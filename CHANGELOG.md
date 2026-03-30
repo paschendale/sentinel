@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/territorial-dev/sentinel/compare/v1.5.1...v1.6.0) (2026-03-30)
+
+
+### Features
+
+* **api:** threshold-based public status with degraded state ([f86cc16](https://github.com/territorial-dev/sentinel/commit/f86cc1655992207f886619569d18811ffafa7a9b))
+
 ## [1.5.1](https://github.com/territorial-dev/sentinel/compare/v1.5.0...v1.5.1) (2026-03-26)
 
 
