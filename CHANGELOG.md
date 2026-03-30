@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/territorial-dev/sentinel/compare/v1.7.0...v1.8.0) (2026-03-30)
+
+
+### Features
+
+* **web:** expose retries, failure_threshold, uses_browser in test editor and details page ([e1a8379](https://github.com/territorial-dev/sentinel/commit/e1a83797a089a300020f415825fde7a56cc1cdd9))
+
 # [1.7.0](https://github.com/territorial-dev/sentinel/compare/v1.6.0...v1.7.0) (2026-03-30)
 
 
