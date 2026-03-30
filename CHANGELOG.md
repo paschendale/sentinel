@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/territorial-dev/sentinel/compare/v1.6.0...v1.7.0) (2026-03-30)
+
+
+### Features
+
+* **web:** add sentinel logo to dashboard, status pages, and favicon ([8ca3bc9](https://github.com/territorial-dev/sentinel/commit/8ca3bc92f1cbead38cd42124f61945e591738053))
+
 # [1.6.0](https://github.com/territorial-dev/sentinel/compare/v1.5.1...v1.6.0) (2026-03-30)
 
 
