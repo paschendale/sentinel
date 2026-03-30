@@ -19,11 +19,12 @@ function utcDayAgo(daysAgo: number): string {
   return new Date(t).toISOString().slice(0, 10)
 }
 
-function makeTestRow(overrides: Partial<{ id: string; name: string; enabled: boolean }> = {}) {
+function makeTestRow(overrides: Partial<{ id: string; name: string; enabled: boolean; tags: string[] }> = {}) {
   return {
     id: overrides.id ?? 'test-1',
     name: overrides.name ?? 'My Test',
     enabled: overrides.enabled ?? true,
+    tags: overrides.tags ?? [],
   }
 }
 
@@ -41,6 +42,13 @@ function makeUdRow(overrides: Partial<{
   }
 }
 
+function makeStateRow(overrides: Partial<{ test_id: string; public_status: string }> = {}) {
+  return {
+    test_id: overrides.test_id ?? 'test-1',
+    public_status: overrides.public_status ?? 'up',
+  }
+}
+
 describe('GET /status', () => {
   beforeEach(() => {
     mockQuery.mockClear()
@@ -49,6 +57,7 @@ describe('GET /status', () => {
   it('returns 200 with an array', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [makeTestRow()] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
@@ -61,18 +70,20 @@ describe('GET /status', () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
     const res = await app.inject({ method: 'GET', url: '/status' })
     expect(JSON.parse(res.body)).toEqual([])
   })
 
-  it('computes current_status as up from most recent day with data', async () => {
+  it('computes current_status as up when state is up', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1' })] } as never)
       .mockResolvedValueOnce({
         rows: [makeUdRow({ test_id: 't1', date: utcDayAgo(1), success_count: 5, failure_count: 0 })],
       } as never)
+      .mockResolvedValueOnce({ rows: [makeStateRow({ test_id: 't1', public_status: 'up' })] } as never)
 
     const app = await buildServer()
     const res = await app.inject({ method: 'GET', url: '/status' })
@@ -80,12 +91,13 @@ describe('GET /status', () => {
     expect(body[0]!.current_status).toBe('up')
   })
 
-  it('computes current_status as down when most recent day has failures', async () => {
+  it('computes current_status as down when state is down', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1' })] } as never)
       .mockResolvedValueOnce({
         rows: [makeUdRow({ test_id: 't1', date: utcDayAgo(1), success_count: 0, failure_count: 3 })],
       } as never)
+      .mockResolvedValueOnce({ rows: [makeStateRow({ test_id: 't1', public_status: 'down' })] } as never)
 
     const app = await buildServer()
     const res = await app.inject({ method: 'GET', url: '/status' })
@@ -93,9 +105,22 @@ describe('GET /status', () => {
     expect(body[0]!.current_status).toBe('down')
   })
 
-  it('returns current_status unknown when no uptime_daily data exists', async () => {
+  it('computes current_status as degraded when state is degraded', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1' })] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [makeStateRow({ test_id: 't1', public_status: 'degraded' })] } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status' })
+    const body = JSON.parse(res.body) as Array<{ current_status: string }>
+    expect(body[0]!.current_status).toBe('degraded')
+  })
+
+  it('returns current_status unknown when no state row exists', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1' })] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
@@ -114,6 +139,7 @@ describe('GET /status', () => {
           makeUdRow({ test_id: 't1', date: utcDayAgo(4), success_count: 6, failure_count: 0 }),
         ],
       } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
     const res = await app.inject({ method: 'GET', url: '/status' })
@@ -126,6 +152,7 @@ describe('GET /status', () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1' })] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
     const res = await app.inject({ method: 'GET', url: '/status' })
@@ -133,13 +160,30 @@ describe('GET /status', () => {
     expect(body[0]!.days).toHaveLength(30)
   })
 
-  it('marks a day as down when failure_count > 0 even with successes', async () => {
+  it('marks a mixed day as degraded', async () => {
     const targetDate = utcDayAgo(5)
     mockQuery
       .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1' })] } as never)
       .mockResolvedValueOnce({
         rows: [makeUdRow({ test_id: 't1', date: targetDate, success_count: 5, failure_count: 1 })],
       } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status' })
+    const body = JSON.parse(res.body) as Array<{ days: Array<{ date: string; outcome: string }> }>
+    const day = body[0]!.days.find(d => d.date === targetDate)
+    expect(day?.outcome).toBe('degraded')
+  })
+
+  it('marks an all-failure day as down', async () => {
+    const targetDate = utcDayAgo(5)
+    mockQuery
+      .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1' })] } as never)
+      .mockResolvedValueOnce({
+        rows: [makeUdRow({ test_id: 't1', date: targetDate, success_count: 0, failure_count: 3 })],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
     const res = await app.inject({ method: 'GET', url: '/status' })
@@ -151,6 +195,7 @@ describe('GET /status', () => {
   it('includes disabled tests with enabled: false', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [makeTestRow({ id: 't1', enabled: false })] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()

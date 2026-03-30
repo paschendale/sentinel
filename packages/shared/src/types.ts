@@ -85,7 +85,7 @@ export interface Incident {
 }
 
 /** Public /status page — derived from `uptime_daily` only (no raw runs). */
-export type PublicStatusOutcome = 'up' | 'down' | 'unknown'
+export type PublicStatusOutcome = 'up' | 'degraded' | 'down' | 'unknown'
 
 /** Granular status history — time period for bucket queries. */
 export type StatusPeriod = '1h' | '24h' | '7d' | '30d'

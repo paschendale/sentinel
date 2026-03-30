@@ -155,6 +155,7 @@ describe('flushTestState deduplication', () => {
     expect(sql).toContain('INSERT INTO test_state')
     expect(sql).toContain('ON CONFLICT (test_id) DO UPDATE')
     expect(sql).toContain('consecutive_failures')
+    expect(sql).toContain('public_status')
     expect(sql).not.toContain('last_notification_at')
   })
 })

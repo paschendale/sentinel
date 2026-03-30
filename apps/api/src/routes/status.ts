@@ -11,8 +11,11 @@ type UdRow = {
   failure_count: number
 }
 
+type StateRow = { test_id: string; public_status: string }
+
 function dayOutcome(successCount: number, failureCount: number): PublicStatusDay['outcome'] {
-  if (failureCount > 0) return 'down'
+  if (failureCount > 0 && successCount === 0) return 'down'
+  if (failureCount > 0 && successCount > 0) return 'degraded'
   if (successCount > 0) return 'up'
   return 'unknown'
 }
@@ -29,7 +32,7 @@ function utcDayStrings(): string[] {
   return out
 }
 
-function buildPublicStatus(tests: TestRow[], udRows: UdRow[]): PublicStatusTest[] {
+function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRow[]): PublicStatusTest[] {
   const dayStrings = utcDayStrings()
   const udByTest = new Map<string, Map<string, { s: number; f: number }>>()
 
@@ -45,6 +48,8 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[]): PublicStatusTest[
     }
     m.set(d, { s: Number(row.success_count), f: Number(row.failure_count) })
   }
+
+  const stateMap = new Map(stateRows.map(s => [s.test_id, s]))
 
   return tests.map((t) => {
     const m = udByTest.get(t.id) ?? new Map()
@@ -62,13 +67,8 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[]): PublicStatusTest[
     const denom = totalS + totalF
     const uptime_pct_30d = denom === 0 ? null : Math.round((100 * totalS) / denom)
 
-    let current_status: PublicStatusTest['current_status'] = 'unknown'
-    for (let i = days.length - 1; i >= 0; i--) {
-      const day = days[i]
-      if (!day || day.outcome === 'unknown') continue
-      current_status = day.outcome
-      break
-    }
+    const state = stateMap.get(t.id)
+    const current_status = (state?.public_status ?? 'unknown') as PublicStatusTest['current_status']
 
     return {
       id: t.id,
@@ -93,7 +93,12 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
        WHERE date >= (CURRENT_DATE - 29)
          AND date <= CURRENT_DATE`,
     )
-    return reply.send(buildPublicStatus(tests, udRows))
+    const testIds = tests.map(t => t.id)
+    const { rows: stateRows } = await pool.query<StateRow>(
+      `SELECT test_id, public_status FROM test_state WHERE test_id = ANY($1)`,
+      [testIds],
+    )
+    return reply.send(buildPublicStatus(tests, udRows, stateRows))
   })
 
   app.get<{ Params: { tag: string } }>('/tag/:tag', async (req, reply) => {
@@ -112,7 +117,11 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
          AND date <= CURRENT_DATE`,
       [testIds],
     )
-    return reply.send(buildPublicStatus(tests, udRows))
+    const { rows: stateRows } = await pool.query<StateRow>(
+      `SELECT test_id, public_status FROM test_state WHERE test_id = ANY($1)`,
+      [testIds],
+    )
+    return reply.send(buildPublicStatus(tests, udRows, stateRows))
   })
 
   app.get<{ Querystring: { period?: string; tag?: string } }>('/buckets', async (req, reply) => {

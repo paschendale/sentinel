@@ -90,22 +90,30 @@ async function flushTestState(rows: RunResult[]): Promise<void> {
     return `($${b + 1},$${b + 2},$${b + 3}::timestamptz)`
   })
 
-  // LEFT JOIN reads existing consecutive_failures so it can be incremented correctly
+  // LEFT JOIN reads existing consecutive_failures so it can be incremented correctly.
+  // JOIN tests to read failure_threshold and compute public_status atomically.
   await pool.query(
-    `INSERT INTO test_state (test_id, last_status, consecutive_failures, last_run_at)
+    `INSERT INTO test_state (test_id, last_status, consecutive_failures, last_run_at, public_status)
      SELECT
        v.test_id,
        v.last_status,
        CASE WHEN v.last_status = 'success' THEN 0
             ELSE COALESCE(ts.consecutive_failures, 0) + 1
        END,
-       v.last_run_at
+       v.last_run_at,
+       CASE
+         WHEN v.last_status = 'success' THEN 'up'
+         WHEN (COALESCE(ts.consecutive_failures, 0) + 1) >= t.failure_threshold THEN 'down'
+         ELSE 'degraded'
+       END
      FROM (VALUES ${placeholders.join(',')}) AS v(test_id, last_status, last_run_at)
      LEFT JOIN test_state ts ON ts.test_id = v.test_id
+     JOIN tests t ON t.id = v.test_id
      ON CONFLICT (test_id) DO UPDATE SET
        last_status          = EXCLUDED.last_status,
        consecutive_failures = EXCLUDED.consecutive_failures,
-       last_run_at          = EXCLUDED.last_run_at`,
+       last_run_at          = EXCLUDED.last_run_at,
+       public_status        = EXCLUDED.public_status`,
     values,
   )
 

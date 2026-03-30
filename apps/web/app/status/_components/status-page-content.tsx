@@ -16,8 +16,9 @@ function computeUptimePct(buckets: StatusBucket[]): number | null {
 }
 
 function CurrentLabel({ status }: { status: PublicStatusOutcome }) {
-  if (status === 'down') return <span className="text-xs tracking-wide text-red-400/90 uppercase">down</span>
-  if (status === 'up') return <span className="text-xs tracking-wide text-emerald-400/90 uppercase">up</span>
+  if (status === 'down')     return <span className="text-xs tracking-wide text-red-400/90 uppercase">down</span>
+  if (status === 'degraded') return <span className="text-xs tracking-wide text-yellow-400/90 uppercase">degraded</span>
+  if (status === 'up')       return <span className="text-xs tracking-wide text-emerald-400/90 uppercase">up</span>
   return <span className="text-xs tracking-wide text-zinc-500 uppercase">unknown</span>
 }
 

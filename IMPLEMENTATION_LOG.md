@@ -595,3 +595,22 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 - `apps/web/app/tests/_components/test-editor.tsx` — added `Alert Cooldown (h)` input, validation, and request payload mapping to `cooldown_ms`
 **Decisions:** Kept DB migration authoritative for existing data so behavior changes immediately and uniformly, while schema/UI defaults keep new and edited tests aligned.
 **Deferred:** No dedicated cooldown display on dashboard/detail views yet.
+
+---
+
+## 2026-03-30 · F-23 Follow-up · Threshold-based public status
+
+**What was built:** The public status page now uses `failure_threshold` to determine `current_status` instead of treating any failure as "down". A new `public_status` column on `test_state` is computed atomically during the `test_state` upsert (via a JOIN on `tests.failure_threshold`). The status API reads this pre-computed value directly — no per-request computation. A new "degraded" state is added: shown when `0 < consecutive_failures < failure_threshold`. Day-level outcomes are also fixed: mixed days (both successes and failures) are now "degraded" rather than "down".
+
+**Files changed:**
+- `apps/api/src/db/migrations/008_public_status.sql` (new) — adds `public_status` column to `test_state`
+- `apps/api/src/db/result-buffer.ts` — upsert computes `public_status` via JOIN on `tests.failure_threshold`
+- `packages/shared/src/types.ts` — added `'degraded'` to `PublicStatusOutcome`
+- `apps/api/src/routes/status.ts` — reads `public_status` from `test_state`; `dayOutcome` fixed for mixed days
+- `apps/web/app/status/_components/status-page-content.tsx` — `CurrentLabel` handles `'degraded'` (yellow)
+- `apps/api/src/routes/status.test.ts` — updated for 3-query mock pattern and new status logic
+- `apps/api/src/db/result-buffer.test.ts` — asserts `public_status` in upsert SQL
+
+**Decisions:** Storing `public_status` in `test_state` rather than computing it on each status page request makes the route trivially fast (one indexed column read) and keeps the logic co-located with the state update. The JOIN on `tests` in the upsert is safe since `test_state` always references a live test.
+
+**Deferred:** Existing `test_state` rows with no recorded runs keep `public_status = 'unknown'` (migration default) until their first run completes — correct behaviour.
