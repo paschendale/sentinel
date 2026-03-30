@@ -23,6 +23,8 @@ interface FormErrors {
   name?: string
   schedule?: string
   timeout?: string
+  retries?: string
+  failureThreshold?: string
   cooldown?: string
   submit?: string
 }
@@ -41,6 +43,9 @@ export default function TestEditor({ test }: Props) {
   const [scheduleS, setScheduleS] = useState(String((test?.schedule_ms ?? 60_000) / 1000))
   const [timeoutS, setTimeoutS] = useState(String((test?.timeout_ms ?? 5_000) / 1000))
   const [cooldownH, setCooldownH] = useState(String((test?.cooldown_ms ?? 86_400_000) / 3_600_000))
+  const [retries, setRetries] = useState(String(test?.retries ?? 0))
+  const [failureThreshold, setFailureThreshold] = useState(String(test?.failure_threshold ?? 3))
+  const [usesBrowser, setUsesBrowser] = useState(test?.uses_browser ?? false)
   const [enabled, setEnabled] = useState(test?.enabled ?? true)
   const [tagsInput, setTagsInput] = useState((test?.tags ?? []).join(', '))
   const [code, setCode] = useState(test?.code ?? DEFAULT_CODE)
@@ -74,6 +79,10 @@ export default function TestEditor({ test }: Props) {
     if (!Number.isFinite(sched) || sched < 30) errs.schedule = 'Minimum 30 seconds.'
     const tout = Number(timeoutS)
     if (!Number.isFinite(tout) || tout < 1 || tout > 10) errs.timeout = 'Must be between 1 and 10 seconds.'
+    const ret = Number(retries)
+    if (!Number.isFinite(ret) || ret < 0 || ret > 5) errs.retries = 'Must be between 0 and 5.'
+    const ft = Number(failureThreshold)
+    if (!Number.isFinite(ft) || ft < 1) errs.failureThreshold = 'Must be at least 1.'
     const cooldown = Number(cooldownH)
     if (!Number.isFinite(cooldown) || cooldown < 0) errs.cooldown = 'Must be 0 or greater.'
     return errs
@@ -96,6 +105,9 @@ export default function TestEditor({ test }: Props) {
       code,
       schedule_ms: Number(scheduleS) * 1000,
       timeout_ms: Number(timeoutS) * 1000,
+      retries: Number(retries),
+      uses_browser: usesBrowser,
+      failure_threshold: Number(failureThreshold),
       cooldown_ms: Math.round(Number(cooldownH) * 3_600_000),
       enabled,
       tags,
@@ -228,6 +240,33 @@ export default function TestEditor({ test }: Props) {
           {errors.timeout && <p className="text-red-400 text-xs mt-1">{errors.timeout}</p>}
         </div>
 
+        {/* Retries */}
+        <div>
+          <label className="block text-zinc-500 text-xs mb-1.5 tracking-wider uppercase">Retries</label>
+          <input
+            type="number"
+            value={retries}
+            onChange={e => setRetries(e.target.value)}
+            min={0}
+            max={5}
+            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+          />
+          {errors.retries && <p className="text-red-400 text-xs mt-1">{errors.retries}</p>}
+        </div>
+
+        {/* Failure Threshold */}
+        <div>
+          <label className="block text-zinc-500 text-xs mb-1.5 tracking-wider uppercase">Failure Threshold</label>
+          <input
+            type="number"
+            value={failureThreshold}
+            onChange={e => setFailureThreshold(e.target.value)}
+            min={1}
+            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+          />
+          {errors.failureThreshold && <p className="text-red-400 text-xs mt-1">{errors.failureThreshold}</p>}
+        </div>
+
         {/* Cooldown */}
         <div>
           <label className="block text-zinc-500 text-xs mb-1.5 tracking-wider uppercase">Alert Cooldown (h)</label>
@@ -252,6 +291,18 @@ export default function TestEditor({ test }: Props) {
             className="w-4 h-4 accent-zinc-100"
           />
           <label htmlFor="enabled" className="text-zinc-400 text-sm">Enabled</label>
+        </div>
+
+        {/* Uses Browser */}
+        <div className="flex items-center gap-3">
+          <input
+            id="uses_browser"
+            type="checkbox"
+            checked={usesBrowser}
+            onChange={e => setUsesBrowser(e.target.checked)}
+            className="w-4 h-4 accent-zinc-100"
+          />
+          <label htmlFor="uses_browser" className="text-zinc-400 text-sm">Uses browser</label>
         </div>
 
         {/* Tags */}

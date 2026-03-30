@@ -614,3 +614,15 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Storing `public_status` in `test_state` rather than computing it on each status page request makes the route trivially fast (one indexed column read) and keeps the logic co-located with the state update. The JOIN on `tests` in the upsert is safe since `test_state` always references a live test.
 
 **Deferred:** Existing `test_state` rows with no recorded runs keep `public_status = 'unknown'` (migration default) until their first run completes — correct behaviour.
+
+## 2026-03-30 · UI · Expose missing test configurations in edit form and details page
+
+**What was built:** Added `retries`, `failure_threshold`, and `uses_browser` fields to the test editor form (previously these existed in the DB and API but were never surfaced in the UI). Added a "Configuration" section to the test details page showing all test settings (interval, timeout, retries, failure threshold, alert cooldown, browser usage, enabled status, and tags) as a compact key-value grid.
+
+**Files changed:**
+- `apps/web/app/tests/_components/test-editor.tsx` — added state, validation, API body fields, and UI inputs for the three missing fields
+- `apps/web/app/tests/[id]/page.tsx` — added Configuration section with `formatCooldown` inline helper
+
+**Decisions:** No API or schema changes were needed — all fields were already accepted and returned. `formatCooldown` kept inline (not shared) since it's used in one place.
+
+**Deferred:** Nothing.

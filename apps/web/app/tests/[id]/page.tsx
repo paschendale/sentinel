@@ -11,6 +11,12 @@ import { serverAuthHeaders } from '../../../lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
+function formatCooldown(ms: number): string {
+  if (ms === 0) return 'disabled'
+  const h = ms / 3_600_000
+  return h >= 1 ? `${h}h` : `${ms / 60_000}m`
+}
+
 async function getTest(id: string): Promise<Test | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
   try {
@@ -90,6 +96,52 @@ export default async function TestDetailPage({ params }: { params: Promise<{ id:
           <RunNowPanel testId={id} />
         </div>
       </header>
+
+      <section className="mt-8">
+        <h2 className="text-zinc-500 text-xs tracking-widest uppercase font-normal mb-3">Configuration</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-4">
+          <div>
+            <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Interval</p>
+            <p className="text-zinc-300 text-sm">{test.schedule_ms / 1000}s</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Timeout</p>
+            <p className="text-zinc-300 text-sm">{test.timeout_ms / 1000}s</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Retries</p>
+            <p className="text-zinc-300 text-sm">{test.retries}</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Failure threshold</p>
+            <p className="text-zinc-300 text-sm">{test.failure_threshold}</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Alert cooldown</p>
+            <p className="text-zinc-300 text-sm">{formatCooldown(test.cooldown_ms)}</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Uses browser</p>
+            <p className="text-zinc-300 text-sm">{test.uses_browser ? 'Yes' : 'No'}</p>
+          </div>
+          <div>
+            <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Status</p>
+            <p className={`text-sm ${test.enabled ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              {test.enabled ? 'enabled' : 'disabled'}
+            </p>
+          </div>
+          {test.tags.length > 0 && (
+            <div>
+              <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Tags</p>
+              <div className="flex flex-wrap gap-1">
+                {test.tags.map(tag => (
+                  <span key={tag} className="text-xs px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded-sm">{tag}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
 
       <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-12 lg:items-start">
         <section className="min-w-0">
