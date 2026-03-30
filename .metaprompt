@@ -8,7 +8,6 @@ Read these docs:
 - docs/DOMAINS.md      → data model, entity rules, ctx API contract
 - RULES.md             → hard rules for this codebase
 
-What to build:   PROJECT.md  ← read "Current Focus" section only; do not self-select features
 Repo layout:     docs/REPOSITORY.md
 
 Key constraints: 1GB RAM / 0.5 vCPU. Single async process. No ORMs. No Redis. Batch DB writes. Notifications fire-and-forget. Monaco lazy-loaded. Public pages use aggregated data only.
@@ -41,3 +40,6 @@ Append an entry to `IMPLEMENTATION_LOG.md` at the repo root. Format:
 ```
 
 Keep entries factual and brief. This log is read by future AI sessions to avoid re-deriving context.
+
+# What to do
+

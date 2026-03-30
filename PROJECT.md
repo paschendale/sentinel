@@ -8,13 +8,13 @@ To start a feature: move it (or describe it) into **Current Focus**. When done, 
 
 ## Current Focus
 
-### M-04 · Documentation
+### F-23 · Status Pages Should Allow for more granular checks
 
-Create a small user documentation explaining deployment, creation of tests, and whatever else you feel interesting. Put it on the main README.md
+Status pages (and dashboard) should allow for viewing more granular checks, for example, allowing the user to see every check that happened in the last hour, 24 hours, 7 days and 30 days. Default should be showing last checks for 24 hours. Each test box should show a fixed bunch of boxes (similar to Github status pages) that would group checks happened for that fraction. For example, say we have 100 boxes and we're seeing the 24 hour period, then, each box would represent 2.88 minutes of time. The box should be colored in red if both checks failed at that period, yellow if at least one check failed at that period and green if none failed.
 
-### M-05 · Automated tests
+A selector should allow for choosing which period are we seeing.
 
-Create an automated test workflow, which should be a pre-requisite to every build workflow. Create a coverage report, add badges to the README
+When hovering a status box, a small panel should show: - the ammount of tests in that period; - the average response time; - how many failed/how many passed
 
 ---
 
@@ -170,6 +170,14 @@ Refactor `notification_channels` into a global named-channel registry: drop `tes
 
 Add a `channel_assignments (channel_id, scope_type: 'test'|'tag', scope_value)` table. API routes to assign/unassign channels to a test or a tag. Update the notifier to resolve channels as the union of direct test assignments and tag-based assignments (deduplicated). Add assignment picker UI to the test editor (per-test channels) and a tag-level assignment panel on the `/channels` page.
 
+### F-23 · Status Pages Should Allow for more granular checks
+
+Status pages (and dashboard) should allow for viewing more granular checks, for example, allowing the user to see every check that happened in the last hour, 24 hours, 7 days and 30 days. Default should be showing last checks for 24 hours. Each test box should show a fixed bunch of boxes (similar to Github status pages) that would group checks happened for that fraction. For example, say we have 100 boxes and we're seeing the 24 hour period, then, each box would represent 2.88 minutes of time. The box should be colored in red if both checks failed at that period, yellow if at least one check failed at that period and green if none failed.
+
+A selector should allow for choosing which period are we seeing.
+
+When hovering a status box, a small panel should show: - the ammount of tests in that period; - the average response time; - how many failed/how many passed
+
 ---
 
 ## Maintenance Tasks
@@ -186,10 +194,54 @@ Create a Dockerfile to pack everything (API + APP) into a single deployment. Cre
 
 Create a Dockerfile to pack the API into a standalone deployment, useful when working with Cloudflare. Create a CI to build it whenever there's a new release. Use the tag paschendale/sentinel-api
 
-### M-04 · Documentation
+### ✅ M-04 · Documentation
 
 Create a small user documentation explaining deployment, creation of tests, and whatever else you feel interesting. Put it on the main README.md
 
-### M-05 · Automated tests
+### ✅ M-05 · Automated tests
 
 Create an automated test workflow, which should be a pre-requisite to every build workflow. Create a coverage report, add badges to the README
+
+### M-06 · Coverage Push to 90% (API)
+
+Current baseline (Mar 26, 2026) from `pnpm --filter @sentinel/api test:coverage`:
+- Statements: 45.69%
+- Branches: 38.98%
+- Functions: 48.06%
+- Lines: 47.34%
+
+Target:
+- Reach at least 90% statements and 90% lines in `apps/api`.
+
+Coverage tasks:
+
+1) **Auth layer hardening (`src/auth/jwt.ts`, `src/routes/auth.ts`)**
+- Add unit tests for JWT sign/verify success path, invalid token handling, missing secret, and expiration behavior.
+- Add route tests for login success and all failure cases (invalid credentials, malformed body, missing fields).
+- **Done when:** auth modules are >=90% line coverage and all auth error branches are exercised.
+
+2) **Executor core tests (`src/executor/compile.ts`, `src/executor/ctx.ts`, `src/executor/run.ts`)**
+- Add focused unit tests for code compilation success/failure, timeout behavior, runtime exception handling, and result shaping.
+- Add tests for `ctx.http` wrapper behavior (status/error mapping) and `ctx.assert` recording hooks where applicable.
+- **Done when:** executor package reaches >=85% line coverage and timeout/error branches are covered.
+
+3) **Route integration matrix (`src/routes/tests.ts`, `src/routes/run.ts`, `src/routes/channels.ts`, `src/routes/dashboard.ts`, `src/routes/metrics.ts`)**
+- Add Fastify injection tests for CRUD happy paths + validation failures + edge cases (not found, invalid ids, empty payloads).
+- Add tests for run-now endpoint success and failure paths.
+- Add channels/tag assignment route tests for invalid scope/tag normalization and dedupe behavior.
+- **Done when:** routes folder reaches >=90% line coverage with both happy and failure paths tested.
+
+4) **Notifier behavior coverage (`src/notifier/dispatch.ts`)**
+- Add unit tests for transition logic (pass->fail threshold, fail->pass recovery), cooldown checks, and payload format generation.
+- Mock outbound HTTP calls and assert destination-specific payload transformations (Discord/Slack/Webhook).
+- **Done when:** notifier module reaches >=90% line coverage and transition/cooldown branches are validated.
+
+5) **DB query and state transitions (`src/db/queries/*`, `src/db/result-buffer.ts`, `src/db/aggregator.ts`)**
+- Add tests for uncovered query helpers (especially assignments), including SQL parameter shape and returned mapping behavior.
+- Extend existing tests with batch flush edge cases and aggregation boundaries (empty day, all failures, mixed runs).
+- **Done when:** db + queries combined coverage reaches >=92% line coverage.
+
+6) **Coverage gates in CI**
+- Configure Vitest coverage thresholds (`lines: 90`, `statements: 90`) in API test config.
+- Enforce `pnpm --filter @sentinel/api test:coverage` in CI as a required check.
+- **Done when:** PRs fail automatically if coverage drops below threshold.
