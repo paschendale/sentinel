@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import type { PublicStatusTest } from '@sentinel/shared'
 import { StatusPageContent } from '../_components/status-page-content'
+import { SentinelLogo } from '../../_components/sentinel-logo'
 
 export const revalidate = 300
 
@@ -32,7 +33,10 @@ export default async function TagStatusPage({
     <main className="min-h-screen bg-zinc-950 px-6 py-12">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-10">
-          <h1 className="text-zinc-100 text-lg font-medium">{slug} · status</h1>
+          <div className="flex items-center gap-2.5">
+            <SentinelLogo className="h-7 text-zinc-100" />
+            <h1 className="text-zinc-100 text-lg font-medium">{slug} · status</h1>
+          </div>
           <a href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
             all tests →
           </a>

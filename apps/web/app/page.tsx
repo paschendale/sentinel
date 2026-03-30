@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import type { TestSummary } from '@sentinel/shared'
 import { serverAuthHeaders } from '../lib/auth-server'
 import { DashboardTable } from './_components/dashboard-table'
+import { SentinelLogo } from './_components/sentinel-logo'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +34,10 @@ export default async function DashboardPage({
   return (
     <main className="min-h-screen bg-zinc-950 px-8 py-12">
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-zinc-100 text-lg">sentinel</h1>
+        <div className="flex items-center gap-2.5">
+            <SentinelLogo className="h-7 text-zinc-100" />
+            <span className="text-zinc-100 text-lg">sentinel</span>
+          </div>
         <div className="flex items-center gap-6">
           <Link href="/status" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">status page</Link>
           <Link href="/channels" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">channels</Link>
