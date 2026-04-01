@@ -433,6 +433,26 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Assignment sync on test save uses a diff approach (fetch existing, add/remove deltas) via `Promise.all` so it's fast and idempotent. The `DISTINCT` in the notifier query handles the case where a channel is assigned both directly to a test and via a shared tag. Tests with no assignments now receive no notifications (correct behavior replacing the old broadcast).
 **Deferred:** Nothing.
 
+## 2026-04-01 · F-03 · Executor HTTP redirect handling
+
+**What was built:** Extended `ctx.http` to support explicit redirect handling and clearer fetch failures. `ctx.http.get/post` now accept `redirect: 'follow' | 'manual' | 'error'`, and redirect-loop failures are surfaced as a dedicated `HttpRequestError` with code `HTTP_REDIRECT_ERROR` instead of a generic `fetch failed`.
+**Files changed:**
+- `apps/api/src/executor/ctx.ts` — added redirect option plumbing and explicit `HttpRequestError` classification for redirect-limit vs generic fetch failures
+- `apps/api/src/executor/ctx.test.ts` (new) — tests for redirect mode forwarding and error classification
+- `docs/DOMAINS.md` — documented `RequestOptions.redirect` in the `ctx` API contract
+
+**Decisions:** Kept backward-compatible default redirect behavior (`follow`) while allowing tests to opt into `manual` for endpoints where a 3xx response is expected and acceptable. Error classification is done centrally in `doFetch` so test authors can catch and branch on `error.code`.
+**Deferred:** No UI/editor affordance yet for inserting redirect options into test snippets; this remains code-driven in user test bodies.
+
+## 2026-04-01 · Docs · Redirect handling in test HTTP API
+
+**What was built:** Added README documentation for `ctx.http` redirect handling, including the new `redirect` option (`follow`/`manual`/`error`), when redirect loops occur, and a concrete GeoServer-style example showing how to treat `3xx` as a valid reachable check with `redirect: 'manual'`.
+**Files changed:**
+- `README.md` — expanded `ctx.http` section with redirect options and example; aligned `ctx.http.post` examples with the current runtime signature
+
+**Decisions:** Documented `manual` as the recommended approach for uptime checks against redirect-heavy UI endpoints, while keeping `follow` as the default behavior for most API checks.
+**Deferred:** No dedicated troubleshooting section for other fetch failure classes yet (`HTTP_FETCH_ERROR` examples can be added later if needed).
+
 ## 2026-03-25 · M-01 · Semantic Release
 
 **What was built:** Added semantic-release automation that triggers on every push to `main`, analyzes Conventional Commits to determine the version bump, generates a CHANGELOG.md, bumps the root `package.json` version, commits the changes back, and creates a GitHub Release with the generated notes.

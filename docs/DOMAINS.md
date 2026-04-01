@@ -148,6 +148,12 @@ interface HttpResponse {
   json<T = unknown>(): T
   duration_ms: number
 }
+
+interface RequestOptions {
+  headers?: Record<string, string>
+  timeout?: number
+  redirect?: 'follow' | 'manual' | 'error'
+}
 ```
 
 **Restrictions:**

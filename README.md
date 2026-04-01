@@ -153,13 +153,33 @@ const res = await ctx.http.get('https://example.com/api/health')
 // res.body     → string (raw response body)
 // res.json()   → parse body as JSON (throws if not valid JSON)
 
-const res = await ctx.http.post('https://example.com/api/users', {
-  body: JSON.stringify({ name: 'Alice' }),
+const res = await ctx.http.post('https://example.com/api/users', { name: 'Alice' }, {
   headers: { 'Content-Type': 'application/json' },
 })
 ```
 
 Supported methods: `get`, `post`, `put`, `delete`. All return `{ status, headers, body, json() }`.
+
+`ctx.http` options:
+
+- `headers` — request headers
+- `timeout` — request timeout in milliseconds
+- `redirect` — redirect policy: `'follow'` (default), `'manual'`, or `'error'`
+
+**Redirect handling:**
+
+Some endpoints (especially web UIs) can bounce between redirects and trigger a redirect-limit error.  
+If you want to treat a redirect response as valid availability, use `redirect: 'manual'`:
+
+```js
+const res = await ctx.http.get('https://map.skyforest.se/v2/geoserver/web/', {
+  redirect: 'manual',
+})
+
+ctx.assert('reachable', res.status >= 200 && res.status < 400)
+```
+
+When `redirect: 'follow'` is used and a redirect loop is detected, Sentinel throws `HttpRequestError` with code `HTTP_REDIRECT_ERROR`.
 
 #### `ctx.assert(name, value, message?)` — Named assertions
 
@@ -211,9 +231,8 @@ return res.status === 200 && body.status === 'ok'
 ```js
 // Create a user
 const create = await ctx.http.post('https://api.example.com/users', {
-  body: JSON.stringify({ name: 'Test User' }),
-  headers: { 'Content-Type': 'application/json' },
-})
+  name: 'Test User',
+}, { headers: { 'Content-Type': 'application/json' } })
 ctx.assert('user created', create.status === 201)
 
 // Fetch it back

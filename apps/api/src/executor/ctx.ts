@@ -12,6 +12,7 @@ export interface HttpResponse {
 export interface HttpOptions {
   headers?: Record<string, string>
   timeout?: number
+  redirect?: 'follow' | 'manual' | 'error'
 }
 
 export interface TestContext {
@@ -36,14 +37,64 @@ export interface BuildCtxOptions {
   onLog?: (message: string) => void
 }
 
+export class HttpRequestError extends Error {
+  readonly code: 'HTTP_FETCH_ERROR' | 'HTTP_REDIRECT_ERROR'
+  readonly url: string
+  readonly method: string
+
+  constructor(
+    code: 'HTTP_FETCH_ERROR' | 'HTTP_REDIRECT_ERROR',
+    message: string,
+    url: string,
+    method: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options)
+    this.name = 'HttpRequestError'
+    this.code = code
+    this.url = url
+    this.method = method
+  }
+}
+
+function isRedirectLimitError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const cause = err.cause
+  if (cause instanceof Error) {
+    return cause.message.toLowerCase().includes('redirect count exceeded')
+  }
+  return err.message.toLowerCase().includes('redirect count exceeded')
+}
+
 async function doFetch(url: string, init: RequestInit): Promise<HttpResponse> {
-  const res = await fetch(url, init)
-  const body = await res.text()
-  const headers: Record<string, string> = {}
-  res.headers.forEach((value, key) => {
-    headers[key] = value
-  })
-  return { status: res.status, body, headers, json: () => JSON.parse(body) }
+  const method = init.method ?? 'GET'
+  try {
+    const res = await fetch(url, init)
+    const body = await res.text()
+    const headers: Record<string, string> = {}
+    res.headers.forEach((value, key) => {
+      headers[key] = value
+    })
+    return { status: res.status, body, headers, json: () => JSON.parse(body) }
+  } catch (err) {
+    if (isRedirectLimitError(err)) {
+      throw new HttpRequestError(
+        'HTTP_REDIRECT_ERROR',
+        `Redirect limit exceeded for ${method} ${url}. This endpoint may redirect in a loop; use { redirect: "manual" } to handle 3xx responses explicitly.`,
+        url,
+        method,
+        { cause: err }
+      )
+    }
+    const message = err instanceof Error ? err.message : String(err)
+    throw new HttpRequestError(
+      'HTTP_FETCH_ERROR',
+      `HTTP request failed for ${method} ${url}: ${message}`,
+      url,
+      method,
+      { cause: err instanceof Error ? err : undefined }
+    )
+  }
 }
 
 export function buildCtx(options?: BuildCtxOptions): CtxBundle {
@@ -55,14 +106,17 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
       async get(url, options) {
         const init: RequestInit = { method: 'GET' }
         if (options?.headers) init.headers = options.headers
+        if (options?.redirect) init.redirect = options.redirect
         return doFetch(url, init)
       },
       async post(url, body, options) {
-        return doFetch(url, {
+        const init: RequestInit = {
           method: 'POST',
           headers: { 'content-type': 'application/json', ...options?.headers },
           body: JSON.stringify(body),
-        })
+        }
+        if (options?.redirect) init.redirect = options.redirect
+        return doFetch(url, init)
       },
     },
     assert(name, value, message) {
