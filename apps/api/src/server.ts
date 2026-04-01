@@ -1,4 +1,5 @@
 import Fastify from 'fastify'
+import { logger } from './logger.js'
 import { testsRoutes } from './routes/tests.js'
 import { runRoutes } from './routes/run.js'
 import { metricsRoutes } from './routes/metrics.js'
@@ -24,7 +25,25 @@ function isPublic(method: string, url: string): boolean {
 }
 
 export async function buildServer() {
-  const app = Fastify({ logger: true })
+  const app = Fastify({
+    loggerInstance: logger,
+    disableRequestLogging: true,
+  })
+
+  app.addHook('onResponse', async (request, reply) => {
+    if (reply.statusCode < 400) return
+    const url = request.url.split('?')[0] ?? request.url
+    logger.warn(
+      {
+        event: 'http.inbound.error',
+        method: request.method,
+        url,
+        statusCode: reply.statusCode,
+        responseTimeMs: reply.elapsedTime,
+      },
+      `inbound HTTP ${request.method} ${url} -> ${reply.statusCode} (${reply.elapsedTime.toFixed(1)}ms)`
+    )
+  })
 
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Access-Control-Allow-Origin', '*')

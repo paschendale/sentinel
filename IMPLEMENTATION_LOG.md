@@ -3,6 +3,41 @@
 A running record of what was built and why. Append-only — do not edit past entries.
 AI agents must append an entry here after completing any feature from PROJECT.md.
 
+## 2026-04-01 · API · Readable test + scheduler log lines
+
+**What was built:** Default local API runs now use `pino-pretty` (via `LOG_PRETTY`, on by default when `NODE_ENV` is not `production`) so test lifecycle, `ctx.log`, HTTP steps, and completion lines are readable in the terminal instead of opaque JSON. Executor log `msg` strings include `test_id`, `run_id`, trigger, HTTP summaries, and pass/fail/timeout with duration and assertion counts. Added `NODE_ENV` / `LOG_PRETTY` to config; Vitest forces `LOG_PRETTY=false`. Added `pino-pretty` as an API devDependency and documented it in `ARCHITECTURE.md`. Scheduler messages include `test_id` in the human-readable line.
+
+**Files changed:**
+- `apps/api/src/config.ts` — `NODE_ENV`, `LOG_PRETTY`
+- `apps/api/src/logger.ts` — conditional `pino-pretty` transport
+- `apps/api/src/executor/run.ts` — richer `msg` text for start/HTTP/user log/complete
+- `apps/api/src/scheduler/index.ts` — clearer scheduler `msg` lines
+- `apps/api/vitest.config.ts` — `LOG_PRETTY=false` for tests
+- `apps/api/package.json` — `pino-pretty` devDependency
+- `docs/ARCHITECTURE.md`, `README.md` — env + approved dep
+
+**Decisions:** `pino-pretty` stays a devDependency: production Docker sets `NODE_ENV=production` and `pnpm deploy --prod` omits dev deps; logs stay JSON there. Local `tsx` / `pnpm dev` gets pretty output by default.
+
+**Deferred:** None.
+
+## 2026-04-01 · API · Test-focused structured logging
+
+**What was built:** Introduced a shared Pino root logger (`LOG_LEVEL` from config) and wired Fastify with `loggerInstance` plus `disableRequestLogging`, logging inbound requests only when `statusCode >= 400`. The executor now emits structured events for each run (`test.run.start` / `test.run.complete`), every `ctx.log` line (`test.user_log`), and each successful outbound HTTP call (`test.http` with method, truncated URL, status, duration). `runTest` takes `{ trigger, onLog? }` for scheduler vs API POST vs SSE. The scheduler uses the same logger instead of `console.*`.
+
+**Files changed:**
+- `apps/api/src/config.ts` — optional `LOG_LEVEL` (default `info`)
+- `apps/api/src/logger.ts` — root Pino instance
+- `apps/api/src/server.ts` — `loggerInstance`, `disableRequestLogging`, `onResponse` warn hook for error statuses
+- `apps/api/src/executor/ctx.ts` — `onHttpComplete` / `HttpCompleteInfo`, timing in `doFetch`
+- `apps/api/src/executor/run.ts` — `RunTestOptions`, child logger, always-on ctx + HTTP logging
+- `apps/api/src/routes/run.ts` — triggers `api-post` / `api-sse`
+- `apps/api/src/scheduler/index.ts` — `scheduler` child logger, `trigger: 'scheduler'`
+- `README.md` — documented `LOG_LEVEL`
+
+**Decisions:** Fastify 5 expects a logger *configuration* for `logger:` but accepts a pre-built Pino via `loggerInstance` (passing a bare instance to `logger` throws). Inbound error logging uses the shared root logger so it matches executor output format.
+
+**Deferred:** `POST /tests/:id/run` still does not return `ctx.log` lines in JSON (SSE only); no DB persistence of user logs.
+
 ## 2026-03-25 · F-23 · Granular Status History
 
 **What was built:** Added a 1h/24h/7d/30d period selector to all status pages and the dashboard. Each period renders a row of equal-width buckets (100 for sub-30d, 30 for 30d) colored green (all pass), yellow (mixed), or red (all fail), with a hover tooltip showing run count, avg latency, and pass/fail breakdown.

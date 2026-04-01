@@ -33,8 +33,20 @@ interface CtxBundle {
   getAssertions: () => AssertionCapture[]
 }
 
+export interface HttpCompleteInfo {
+  method: string
+  url: string
+  status: number
+  duration_ms: number
+}
+
 export interface BuildCtxOptions {
   onLog?: (message: string) => void
+  onHttpComplete?: (info: HttpCompleteInfo) => void
+}
+
+function truncateUrl(url: string, max = 200): string {
+  return url.length > max ? `${url.slice(0, max)}…` : url
 }
 
 export class HttpRequestError extends Error {
@@ -66,14 +78,26 @@ function isRedirectLimitError(err: unknown): boolean {
   return err.message.toLowerCase().includes('redirect count exceeded')
 }
 
-async function doFetch(url: string, init: RequestInit): Promise<HttpResponse> {
+async function doFetch(
+  url: string,
+  init: RequestInit,
+  onHttpComplete?: BuildCtxOptions['onHttpComplete']
+): Promise<HttpResponse> {
   const method = init.method ?? 'GET'
+  const startMs = Date.now()
   try {
     const res = await fetch(url, init)
     const body = await res.text()
     const headers: Record<string, string> = {}
     res.headers.forEach((value, key) => {
       headers[key] = value
+    })
+    const duration_ms = Date.now() - startMs
+    onHttpComplete?.({
+      method,
+      url: truncateUrl(url),
+      status: res.status,
+      duration_ms,
     })
     return { status: res.status, body, headers, json: () => JSON.parse(body) }
   } catch (err) {
@@ -100,23 +124,24 @@ async function doFetch(url: string, init: RequestInit): Promise<HttpResponse> {
 export function buildCtx(options?: BuildCtxOptions): CtxBundle {
   const logs: string[] = []
   const assertions: AssertionCapture[] = []
+  const onHttpComplete = options?.onHttpComplete
 
   const ctx: TestContext = {
     http: {
-      async get(url, options) {
+      async get(url, httpOptions) {
         const init: RequestInit = { method: 'GET' }
-        if (options?.headers) init.headers = options.headers
-        if (options?.redirect) init.redirect = options.redirect
-        return doFetch(url, init)
+        if (httpOptions?.headers) init.headers = httpOptions.headers
+        if (httpOptions?.redirect) init.redirect = httpOptions.redirect
+        return doFetch(url, init, onHttpComplete)
       },
-      async post(url, body, options) {
+      async post(url, body, httpOptions) {
         const init: RequestInit = {
           method: 'POST',
-          headers: { 'content-type': 'application/json', ...options?.headers },
+          headers: { 'content-type': 'application/json', ...httpOptions?.headers },
           body: JSON.stringify(body),
         }
-        if (options?.redirect) init.redirect = options.redirect
-        return doFetch(url, init)
+        if (httpOptions?.redirect) init.redirect = httpOptions.redirect
+        return doFetch(url, init, onHttpComplete)
       },
     },
     assert(name, value, message) {

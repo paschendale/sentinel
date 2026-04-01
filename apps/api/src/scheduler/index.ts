@@ -4,6 +4,9 @@ import { pool } from '../db/pool.js'
 import { runTest } from '../executor/run.js'
 import { enqueue } from '../db/result-buffer.js'
 import { testEvents } from '../events.js'
+import { logger } from '../logger.js'
+
+const schedLog = logger.child({ component: 'scheduler' })
 
 const CONCURRENCY = 10
 const limit = pLimit(CONCURRENCY)
@@ -17,11 +20,11 @@ function register(test: Test): void {
 
   const timer = setInterval(() => {
     if (limit.activeCount >= CONCURRENCY) {
-      console.warn(`scheduler: queue full, skipping test ${test.id}`)
+      schedLog.warn({ test_id: test.id }, `scheduler: queue full, skipping test_id=${test.id}`)
       return
     }
-    limit(() => runTest(test).then(enqueue)).catch((err: unknown) => {
-      console.error(`scheduler: run failed for test ${test.id}`, err)
+    limit(() => runTest(test, { trigger: 'scheduler' }).then(enqueue)).catch((err: unknown) => {
+      schedLog.error({ test_id: test.id, err }, `scheduler: scheduled run failed for test_id=${test.id}`)
     })
   }, jitteredInterval)
 
@@ -45,8 +48,8 @@ export async function startScheduler(): Promise<void> {
   testEvents.on('test:created', (test: Test) => {
     register(test)
     if (test.enabled) {
-      limit(() => runTest(test).then(enqueue)).catch((err: unknown) => {
-        console.error(`scheduler: immediate run failed for test ${test.id}`, err)
+      limit(() => runTest(test, { trigger: 'scheduler' }).then(enqueue)).catch((err: unknown) => {
+        schedLog.error({ test_id: test.id, err }, `scheduler: immediate run after create failed for test_id=${test.id}`)
       })
     }
   })
@@ -56,7 +59,7 @@ export async function startScheduler(): Promise<void> {
   })
   testEvents.on('test:deleted', (testId: string) => unregister(testId))
 
-  console.info(`scheduler: started with ${rows.length} test(s)`)
+  schedLog.info({ test_count: rows.length }, `scheduler started: ${rows.length} enabled test(s)`)
 }
 
 export function stopScheduler(): void {

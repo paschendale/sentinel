@@ -138,6 +138,7 @@ pnpm workspaces manage the monorepo.
 | `p-limit` | Concurrency control |
 | `p-timeout` | Promise timeout enforcement |
 | `pino` | Structured logging |
+| `pino-pretty` | `devDependency` — readable terminal output when `LOG_PRETTY` is on |
 | `prom-client` | Prometheus metrics |
 | `nanoid` | ID generation |
 | `zod` | Schema validation (shared) |

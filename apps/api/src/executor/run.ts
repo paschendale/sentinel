@@ -1,8 +1,16 @@
 import { nanoid } from 'nanoid'
 import type { TestStatus } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
+import { logger } from '../logger.js'
 import { getCompiledFn } from './compile.js'
-import { buildCtx, type BuildCtxOptions } from './ctx.js'
+import { buildCtx } from './ctx.js'
+
+export type RunTrigger = 'scheduler' | 'api-post' | 'api-sse'
+
+export interface RunTestOptions {
+  trigger: RunTrigger
+  onLog?: (message: string) => void
+}
 
 export interface RunResult {
   id: string
@@ -20,16 +28,38 @@ interface TestInput {
   timeout_ms: number
 }
 
-export async function runTest(test: TestInput, onLog?: BuildCtxOptions['onLog']): Promise<RunResult> {
+export async function runTest(test: TestInput, options: RunTestOptions): Promise<RunResult> {
   const runId = nanoid()
   const startedAt = new Date()
   const startMs = Date.now()
+
+  const runLog = logger.child({
+    test_id: test.id,
+    run_id: runId,
+    trigger: options.trigger,
+  })
+
+  runLog.info(
+    { event: 'test.run.start' },
+    `test run started: trigger=${options.trigger} test_id=${test.id} run_id=${runId}`
+  )
 
   let status: TestStatus = 'success'
   let errorMessage: string | null = null
 
   const fn = getCompiledFn(test.id, test.code)
-  const { ctx, getAssertions } = buildCtx(onLog ? { onLog } : undefined)
+  const { ctx, getAssertions } = buildCtx({
+    onLog: (message) => {
+      runLog.info({ event: 'test.user_log' }, `[ctx.log] ${message}`)
+      options.onLog?.(message)
+    },
+    onHttpComplete: (info) => {
+      runLog.info(
+        { event: 'test.http', ...info },
+        `HTTP ${info.method} ${info.url} -> ${info.status} (${info.duration_ms}ms)`
+      )
+    },
+  })
 
   const timeoutPromise = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(`Timed out after ${test.timeout_ms}ms`)), test.timeout_ms)
@@ -55,6 +85,33 @@ export async function runTest(test: TestInput, onLog?: BuildCtxOptions['onLog'])
 
   // Persist assertion results (batch)
   const assertions = getAssertions()
+  const assertionPassed = assertions.filter((a) => a.passed).length
+  const assertionFailed = assertions.length - assertionPassed
+
+  const resultSummary =
+    status === 'success'
+      ? 'passed'
+      : status === 'timeout'
+        ? 'timed out'
+        : 'failed'
+
+  runLog.info(
+    {
+      event: 'test.run.complete',
+      status,
+      duration_ms: durationMs,
+      assertion_count: assertions.length,
+      assertion_passed: assertionPassed,
+      assertion_failed: assertionFailed,
+      error_message: errorMessage,
+    },
+    `test run ${resultSummary}: test_id=${test.id} run_id=${runId} status=${status} duration_ms=${durationMs}` +
+      (assertions.length > 0
+        ? ` assertions=${assertionPassed}ok/${assertionFailed}fail`
+        : '') +
+      (errorMessage != null && errorMessage.length > 0 ? ` error=${errorMessage.slice(0, 300)}` : '')
+  )
+
   if (assertions.length > 0) {
     const values: unknown[] = []
     const placeholders = assertions.map((a, i) => {

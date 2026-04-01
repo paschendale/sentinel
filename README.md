@@ -63,6 +63,9 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `ADMIN_PASSWORD` | Yes | Password for the admin account |
 | `JWT_SECRET` | Yes | Secret used to sign JWT tokens — use a long random string |
 | `PORT` | No | HTTP port for the API (default: `3001`; ignored in full-stack image which uses Caddy on port `80`) |
+| `LOG_LEVEL` | No | Pino log level for the API process (`trace` … `fatal`; default: `info`) |
+| `LOG_PRETTY` | No | When `true`, print human-readable lines instead of JSON (default: `true` except when `NODE_ENV=production`) |
+| `NODE_ENV` | No | Set to `production` in deployment for JSON logs and `LOG_PRETTY` default off |
 
 ### Single Container (no Compose)
 
@@ -95,6 +98,8 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/sentinel
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin
 JWT_SECRET=dev-secret
+# LOG_LEVEL=debug
+# LOG_PRETTY=true   # readable test/HTTP lines in the API terminal (default on in dev)
 ```
 
 Create `apps/web/.env.local`:

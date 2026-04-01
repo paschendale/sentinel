@@ -15,7 +15,7 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
     if (test == null) return reply.status(404).send({ error: 'not found' })
     if (!test.enabled) return reply.status(422).send({ error: 'test is disabled' })
 
-    const result = await runTest(test)
+    const result = await runTest(test, { trigger: 'api-post' })
     enqueue(result)
     return reply.send(result)
   })
@@ -53,7 +53,10 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const result = await runTest(test, (message) => send('log', { message }))
+      const result = await runTest(test, {
+        trigger: 'api-sse',
+        onLog: (message) => send('log', { message }),
+      })
       enqueue(result)
       send('done', result)
     } catch (err) {
