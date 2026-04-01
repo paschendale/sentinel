@@ -7,6 +7,7 @@ import { invalidateCache } from '../executor/compile.js'
 import { testEvents } from '../events.js'
 import { getAssignedChannels, addAssignment, removeAssignment } from '../db/queries/assignments.js'
 import { normalizeTags } from '../tags/normalize.js'
+import { buildIncidentsFromRuns } from './incident-policy.js'
 
 export async function testsRoutes(app: FastifyInstance): Promise<void> {
   // POST /tests
@@ -121,44 +122,24 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
       [req.params.id]
     )
     if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
-    const { rows } = await pool.query<{ started_at: Date; finished_at: Date; status: string }>(
-      `SELECT started_at, finished_at, status FROM test_runs
-       WHERE test_id = $1 ORDER BY started_at ASC LIMIT 500`,
-      [req.params.id]
+    const { rows: testRows } = await pool.query<Pick<Test, 'failure_threshold'>>(
+      'SELECT failure_threshold FROM tests WHERE id = $1',
+      [req.params.id],
     )
-    const incidents: Incident[] = []
-    let current: { started_at: Date; ended_at: Date; count: number } | null = null
-    for (const run of rows) {
-      if (run.status !== 'success') {
-        if (!current) {
-          current = { started_at: run.started_at, ended_at: run.finished_at, count: 1 }
-        } else {
-          current.ended_at = run.finished_at
-          current.count++
-        }
-      } else {
-        if (current) {
-          incidents.push({
-            started_at: current.started_at.toISOString(),
-            ended_at: current.ended_at.toISOString(),
-            duration_ms: current.ended_at.getTime() - current.started_at.getTime(),
-            failure_count: current.count,
-            ongoing: false,
-          })
-          current = null
-        }
-      }
-    }
-    if (current) {
-      incidents.push({
-        started_at: current.started_at.toISOString(),
-        ended_at: current.ended_at.toISOString(),
-        duration_ms: current.ended_at.getTime() - current.started_at.getTime(),
-        failure_count: current.count,
-        ongoing: true,
-      })
-    }
-    incidents.reverse()
+    const failureThreshold = testRows[0]?.failure_threshold ?? 3
+    const { rows } = await pool.query<{ started_at: Date; finished_at: Date; status: 'success' | 'fail' | 'timeout' }>(
+      `SELECT started_at, finished_at, status
+       FROM (
+         SELECT started_at, finished_at, status
+         FROM test_runs
+         WHERE test_id = $1
+         ORDER BY finished_at DESC
+         LIMIT 500
+       ) AS recent_runs
+       ORDER BY finished_at ASC`,
+      [req.params.id],
+    )
+    const incidents: Incident[] = buildIncidentsFromRuns(rows, failureThreshold)
     return reply.send(incidents)
   })
 

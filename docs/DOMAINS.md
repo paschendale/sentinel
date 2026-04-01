@@ -12,7 +12,7 @@ The central entity. Represents a user-defined monitoring check.
 | `code` | `string` | JavaScript function body — must return boolean |
 | `schedule_ms` | `number` | Run interval in milliseconds (minimum: 30,000) |
 | `timeout_ms` | `number` | Max execution time per run (maximum: 10,000) |
-| `retries` | `number` | Number of retries on failure before recording as failed (default: 0) |
+| `retries` | `number` | Reserved retry budget per check (currently not applied by executor; each scheduled run records a single final outcome) |
 | `uses_browser` | `boolean` | Whether this test uses Playwright (opt-in, default false) |
 | `enabled` | `boolean` | Whether the scheduler should run this test |
 | `created_at` | `timestamp` | Creation time |

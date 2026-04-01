@@ -646,3 +646,15 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** No API or schema changes were needed — all fields were already accepted and returned. `formatCooldown` kept inline (not shared) since it's used in one place.
 
 **Deferred:** Nothing.
+
+## 2026-04-01 · F-24 · Incident lifecycle alignment
+
+**What was built:** Incident reconstruction now uses the most recent runs window and a threshold-aware lifecycle policy, so incidents are not opened for isolated blips and are closed on recovery success. The `/tests/:id/incidents` endpoint now aligns with outage semantics already used by `test_state.public_status` and notifier thresholding.
+**Files changed:**
+- `apps/api/src/routes/tests.ts`
+- `apps/api/src/routes/incident-policy.ts`
+- `apps/api/src/routes/incident-policy.test.ts`
+- `apps/api/src/routes/tests-incidents-route.test.ts`
+- `docs/DOMAINS.md`
+**Decisions:** Kept retries as documented-but-not-enforced behavior for now, and clarified docs instead of adding runtime retry orchestration in this change; timeout remains a failing signal for threshold streaks.
+**Deferred:** Executor-level retry application (`tests.retries`) is still not implemented, so incident logic currently uses final status of each scheduled run attempt.
