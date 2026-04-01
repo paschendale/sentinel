@@ -1,3 +1,16 @@
+# [1.9.0](https://github.com/territorial-dev/sentinel/compare/v1.8.0...v1.9.0) (2026-04-01)
+
+
+### Bug Fixes
+
+* **executor:** add explicit redirect error handling and redirect modes ([db27107](https://github.com/territorial-dev/sentinel/commit/db27107ec2ac52ecc775dcb2f313fd744e660822))
+
+
+### Features
+
+* **api:** threshold-aware incidents from recent run window ([22f83a4](https://github.com/territorial-dev/sentinel/commit/22f83a47d81a64e7a719ed522e4570d7adb1f022))
+* **api:** verbose synthetic test logs and quieter inbound HTTP ([72dd104](https://github.com/territorial-dev/sentinel/commit/72dd1048ffed816231aa41689f36f855adfac7c4))
+
 # [1.8.0](https://github.com/territorial-dev/sentinel/compare/v1.7.0...v1.8.0) (2026-03-30)
 
 
