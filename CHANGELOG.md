@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/territorial-dev/sentinel/compare/v1.9.0...v1.10.0) (2026-04-29)
+
+
+### Features
+
+* Executor · `warn` status and warning notifications ([31a1eba](https://github.com/territorial-dev/sentinel/commit/31a1eba54438c811df11424567be05491b4391b7))
+
 # [1.9.0](https://github.com/territorial-dev/sentinel/compare/v1.8.0...v1.9.0) (2026-04-01)
 
 
