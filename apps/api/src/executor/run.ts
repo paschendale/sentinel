@@ -48,7 +48,7 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   let errorMessage: string | null = null
 
   const fn = getCompiledFn(test.id, test.code)
-  const { ctx, getAssertions } = buildCtx({
+  const { ctx, getAssertions, getWarnings } = buildCtx({
     onLog: (message) => {
       runLog.info({ event: 'test.user_log' }, `[ctx.log] ${message}`)
       options.onLog?.(message)
@@ -80,6 +80,11 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
     errorMessage = msg
   }
 
+  if (status === 'success' && getWarnings().length > 0) {
+    status = 'warn'
+    errorMessage = getWarnings().join('; ')
+  }
+
   const finishedAt = new Date()
   const durationMs = Date.now() - startMs
 
@@ -91,9 +96,11 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   const resultSummary =
     status === 'success'
       ? 'passed'
-      : status === 'timeout'
-        ? 'timed out'
-        : 'failed'
+      : status === 'warn'
+        ? 'warned'
+        : status === 'timeout'
+          ? 'timed out'
+          : 'failed'
 
   runLog.info(
     {

@@ -97,12 +97,13 @@ async function flushTestState(rows: RunResult[]): Promise<void> {
      SELECT
        v.test_id,
        v.last_status,
-       CASE WHEN v.last_status = 'success' THEN 0
+       CASE WHEN v.last_status = 'success' OR v.last_status = 'warn' THEN 0
             ELSE COALESCE(ts.consecutive_failures, 0) + 1
        END,
        v.last_run_at,
        CASE
          WHEN v.last_status = 'success' THEN 'up'
+         WHEN v.last_status = 'warn' THEN 'degraded'
          WHEN (COALESCE(ts.consecutive_failures, 0) + 1) >= t.failure_threshold THEN 'down'
          ELSE 'degraded'
        END

@@ -17,7 +17,8 @@ Sentinel lets you write synthetic tests as plain JavaScript functions that run o
 - Write tests as JavaScript with a simple `ctx` API
 - Run tests every N seconds with configurable timeouts and retries
 - Named assertions (`ctx.assert`) recorded per run
-- State-transition alerts: notify on failure after a threshold, and again on recovery
+- Three-tier outcomes: **pass** (green), **warn** (yellow/degraded), **fail** (red)
+- State-transition alerts: failure, warning (degraded), and recovery notifications
 - Notification channels: Discord, Slack, and generic webhooks
 - Public read-only status pages (per-tag)
 - Prometheus metrics endpoint
@@ -195,9 +196,31 @@ ctx.assert('status is 200', res.status === 200)
 ctx.assert('body has id', res.json().id !== undefined, 'Expected id in response')
 ```
 
-Assertions are stored in the database and shown on the test detail page. A failed assertion does not automatically fail the test — return a falsy value or throw to fail the run.
+Assertions are stored in the database and shown on the test detail page. A failed assertion throws immediately and fails the run.
 
-#### `ctx.log(...args)` — Logging
+#### `ctx.warn(message)` — Degraded / warning state
+
+Signal that something is off without failing the run:
+
+```js
+ctx.warn(`data is stale: ${Math.round(ageMinutes)} min`)
+```
+
+The run completes with status `warn` (yellow) instead of `success`. The test is not considered down — `consecutive_failures` is not incremented — but `public_status` becomes `degraded` and a **warning notification** is sent to all assigned channels (subject to the test's cooldown). When the test later passes cleanly, a recovery notification fires.
+
+This is useful for soft thresholds, data freshness checks, or anything that degrades before it fully breaks:
+
+```js
+if (ageMinutes >= 180) {
+  throw new Error(`CRITICAL: stale ${Math.round(ageMinutes)} min`)
+}
+if (ageMinutes >= 60) {
+  ctx.warn(`stale ${Math.round(ageMinutes)} min`)
+}
+return true
+```
+
+#### `ctx.log(message)` — Logging
 
 ```js
 ctx.log('Checking endpoint:', url)
@@ -265,7 +288,7 @@ When creating a test, configure:
 
 ## Notification Channels
 
-Sentinel sends alerts on state transitions: when a test starts failing (after `failure_threshold` consecutive failures) and when it recovers.
+Sentinel sends alerts on state transitions.
 
 **Supported channel types:** Discord webhook, Slack webhook, generic webhook.
 
@@ -275,12 +298,23 @@ Sentinel sends alerts on state transitions: when a test starts failing (after `f
 2. Create a channel with a name and webhook URL.
 3. Assign channels to tests (per-test) or to tags (all tests with that tag inherit the channel).
 
+### Alert types
+
+| Event | Trigger | Color |
+|---|---|---|
+| **Warning** | Test calls `ctx.warn()` — sent on first occurrence, then cooldown-gated | Yellow |
+| **Failure** | `consecutive_failures >= failure_threshold` — then cooldown-gated | Red |
+| **Recovery** | Test returns to `success` after a warning or failure alert was sent | Green |
+
+Warning and failure alerts have independent cooldown windows — a warning notification does not suppress a subsequent failure alert.
+
 ### Alert payloads
 
-- **Failure alert** — includes test name, failure reason, last response time, and how many consecutive failures occurred.
-- **Recovery alert** — includes test name, downtime duration since the first failure, and last response time.
+- **Warning alert** — includes test name and warning message.
+- **Failure alert** — includes test name, failure reason, last response time, and consecutive failure count.
+- **Recovery alert** — includes test name, downtime duration since the first alert, and last response time.
 
-Discord alerts use colored embeds (red for failure, green for recovery). Slack alerts use attachments. Generic webhooks receive a JSON payload.
+Discord alerts use colored embeds (yellow for warning, red for failure, green for recovery). Slack alerts use attachments with the same colors. Generic webhooks receive a JSON payload with an `event` field (`"warning"`, `"fail"`, or `"recovery"`).
 
 ---
 

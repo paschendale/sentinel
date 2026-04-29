@@ -6,7 +6,7 @@ import { getToken } from '../../../lib/auth-client'
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
 interface RunResult {
-  status: 'success' | 'fail' | 'timeout'
+  status: 'success' | 'warn' | 'fail' | 'timeout'
   duration_ms: number
   error_message: string | null
 }
@@ -82,7 +82,10 @@ export function RunNowPanel({ testId }: Props) {
   }
 
   const statusColor =
-    result == null ? '' : result.status === 'success' ? 'text-emerald-400' : 'text-red-400'
+    result == null ? '' :
+    result.status === 'success' ? 'text-emerald-400' :
+    result.status === 'warn' ? 'text-yellow-400' :
+    'text-red-400'
 
   return (
     <>

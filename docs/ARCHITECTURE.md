@@ -58,17 +58,18 @@ pnpm workspaces manage the monorepo.
 ### Test Execution Engine
 - User test code compiled **once on save** via `new Function('ctx', code)` and cached in memory
 - Execution: `Promise.race([compiledFn(ctx), timeout(ms)])` — hard kill after timeout
-- `ctx` object exposes only: `ctx.http`, `ctx.assert`, `ctx.log`, `ctx.now()`
+- `ctx` object exposes only: `ctx.http`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
 - No filesystem access, no arbitrary network calls from user code
 - Tests must return a boolean (`true` = pass, `false`/throw = fail)
 
 ### Notification Pipeline
 - Event-driven: `testFailed → notifier → channels`
 - **Fire-and-forget**: notifications never block the test execution path
-- State tracked per test: `lastStatus`, `consecutiveFailures`, `lastNotificationAt`
-- Alert only on **state transitions** (pass→fail, fail→pass)
-- Alert only after **3 consecutive failures** (configurable)
-- **5-minute cooldown** between duplicate alerts for same test
+- State tracked per test: `lastStatus`, `consecutiveFailures`, `lastNotificationAt`, `lastWarningAt`
+- Three event types: **warning** (`warn` result), **fail** (threshold crossed), **recovery** (back to success)
+- Fail alert only after **3 consecutive failures** (configurable `failure_threshold`)
+- Warning alert fires on first `warn` result — no threshold, just cooldown
+- `lastNotificationAt` and `lastWarningAt` are tracked independently so a warning never suppresses a subsequent fail alert
 
 ### Observability
 - **Pino** for structured JSON logging — logs are the primary operational output
@@ -106,7 +107,7 @@ pnpm workspaces manage the monorepo.
 - **Dark mode by default** — `dark` class on `<html>`, no system-preference toggle needed for MVP
 - Background scale: `zinc-950` (page) → `zinc-900` (card) → `zinc-800` (input/hover)
 - Text: `zinc-100` primary, `zinc-400` secondary/muted, `zinc-600` disabled
-- Accent: `emerald-500` for success/pass, `red-500` for failure, `zinc-500` for neutral/unknown
+- Accent: `emerald-500` for success/pass, `yellow-400` for warn/degraded, `red-500` for failure, `zinc-500` for neutral/unknown
 - Font family: **Consolas, monospace** — used for both UI text and code. Do not mix with a sans-serif UI font.
 
 **Components:** Use **shadcn/ui** (Radix UI headless primitives + Tailwind). Install components individually with `npx shadcn@latest add <component>`. Never wrap shadcn components in additional abstraction layers — edit the generated component file directly if customization is needed.

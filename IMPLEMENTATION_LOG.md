@@ -693,3 +693,22 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 - `docs/DOMAINS.md`
 **Decisions:** Kept retries as documented-but-not-enforced behavior for now, and clarified docs instead of adding runtime retry orchestration in this change; timeout remains a failing signal for threshold streaks.
 **Deferred:** Executor-level retry application (`tests.retries`) is still not implemented, so incident logic currently uses final status of each scheduled run attempt.
+
+## 2026-04-29 · Executor · `warn` status and warning notifications
+
+**What was built:** Added `ctx.warn(message)` to the test context API. A test that calls `ctx.warn()` without throwing completes with status `'warn'` — a soft degraded outcome between pass and fail. This threads through the full pipeline: DB CHECK constraints expanded, `consecutive_failures` resets on warn (same as success), `public_status` maps warn to `'degraded'`, a `'warning'` notification event fires (cooldown-gated, no threshold), and Discord/Slack payloads render with a yellow ⚠️ embed. Recovery from warn→success still sends a `'recovery'` notification. Frontend badges show yellow "warn" in the dashboard table, run history, and run-now panel.
+
+**Files changed:**
+- `apps/api/src/db/migrations/009_warn_status.sql` (new)
+- `packages/shared/src/types.ts`
+- `apps/api/src/executor/ctx.ts`
+- `apps/api/src/executor/run.ts`
+- `apps/api/src/db/result-buffer.ts`
+- `apps/api/src/db/queries/notification-events.ts`
+- `apps/api/src/notifier/dispatch.ts`
+- `apps/web/app/_components/dashboard-table.tsx`
+- `apps/web/app/tests/_components/run-history.tsx`
+- `apps/web/app/tests/_components/run-now-panel.tsx`
+
+**Decisions:** `warn` resets `consecutive_failures` to 0 — it is an intentional signal, not a failure streak, so the failure threshold shouldn't accumulate across warn runs. Warning notifications skip the failure threshold check (warn is already deliberate) but respect the test's cooldown to prevent spam during extended degraded windows.
+**Deferred:** No `warning_threshold` per-test config — warnings fire on first occurrence. Could be added later if users need hysteresis.

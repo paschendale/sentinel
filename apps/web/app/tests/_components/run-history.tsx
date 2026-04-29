@@ -23,6 +23,14 @@ function StatusCell({ status }: { status: TestStatus }) {
       </span>
     )
   }
+  if (status === 'warn') {
+    return (
+      <span className="flex items-center gap-1.5 text-yellow-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0" aria-hidden />
+        warn
+      </span>
+    )
+  }
   return (
     <span className="flex items-center gap-1.5 text-red-400">
       <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" aria-hidden />

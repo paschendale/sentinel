@@ -11,7 +11,7 @@ const PERIODS: StatusPeriod[] = ['1h', '24h', '7d', '30d']
 
 type SortKey = 'name' | 'status' | 'last_run_at' | 'avg_latency_ms'
 
-const STATUS_ORDER: Record<string, number> = { success: 0, fail: 1, timeout: 1 }
+const STATUS_ORDER: Record<string, number> = { success: 0, warn: 1, fail: 2, timeout: 2 }
 
 function sortTests(tests: TestSummary[], key: SortKey | null, dir: 'asc' | 'desc'): TestSummary[] {
   if (!key) return tests
@@ -64,6 +64,14 @@ function StatusBadge({ status }: { status: TestSummary['last_status'] }) {
       <span className="flex items-center gap-1.5 text-emerald-400">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
         pass
+      </span>
+    )
+  }
+  if (status === 'warn') {
+    return (
+      <span className="flex items-center gap-1.5 text-yellow-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 inline-block" />
+        warn
       </span>
     )
   }

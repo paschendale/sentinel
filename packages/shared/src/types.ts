@@ -1,4 +1,4 @@
-export type TestStatus = 'success' | 'fail' | 'timeout'
+export type TestStatus = 'success' | 'warn' | 'fail' | 'timeout'
 export type NotificationChannelType = 'discord' | 'slack' | 'webhook'
 
 export interface Test {

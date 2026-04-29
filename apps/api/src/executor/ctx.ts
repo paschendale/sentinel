@@ -21,6 +21,7 @@ export interface TestContext {
     post(url: string, body: unknown, options?: HttpOptions): Promise<HttpResponse>
   }
   assert: (name: string, value: unknown, message?: string) => void
+  warn: (message: string) => void
   log: (message: string) => void
   now: () => Date
 }
@@ -31,6 +32,7 @@ interface CtxBundle {
   ctx: TestContext
   getLogs: () => string[]
   getAssertions: () => AssertionCapture[]
+  getWarnings: () => string[]
 }
 
 export interface HttpCompleteInfo {
@@ -124,6 +126,7 @@ async function doFetch(
 export function buildCtx(options?: BuildCtxOptions): CtxBundle {
   const logs: string[] = []
   const assertions: AssertionCapture[] = []
+  const warnings: string[] = []
   const onHttpComplete = options?.onHttpComplete
 
   const ctx: TestContext = {
@@ -151,6 +154,10 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
         throw new Error(message ?? `Assertion "${name}" failed`)
       }
     },
+    warn(message) {
+      warnings.push(message)
+      options?.onLog?.(`[WARN] ${message}`)
+    },
     log(message) {
       logs.push(message)
       options?.onLog?.(message)
@@ -164,5 +171,6 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
     ctx,
     getLogs: () => logs,
     getAssertions: () => assertions,
+    getWarnings: () => warnings,
   }
 }

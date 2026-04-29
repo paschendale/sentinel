@@ -35,12 +35,13 @@ A single execution result for a test.
 | `test_id` | `string` | FK → Test |
 | `started_at` | `timestamp` | Execution start time |
 | `finished_at` | `timestamp` | Execution end time |
-| `status` | `'success' \| 'fail' \| 'timeout'` | Outcome |
+| `status` | `'success' \| 'warn' \| 'fail' \| 'timeout'` | Outcome |
 | `duration_ms` | `number` | Wall-clock execution duration |
-| `error_message` | `string \| null` | Error details if status is fail or timeout |
+| `error_message` | `string \| null` | Error/warning details if status is warn, fail, or timeout |
 
 **Invariants:**
 - `finished_at >= started_at`
+- `status = 'warn'` when the test called `ctx.warn()` without throwing — `error_message` holds the joined warning messages
 - `status = 'timeout'` when execution exceeded `test.timeout_ms`
 - Raw runs are retained for 7 days, then pruned via partition drop
 
@@ -100,15 +101,17 @@ Runtime state for each test. Tracks alert logic. Persisted to DB but treated as 
 | Field | Type | Description |
 |-------|------|-------------|
 | `test_id` | `string` | FK → Test (PK) |
-| `last_status` | `'success' \| 'fail' \| 'timeout' \| null` | Status of the most recent run |
-| `consecutive_failures` | `number` | Unbroken streak of non-success results |
-| `last_notification_at` | `timestamp \| null` | When the last alert was fired |
+| `last_status` | `'success' \| 'warn' \| 'fail' \| 'timeout' \| null` | Status of the most recent run |
+| `consecutive_failures` | `number` | Unbroken streak of non-success, non-warn results |
+| `last_notification_at` | `timestamp \| null` | When the last fail/recovery alert was fired |
+| `last_warning_at` | `timestamp \| null` | When the last warning alert was fired |
 | `last_run_at` | `timestamp \| null` | When the test last executed |
 
 **Invariants:**
-- `consecutive_failures` resets to 0 on any success
-- A notification fires only when `consecutive_failures >= threshold` AND `now - last_notification_at > cooldown`
-- A notification fires on recovery (fail→success) with no threshold requirement
+- `consecutive_failures` resets to 0 on `success` or `warn` (neither is a failure streak)
+- A **fail** notification fires when `consecutive_failures >= threshold` AND `now - last_notification_at > cooldown`
+- A **warning** notification fires on the first `warn` result (no threshold), then after `cooldown` elapses — tracked independently via `last_warning_at` so it never blocks a subsequent fail alert
+- A **recovery** notification fires on `success` if either `last_notification_at` or `last_warning_at` is set; both are cleared on recovery
 
 ---
 
@@ -134,9 +137,8 @@ interface TestContext {
     get(url: string, options?: RequestOptions): Promise<HttpResponse>
     post(url: string, body: unknown, options?: RequestOptions): Promise<HttpResponse>
   }
-  assert: {
-    (name: string, value: boolean, message?: string): void  // V2
-  }
+  assert: (name: string, value: boolean, message?: string) => void
+  warn: (message: string) => void
   log: (message: string) => void
   now: () => Date
 }
@@ -156,7 +158,9 @@ interface RequestOptions {
 }
 ```
 
-**Restrictions:**
+**Method behaviour:**
+- `ctx.assert(name, value, message?)` — records a named assertion; throws immediately on failure, failing the run
+- `ctx.warn(message)` — records a warning message and emits it to the run log; does **not** throw; if any warns were recorded when the test returns, status becomes `'warn'` and `error_message` holds all messages joined by `'; '`
+- `ctx.log(message)` — emits a message to the run log; has no effect on status
 - `ctx.http` routes through undici with the test's timeout enforced
 - No `ctx.fs`, no `ctx.exec`, no `require()`, no `import`
-- `ctx.log` output is captured per-run and stored in `TestRun.error_message` on failure

@@ -22,12 +22,12 @@ export function triggerNotifications(candidates: NotificationCandidate[]): void 
 
 async function runNotifications(candidates: NotificationCandidate[]): Promise<void> {
   const actionable = candidates.filter(c => {
-    const prevFailing = c.prev_status !== null && c.prev_status !== 'success'
-    const nowFailing = c.new_status !== 'success'
+    const prevNonSuccess = c.prev_status !== null && c.prev_status !== 'success'
+    if (c.new_status === 'warn') return true
     // Always evaluate failing tests so missed threshold crossings can still notify.
-    if (nowFailing) return true
-    // Recovery only matters on actual fail -> success transition.
-    return prevFailing && c.new_status === 'success'
+    if (c.new_status !== 'success') return true
+    // Recovery only matters on actual non-success -> success transition.
+    return prevNonSuccess && c.new_status === 'success'
   })
   if (actionable.length === 0) return
 
@@ -36,11 +36,12 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
     test_id: string
     consecutive_failures: number
     last_notification_at: Date | null
+    last_warning_at: Date | null
     failure_threshold: number
     cooldown_ms: number
   }>(
     `SELECT ts.test_id, ts.consecutive_failures, ts.last_notification_at,
-            t.failure_threshold, t.cooldown_ms
+            ts.last_warning_at, t.failure_threshold, t.cooldown_ms
      FROM test_state ts
      JOIN tests t ON t.id = ts.test_id
      WHERE ts.test_id = ANY($1)`,
@@ -52,20 +53,35 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
     const state = stateMap.get(candidate.test_id)
     const consecutive = state?.consecutive_failures ?? 0
     const lastNotifiedAt = state?.last_notification_at ?? null
+    const lastWarningAt = state?.last_warning_at ?? null
     const threshold = state?.failure_threshold ?? 3
     const cooldown = state?.cooldown_ms ?? 86_400_000
 
+    const eventType = candidate.new_status === 'success' ? 'recovery'
+      : candidate.new_status === 'warn' ? 'warning'
+      : 'fail'
+
     await logNotificationEventSafe({
       test_id: candidate.test_id,
-      event: candidate.new_status !== 'success' ? 'fail' : 'recovery',
+      event: eventType,
       phase: 'evaluated',
       consecutive_failures: consecutive,
       failure_threshold: threshold,
       cooldown_ms: cooldown,
     })
 
-    if (candidate.new_status !== 'success') {
-      // fail transition: check per-test threshold and cooldown
+    if (candidate.new_status === 'warn') {
+      // warning: no threshold check; uses last_warning_at for cooldown (independent of fail cooldown)
+      if (lastWarningAt !== null) {
+        const elapsed = Date.now() - lastWarningAt.getTime()
+        if (elapsed < cooldown) {
+          await logSkippedEvent(candidate.test_id, 'warning', consecutive, threshold, cooldown, 'cooldown_active')
+          continue
+        }
+      }
+      await dispatchForTest(candidate.test_id, 'warning', consecutive, threshold, cooldown, candidate.error_message, candidate.duration_ms, null)
+    } else if (candidate.new_status !== 'success') {
+      // fail/timeout: check per-test threshold and cooldown (last_notification_at only — not affected by warnings)
       if (consecutive < threshold) {
         await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'below_threshold')
         continue
@@ -79,19 +95,20 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
       }
       await dispatchForTest(candidate.test_id, 'fail', consecutive, threshold, cooldown, candidate.error_message, candidate.duration_ms, null)
     } else {
-      // recovery transition: only notify if we previously sent a fail alert
-      if (lastNotifiedAt === null) {
+      // recovery: notify if either a fail or a warning was previously sent
+      if (lastNotifiedAt === null && lastWarningAt === null) {
         await logSkippedEvent(candidate.test_id, 'recovery', consecutive, threshold, cooldown, 'no_prior_notification')
         continue
       }
-      await dispatchForTest(candidate.test_id, 'recovery', consecutive, threshold, cooldown, null, candidate.duration_ms, lastNotifiedAt)
+      const downtimeFrom = lastNotifiedAt ?? lastWarningAt
+      await dispatchForTest(candidate.test_id, 'recovery', consecutive, threshold, cooldown, null, candidate.duration_ms, downtimeFrom)
     }
   }
 }
 
 async function dispatchForTest(
   testId: string,
-  event: 'fail' | 'recovery',
+  event: 'fail' | 'recovery' | 'warning',
   consecutiveFailures: number,
   failureThreshold: number,
   cooldownMs: number,
@@ -99,12 +116,19 @@ async function dispatchForTest(
   durationMs: number,
   lastNotifiedAt: Date | null,
 ): Promise<void> {
-  // Update last_notification_at first to prevent duplicate dispatches
-  const newNotifiedAt = event === 'fail' ? new Date() : null
-  await pool.query(
-    `UPDATE test_state SET last_notification_at = $2 WHERE test_id = $1`,
-    [testId, newNotifiedAt],
-  )
+  // Update the appropriate timestamp first to prevent duplicate dispatches.
+  // fail/recovery use last_notification_at; warnings use last_warning_at (separate cooldown).
+  if (event === 'fail') {
+    await pool.query(`UPDATE test_state SET last_notification_at = NOW() WHERE test_id = $1`, [testId])
+  } else if (event === 'warning') {
+    await pool.query(`UPDATE test_state SET last_warning_at = NOW() WHERE test_id = $1`, [testId])
+  } else {
+    // recovery: clear both so the next incident starts fresh
+    await pool.query(
+      `UPDATE test_state SET last_notification_at = NULL, last_warning_at = NULL WHERE test_id = $1`,
+      [testId],
+    )
+  }
 
   const channelResult = await pool.query<{
     id: string
@@ -213,7 +237,7 @@ async function dispatchForTest(
 
 async function logSkippedEvent(
   testId: string,
-  event: 'fail' | 'recovery',
+  event: 'fail' | 'recovery' | 'warning',
   consecutiveFailures: number,
   threshold: number,
   cooldownMs: number,
@@ -243,7 +267,7 @@ async function logNotificationEventSafe(
 function buildPayload(
   type: 'discord' | 'slack' | 'webhook',
   testName: string,
-  event: 'fail' | 'recovery',
+  event: 'fail' | 'recovery' | 'warning',
   consecutiveFailures: number,
   testId: string,
   errorMessage: string | null,
@@ -269,21 +293,37 @@ function buildPayload(
           footer: { text: 'Sentinel' },
         }],
       }
-    } else {
+    }
+    if (event === 'warning') {
       const fields: Record<string, unknown>[] = []
-      if (downtimeMs !== null) {
-        fields.push({ name: 'Downtime', value: formatDuration(downtimeMs), inline: true })
+      if (errorMessage) {
+        fields.push({ name: 'Reason', value: errorMessage, inline: false })
       }
       fields.push({ name: 'Response Time', value: `${durationMs} ms`, inline: true })
       return {
         embeds: [{
-          title: `✅ ${testName} is back UP`,
-          color: 3066993, // green
+          title: `⚠️ ${testName} is DEGRADED`,
+          color: 16776960, // yellow
           fields,
           timestamp: now,
           footer: { text: 'Sentinel' },
         }],
       }
+    }
+    // recovery
+    const fields: Record<string, unknown>[] = []
+    if (downtimeMs !== null) {
+      fields.push({ name: 'Downtime', value: formatDuration(downtimeMs), inline: true })
+    }
+    fields.push({ name: 'Response Time', value: `${durationMs} ms`, inline: true })
+    return {
+      embeds: [{
+        title: `✅ ${testName} is back UP`,
+        color: 3066993, // green
+        fields,
+        timestamp: now,
+        footer: { text: 'Sentinel' },
+      }],
     }
   }
 
@@ -304,21 +344,37 @@ function buildPayload(
           ts: Math.floor(Date.now() / 1000),
         }],
       }
-    } else {
+    }
+    if (event === 'warning') {
       const fields: Record<string, unknown>[] = []
-      if (downtimeMs !== null) {
-        fields.push({ title: 'Downtime', value: formatDuration(downtimeMs), short: true })
+      if (errorMessage) {
+        fields.push({ title: 'Reason', value: errorMessage, short: false })
       }
       fields.push({ title: 'Response Time', value: `${durationMs} ms`, short: true })
       return {
         attachments: [{
-          color: '#2ecc71',
-          title: `✅ ${testName} is back UP`,
+          color: '#f1c40f',
+          title: `⚠️ ${testName} is DEGRADED`,
           fields,
           footer: 'Sentinel',
           ts: Math.floor(Date.now() / 1000),
         }],
       }
+    }
+    // recovery
+    const fields: Record<string, unknown>[] = []
+    if (downtimeMs !== null) {
+      fields.push({ title: 'Downtime', value: formatDuration(downtimeMs), short: true })
+    }
+    fields.push({ title: 'Response Time', value: `${durationMs} ms`, short: true })
+    return {
+      attachments: [{
+        color: '#2ecc71',
+        title: `✅ ${testName} is back UP`,
+        fields,
+        footer: 'Sentinel',
+        ts: Math.floor(Date.now() / 1000),
+      }],
     }
   }
 
