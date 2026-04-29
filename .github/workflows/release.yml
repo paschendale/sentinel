@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: release-main
+  cancel-in-progress: true
+
 permissions:
   contents: write
   issues: write
@@ -55,12 +59,19 @@ jobs:
 
       - name: Run tests
         working-directory: apps/api
-        run: pnpm test
+        run: pnpm test:coverage
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentinel
           ADMIN_USERNAME: admin
           ADMIN_PASSWORD: admin
           JWT_SECRET: test-secret
+
+      - name: Upload coverage summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage-summary
+          path: apps/api/coverage/coverage-summary.json
+          if-no-files-found: error
 
   release:
     name: Semantic Release
@@ -161,3 +172,56 @@ jobs:
             paschendale/sentinel-api:${{ needs.release.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  coverage-badge:
+    name: Update coverage badge
+    needs: [test, release]
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage summary
+        uses: actions/download-artifact@v4
+        with:
+          name: api-coverage-summary
+          path: .coverage
+
+      - name: Generate coverage badge
+        run: |
+          node - <<'EOF'
+          const fs = require('fs')
+          const summary = JSON.parse(fs.readFileSync('.coverage/coverage-summary.json', 'utf8'))
+          const pct = Math.round(summary.total.lines.pct)
+          const color = pct >= 80 ? '#4c1' : pct >= 60 ? '#dfb317' : '#e05d44'
+          const label = 'coverage'
+          const value = `${pct}%`
+          const lw = 70, vw = 52, h = 20
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${lw+vw}" height="${h}">
+            <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+            <rect rx="3" width="${lw+vw}" height="${h}" fill="#555"/>
+            <rect rx="3" x="${lw}" width="${vw}" height="${h}" fill="${color}"/>
+            <rect x="${lw}" width="4" height="${h}" fill="${color}"/>
+            <rect rx="3" width="${lw+vw}" height="${h}" fill="url(#s)"/>
+            <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+              <text x="${lw/2}" y="15" fill="#010101" fill-opacity=".3">${label}</text>
+              <text x="${lw/2}" y="14">${label}</text>
+              <text x="${lw+vw/2}" y="15" fill="#010101" fill-opacity=".3">${value}</text>
+              <text x="${lw+vw/2}" y="14">${value}</text>
+            </g>
+          </svg>`
+          fs.mkdirSync('.badges', { recursive: true })
+          fs.writeFileSync('.badges/coverage.svg', svg)
+          console.log(`Coverage badge: ${pct}%`)
+          EOF
+
+      - name: Commit coverage badge
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git pull --ff-only origin main
+          git add .badges/coverage.svg
+          git diff --staged --quiet || git commit -m "chore: update coverage badge [skip ci]"
+          git push
