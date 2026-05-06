@@ -33,7 +33,7 @@ Sentinel lets you write synthetic tests as plain JavaScript functions that run o
 The easiest way to run Sentinel is with Docker Compose. Clone the repository and use the included `docker-compose.yml`:
 
 ```bash
-curl -O https://raw.githubusercontent.com/paschendale/sentinel/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/territorial-dev/sentinel/main/docker-compose.yml
 ```
 
 Edit the environment variables (see table below), then start:
@@ -49,7 +49,7 @@ Sentinel will be available at `http://localhost`. The API runs behind a Caddy re
 If you want to host the dashboard on Cloudflare Pages and only run the API + database on a VPS, use `docker-compose.cloudflare.yml`:
 
 ```bash
-curl -O https://raw.githubusercontent.com/paschendale/sentinel/main/docker-compose.cloudflare.yml
+curl -O https://raw.githubusercontent.com/territorial-dev/sentinel/main/docker-compose.cloudflare.yml
 docker compose -f docker-compose.cloudflare.yml up -d
 ```
 
