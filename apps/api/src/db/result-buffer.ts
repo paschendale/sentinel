@@ -62,7 +62,8 @@ async function flushTestRuns(rows: RunResult[]): Promise<void> {
   })
   await pool.query(
     `INSERT INTO test_runs (id, test_id, started_at, finished_at, status, duration_ms, error_message)
-     VALUES ${placeholders.join(',')}`,
+     VALUES ${placeholders.join(',')}
+     ON CONFLICT (id, started_at) DO NOTHING`,
     values,
   )
 }
@@ -79,7 +80,9 @@ async function flushAssertions(rows: RunResult[]): Promise<void> {
     return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`
   })
   await pool.query(
-    `INSERT INTO assertion_results (id, test_run_id, test_run_started_at, name, passed, message) VALUES ${placeholders.join(',')}`,
+    `INSERT INTO assertion_results (id, test_run_id, test_run_started_at, name, passed, message)
+     VALUES ${placeholders.join(',')}
+     ON CONFLICT (id) DO NOTHING`,
     values,
   )
 }

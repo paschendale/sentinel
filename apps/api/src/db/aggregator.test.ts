@@ -52,19 +52,33 @@ describe('runAggregation', () => {
     expect(diff).toBe(2 * 24 * 60 * 60 * 1000)
   })
 
-  it('prunes test_runs in batches and stops when batch is smaller than limit', async () => {
+  it('drops fully-expired partitions and row-deletes the straddling one', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-09T00:00:00Z'))
+    // cutoff = 2026-05-02. test_runs_2026_04 ends 2026-05-01 (< cutoff) → DROP.
+    // test_runs_2026_05 starts 2026-05-01, ends 2026-06-01 (straddles) → row delete.
     mockQuery
       .mockResolvedValueOnce({ rows: [] } as never) // upsert
-      .mockResolvedValueOnce({ rowCount: 2, rows: [] } as never) // prune batch 1
-      .mockResolvedValueOnce({ rowCount: 1, rows: [] } as never) // prune batch 2
-      .mockResolvedValue({ rows: [], rowCount: 0 } as never) // rest
+      .mockResolvedValueOnce({ rows: [{ tablename: 'test_runs_2026_04' }, { tablename: 'test_runs_2026_05' }] } as never) // pg_tables
+      .mockResolvedValueOnce({ rows: [] } as never) // DROP TABLE test_runs_2026_04
+      .mockResolvedValueOnce({ rowCount: 2, rows: [] } as never) // delete batch 1 (full → continue)
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] } as never) // delete batch 2 (partial → stop)
+      .mockResolvedValue({ rows: [] } as never) // partition creates + agg prune
 
     await runAggregation()
 
-    const pruneCalls = mockQuery.mock.calls.filter(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM test_runs'),
+    const dropCall = mockQuery.mock.calls.find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DROP TABLE'),
     )
-    expect(pruneCalls).toHaveLength(2)
+    expect(dropCall).toBeDefined()
+    expect(dropCall![0]).toContain('test_runs_2026_04')
+
+    const deleteCalls = mockQuery.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM test_runs_2026_05'),
+    )
+    expect(deleteCalls).toHaveLength(2)
+
+    vi.useRealTimers()
   })
 
   it('issues the uptime_daily DELETE using retention parameter', async () => {
@@ -80,7 +94,7 @@ describe('runAggregation', () => {
 
   it('makes expected maintenance calls in order', async () => {
     await runAggregation()
-    // upsert + prune + create partition x3 + prune uptime_daily
+    // upsert + pg_tables (no partitions returned) + create partition x3 + prune uptime_daily
     expect(mockQuery).toHaveBeenCalledTimes(6)
   })
 })

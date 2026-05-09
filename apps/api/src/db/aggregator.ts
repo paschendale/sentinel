@@ -71,35 +71,58 @@ export async function runAggregation(): Promise<void> {
   }
 
   try {
+    const cutoff = new Date(rawCutoffIso)
+    const { rows: partitions } = await pool.query<{ tablename: string }>(
+      `SELECT tablename FROM pg_tables
+       WHERE schemaname = 'public' AND tablename ~ '^test_runs_\\d{4}_\\d{2}$'
+       ORDER BY tablename`,
+    )
+
+    const dropped: string[] = []
     let deletedRuns = 0
-    while (true) {
-      const result = await pool.query(
-        `DELETE FROM test_runs
-         WHERE (id, started_at) IN (
-           SELECT id, started_at
-           FROM test_runs
-           WHERE started_at < $1
-           ORDER BY started_at ASC
-           LIMIT $2
-         )`,
-        [rawCutoffIso, PRUNE_BATCH_SIZE],
-      )
-      const batchDeleted = result.rowCount ?? 0
-      deletedRuns += batchDeleted
-      if (batchDeleted < PRUNE_BATCH_SIZE) break
+
+    for (const { tablename } of partitions) {
+      const m = /^test_runs_(\d{4})_(\d{2})$/.exec(tablename)
+      if (!m) continue
+      const year = parseInt(m[1]!, 10)
+      const month = parseInt(m[2]!, 10) - 1
+      const partitionStart = new Date(Date.UTC(year, month, 1))
+      const partitionEnd = new Date(Date.UTC(year, month + 1, 1))
+
+      if (partitionEnd <= cutoff) {
+        await pool.query(`DROP TABLE IF EXISTS ${tablename}`)
+        dropped.push(tablename)
+      } else if (partitionStart < cutoff) {
+        while (true) {
+          const result = await pool.query(
+            `DELETE FROM ${tablename}
+             WHERE (id, started_at) IN (
+               SELECT id, started_at FROM ${tablename}
+               WHERE started_at < $1
+               ORDER BY started_at ASC
+               LIMIT $2
+             )`,
+            [rawCutoffIso, PRUNE_BATCH_SIZE],
+          )
+          const batch = result.rowCount ?? 0
+          deletedRuns += batch
+          if (batch < PRUNE_BATCH_SIZE) break
+        }
+      }
     }
 
     logger.info(
       {
         event: 'aggregator.prune_test_runs',
         cutoff: rawCutoffIso,
+        dropped_partitions: dropped,
         deleted_rows: deletedRuns,
         batch_size: PRUNE_BATCH_SIZE,
       },
-      'aggregator pruned test_runs rows',
+      'aggregator pruned raw test_runs data',
     )
   } catch (err) {
-    logger.error({ event: 'aggregator.prune_test_runs_failed', err }, 'aggregator failed to prune test_runs rows')
+    logger.error({ event: 'aggregator.prune_test_runs_failed', err }, 'aggregator failed to prune test_runs data')
   }
 
   try {
@@ -112,10 +135,7 @@ export async function runAggregation(): Promise<void> {
       const month = String(start.getUTCMonth() + 1).padStart(2, '0')
       const tableName = `test_runs_${year}_${month}`
       await pool.query(
-        `CREATE TABLE IF NOT EXISTS ${tableName}
-         PARTITION OF test_runs
-         FOR VALUES FROM ($1) TO ($2)`,
-        [start.toISOString(), end.toISOString()],
+        `CREATE TABLE IF NOT EXISTS ${tableName} PARTITION OF test_runs FOR VALUES FROM ('${start.toISOString()}') TO ('${end.toISOString()}')`,
       )
       ensured.push(tableName)
     }
