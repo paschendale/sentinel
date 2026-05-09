@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/territorial-dev/sentinel/compare/v1.10.0...v1.11.0) (2026-05-09)
+
+
+### Features
+
+* added log pruning ([bedde76](https://github.com/territorial-dev/sentinel/commit/bedde76d84e5452273e53d9fcb361f9e938a9811))
+
 # [1.10.0](https://github.com/territorial-dev/sentinel/compare/v1.9.0...v1.10.0) (2026-04-29)
 
 
