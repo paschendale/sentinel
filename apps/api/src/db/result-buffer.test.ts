@@ -20,6 +20,7 @@ function makeResult(overrides: Partial<{
   status: 'success' | 'fail' | 'timeout'
   duration_ms: number
   error_message: string | null
+  assertions: Array<{ id: string; name: string; passed: boolean; message: string | null }>
 }> = {}) {
   return {
     id: overrides.id ?? 'run-1',
@@ -29,6 +30,7 @@ function makeResult(overrides: Partial<{
     status: overrides.status ?? 'success' as const,
     duration_ms: overrides.duration_ms ?? 100,
     error_message: overrides.error_message ?? null,
+    assertions: overrides.assertions ?? [],
   }
 }
 
@@ -91,6 +93,35 @@ describe('flush', () => {
     await flush()
     // test_runs + prev-state select + test_state upsert = 3 queries for the re-queued row
     expect(mockQuery).toHaveBeenCalledTimes(3)
+  })
+
+  it('skips assertion_results insert when result has no assertions', async () => {
+    enqueue(makeResult())
+    await flush()
+    const assertionCall = mockQuery.mock.calls.find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('INSERT INTO assertion_results'),
+    )
+    expect(assertionCall).toBeUndefined()
+    expect(mockQuery).toHaveBeenCalledTimes(3)
+  })
+
+  it('inserts assertion_results after test_runs when assertions are present', async () => {
+    enqueue(makeResult({
+      assertions: [
+        { id: 'a-1', name: 'status is 200', passed: true, message: null },
+        { id: 'a-2', name: 'body matches', passed: false, message: 'expected foo' },
+      ],
+    }))
+    await flush()
+
+    // test_runs must be first, assertion_results second
+    expect(mockQuery.mock.calls[0]![0]).toContain('INSERT INTO test_runs')
+    expect(mockQuery.mock.calls[1]![0]).toContain('INSERT INTO assertion_results')
+    // 4 queries: test_runs + assertion_results + prev-state SELECT + test_state upsert
+    expect(mockQuery).toHaveBeenCalledTimes(4)
+    // 2 assertions × 6 params = 12 params
+    const params = mockQuery.mock.calls[1]![1] as unknown[]
+    expect(params).toHaveLength(12)
   })
 
   it('prevents concurrent flushes via flushInProgress guard', async () => {

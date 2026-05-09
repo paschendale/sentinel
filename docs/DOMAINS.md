@@ -43,7 +43,7 @@ A single execution result for a test.
 - `finished_at >= started_at`
 - `status = 'warn'` when the test called `ctx.warn()` without throwing — `error_message` holds the joined warning messages
 - `status = 'timeout'` when execution exceeded `test.timeout_ms`
-- Raw runs are retained for 7 days, then pruned via partition drop
+- Raw runs are retained for 7 days by default (`RAW_RETENTION_DAYS`) and pruned daily by timestamp cutoff in batches
 
 ---
 
@@ -54,9 +54,14 @@ An individual named assertion within a test run. Optional — only recorded when
 |-------|------|-------------|
 | `id` | `string` (nanoid) | Unique identifier |
 | `test_run_id` | `string` | FK → TestRun |
+| `test_run_started_at` | `timestamp` | Partition key companion for FK → TestRun |
 | `name` | `string` | Assertion label (e.g., "status is 200") |
 | `passed` | `boolean` | Whether the assertion passed |
 | `message` | `string \| null` | Failure reason or additional context |
+
+**Invariants:**
+- `(test_run_id, test_run_started_at)` references `TestRun(id, started_at)` with `ON DELETE CASCADE`
+- Assertion rows are pruned automatically when retained raw runs are deleted
 
 ---
 
@@ -73,7 +78,7 @@ Pre-aggregated daily stats per test. The only table queried by public dashboards
 
 **Invariants:**
 - One row per (test_id, date) — upserted at end of day
-- Retained for 30–90 days (configurable)
+- Retained for 30–180 days via config (`AGG_RETENTION_DAYS`, default 90)
 - Never queried alongside raw `test_runs` — used exclusively for history/dashboard
 
 ---

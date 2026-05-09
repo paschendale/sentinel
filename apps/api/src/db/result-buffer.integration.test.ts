@@ -60,6 +60,7 @@ function makeResult(overrides: {
     status: overrides.status ?? ('success' as const),
     duration_ms: 100,
     error_message: null,
+    assertions: [] as Array<{ id: string; name: string; passed: boolean; message: string | null }>,
   }
 }
 

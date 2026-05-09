@@ -1,6 +1,5 @@
 import { nanoid } from 'nanoid'
 import type { TestStatus } from '@sentinel/shared'
-import { pool } from '../db/pool.js'
 import { logger } from '../logger.js'
 import { getCompiledFn } from './compile.js'
 import { buildCtx } from './ctx.js'
@@ -20,6 +19,7 @@ export interface RunResult {
   status: TestStatus
   duration_ms: number
   error_message: string | null
+  assertions: Array<{ id: string; name: string; passed: boolean; message: string | null }>
 }
 
 interface TestInput {
@@ -119,19 +119,6 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
       (errorMessage != null && errorMessage.length > 0 ? ` error=${errorMessage.slice(0, 300)}` : '')
   )
 
-  if (assertions.length > 0) {
-    const values: unknown[] = []
-    const placeholders = assertions.map((a, i) => {
-      const base = i * 5
-      values.push(nanoid(), runId, a.name, a.passed, a.message)
-      return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`
-    })
-    await pool.query(
-      `INSERT INTO assertion_results (id, test_run_id, name, passed, message) VALUES ${placeholders.join(', ')}`,
-      values
-    )
-  }
-
   return {
     id: runId,
     test_id: test.id,
@@ -140,5 +127,6 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
     status,
     duration_ms: durationMs,
     error_message: errorMessage,
+    assertions: assertions.map((a) => ({ id: nanoid(), name: a.name, passed: a.passed, message: a.message ?? null })),
   }
 }

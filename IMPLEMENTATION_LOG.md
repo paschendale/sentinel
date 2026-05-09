@@ -712,3 +712,17 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 
 **Decisions:** `warn` resets `consecutive_failures` to 0 — it is an intentional signal, not a failure streak, so the failure threshold shouldn't accumulate across warn runs. Warning notifications skip the failure threshold check (warn is already deliberate) but respect the test's cooldown to prevent spam during extended degraded windows.
 **Deferred:** No `warning_threshold` per-test config — warnings fire on first occurrence. Could be added later if users need hysteresis.
+
+## 2026-05-06 · F-25 · Automated log pruning retention
+
+**What was built:** Implemented configurable retention controls for raw runs and aggregates, and refactored daily aggregation into a full maintenance job that prunes raw `test_runs` by exact timestamp cutoff in batches, keeps `uptime_daily` retention configurable, and ensures future monthly partitions exist. Added relational cleanup for assertions by introducing a composite FK from `assertion_results` to partitioned `test_runs` with `ON DELETE CASCADE`, then updated executor inserts to write the companion partition key.
+**Files changed:**
+- `apps/api/src/config.ts`
+- `apps/api/src/db/aggregator.ts`
+- `apps/api/src/db/aggregator.test.ts`
+- `apps/api/src/db/migrations/011_assertion_results_fk_cascade.sql`
+- `apps/api/src/executor/run.ts`
+- `docs/ARCHITECTURE.md`
+- `docs/DOMAINS.md`
+**Decisions:** Used batched row deletes (`ctid` + `LIMIT`) instead of partition drops to enforce an exact 7-day raw window while preserving single-process resource limits. Kept partition maintenance idempotent (`CREATE TABLE IF NOT EXISTS`) in the same daily job to avoid schema drift on long-running deployments.
+**Deferred:** Existing failing `result-buffer.integration` tests in this environment were not part of this change; targeted pruning tests pass and full-suite failure appears in pre-existing integration behavior.

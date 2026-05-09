@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+vi.mock('../config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../config.js')>()
+  return {
+    ...actual,
+    RAW_RETENTION_DAYS: 7,
+    AGG_RETENTION_DAYS: 90,
+    PRUNE_BATCH_SIZE: 2,
+  }
+})
+
 vi.mock('./pool.js', () => ({
   pool: {
     query: vi.fn().mockResolvedValue({ rows: [] }),
@@ -42,97 +52,45 @@ describe('runAggregation', () => {
     expect(diff).toBe(2 * 24 * 60 * 60 * 1000)
   })
 
-  it('queries pg_class for partition names', async () => {
+  it('prunes test_runs in batches and stops when batch is smaller than limit', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] } as never) // upsert
+      .mockResolvedValueOnce({ rowCount: 2, rows: [] } as never) // prune batch 1
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] } as never) // prune batch 2
+      .mockResolvedValue({ rows: [], rowCount: 0 } as never) // rest
+
     await runAggregation()
 
-    const pgClassCall = mockQuery.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('pg_class'),
+    const pruneCalls = mockQuery.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM test_runs'),
     )
-    expect(pgClassCall).toBeDefined()
-    const sql = pgClassCall![0] as string
-    expect(sql).toContain('pg_class')
-    expect(sql).toContain("relkind = 'r'")
+    expect(pruneCalls).toHaveLength(2)
   })
 
-  it('issues the uptime_daily DELETE for rows older than 90 days', async () => {
+  it('issues the uptime_daily DELETE using retention parameter', async () => {
     await runAggregation()
 
     const deleteCall = mockQuery.mock.calls.find(
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM uptime_daily'),
     )
     expect(deleteCall).toBeDefined()
-    expect(deleteCall![0]).toContain('90 days')
+    expect(deleteCall![0]).toContain('CURRENT_DATE - $1::int')
+    expect(deleteCall![1]).toEqual([90])
   })
 
-  it('makes exactly 3 pool.query calls when no partitions exist', async () => {
-    // pg_class query returns empty rows
-    mockQuery.mockResolvedValue({ rows: [] } as never)
+  it('makes expected maintenance calls in order', async () => {
     await runAggregation()
-    expect(mockQuery).toHaveBeenCalledTimes(3)
+    // upsert + prune + create partition x3 + prune uptime_daily
+    expect(mockQuery).toHaveBeenCalledTimes(6)
   })
 })
 
-describe('partition pruning', () => {
-  it('drops a partition whose end date is beyond the 7-day cutoff', async () => {
-    // test_runs_2020_01 ends on 2020-02-01, well beyond 7 days ago
+describe('maintenance resilience', () => {
+  it('continues to prune uptime_daily even if raw pruning throws', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] } as never) // upsert
-      .mockResolvedValueOnce({ rows: [{ relname: 'test_runs_2020_01' }] } as never) // pg_class
-      .mockResolvedValueOnce({ rows: [] } as never) // DROP TABLE
-      .mockResolvedValueOnce({ rows: [] } as never) // DELETE uptime_daily
-
-    await runAggregation()
-
-    const dropCall = mockQuery.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DROP TABLE'),
-    )
-    expect(dropCall).toBeDefined()
-    expect(dropCall![0]).toContain('test_runs_2020_01')
-  })
-
-  it('does not drop a partition whose end date is within the 7-day window', async () => {
-    const now = new Date()
-    // Use next month's partition — its end is in the future, definitely within window
-    const futureYear = now.getUTCFullYear()
-    const futureMonth = String(now.getUTCMonth() + 2).padStart(2, '0') // +2 because months 0-indexed
-    const recentPartition = `test_runs_${futureYear}_${futureMonth}`
-
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] } as never) // upsert
-      .mockResolvedValueOnce({ rows: [{ relname: recentPartition }] } as never) // pg_class
-      .mockResolvedValueOnce({ rows: [] } as never) // DELETE uptime_daily
-
-    await runAggregation()
-
-    const dropCall = mockQuery.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DROP TABLE'),
-    )
-    expect(dropCall).toBeUndefined()
-  })
-
-  it('drops multiple old partitions in separate queries', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] } as never) // upsert
-      .mockResolvedValueOnce({
-        rows: [{ relname: 'test_runs_2019_11' }, { relname: 'test_runs_2019_12' }],
-      } as never) // pg_class
-      .mockResolvedValue({ rows: [] } as never) // DROP TABLE × 2 + DELETE
-
-    await runAggregation()
-
-    const dropCalls = mockQuery.mock.calls.filter(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('DROP TABLE'),
-    )
-    expect(dropCalls).toHaveLength(2)
-    expect(dropCalls[0]![0]).toContain('test_runs_2019_11')
-    expect(dropCalls[1]![0]).toContain('test_runs_2019_12')
-  })
-
-  it('continues to prune uptime_daily even if partition pruning throws', async () => {
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] } as never) // upsert
-      .mockRejectedValueOnce(new Error('pg_class failed')) // pg_class error
-      .mockResolvedValueOnce({ rows: [] } as never) // DELETE uptime_daily
+      .mockRejectedValueOnce(new Error('raw prune failed'))
+      .mockResolvedValue({ rows: [] } as never)
 
     await runAggregation()
 
@@ -140,6 +98,15 @@ describe('partition pruning', () => {
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM uptime_daily'),
     )
     expect(deleteCall).toBeDefined()
+  })
+
+  it('creates monthly partitions for current month plus next two months', async () => {
+    await runAggregation()
+
+    const createPartitionCalls = mockQuery.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && (c[0] as string).includes('CREATE TABLE IF NOT EXISTS test_runs_'),
+    )
+    expect(createPartitionCalls).toHaveLength(3)
   })
 })
 
