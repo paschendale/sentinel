@@ -1,3 +1,10 @@
+## [1.11.1](https://github.com/territorial-dev/sentinel/compare/v1.11.0...v1.11.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* fixed duplciate rows on partition ([33e31c4](https://github.com/territorial-dev/sentinel/commit/33e31c4360f5ba17bc16af63c838454c26016b7a))
+
 # [1.11.0](https://github.com/territorial-dev/sentinel/compare/v1.10.0...v1.11.0) (2026-05-09)
 
 
