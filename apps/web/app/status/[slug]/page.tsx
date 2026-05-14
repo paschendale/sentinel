@@ -31,7 +31,7 @@ export default async function TagStatusPage({
 
   return (
     <main className="min-h-screen bg-zinc-950 px-6 py-12">
-      <div className="max-w-2xl mx-auto">
+      <div>
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center gap-2.5">
             <SentinelLogo className="h-7 text-zinc-100" />

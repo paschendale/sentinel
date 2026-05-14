@@ -726,3 +726,17 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 - `docs/DOMAINS.md`
 **Decisions:** Used batched row deletes (`ctid` + `LIMIT`) instead of partition drops to enforce an exact 7-day raw window while preserving single-process resource limits. Kept partition maintenance idempotent (`CREATE TABLE IF NOT EXISTS`) in the same daily job to avoid schema drift on long-running deployments.
 **Deferred:** Existing failing `result-buffer.integration` tests in this environment were not part of this change; targeted pruning tests pass and full-suite failure appears in pre-existing integration behavior.
+
+## 2026-05-14 · UI · Compact grid view for status page
+
+**What was built:** Added a compact grid view to the public status page (both `/status` and `/status/[slug]`). Grid is now the default; users can toggle between grid and list via two icon buttons in the top-right of the controls row. The grid uses `auto-fill minmax(220px, 1fr)` to fill 100% of the viewport, fitting 100+ checks on a wide screen without horizontal constraints. Each grid card shows a status dot, test name (truncated), uptime %, and a 30-bucket mini histogram. View preference persists in `localStorage`.
+
+**Files changed:**
+- `apps/web/app/status/_components/status-page-content.tsx` — added view state, toggle buttons, grid rendering branch, localStorage persistence
+- `apps/web/app/status/_components/status-grid-card.tsx` — new compact card component for grid view
+- `apps/web/app/status/page.tsx` — removed `max-w-2xl mx-auto` wrapper so grid can use full viewport width
+- `apps/web/app/status/[slug]/page.tsx` — same max-w removal
+
+**Decisions:** Grid card omits tag links (too noisy at small size) and hover tooltips on histogram buckets (too small to be useful). The list view is completely unchanged in appearance — `max-w-2xl` is re-applied inside `StatusPageContent` for that branch only. `sampleBuckets` downsamples to 30 slices when API returns 100 buckets, preserving visual shape without crowding.
+
+**Deferred:** Hover tooltips on grid card histogram could be added later if requested.
