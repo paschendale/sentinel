@@ -169,7 +169,12 @@ export function StatusPageContent({ tests, tag }: Props) {
             >
               <div className="flex items-start justify-between gap-4 mb-4">
                 <div>
-                  <h2 className="text-zinc-100 font-medium text-base">{test.name}</h2>
+                  <a
+                    href={`/status/tests/${test.id}`}
+                    className="text-zinc-100 font-medium text-base hover:text-zinc-300 transition-colors"
+                  >
+                    {test.name}
+                  </a>
                   {!test.enabled && <p className="text-zinc-600 text-xs mt-1">disabled</p>}
                   {(test.tags ?? []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
@@ -185,7 +190,15 @@ export function StatusPageContent({ tests, tag }: Props) {
                     </div>
                   )}
                 </div>
-                <CurrentLabel status={test.current_status} />
+                <div className="flex items-center gap-3 shrink-0">
+                  <CurrentLabel status={test.current_status} />
+                  <a
+                    href={`/status/tests/${test.id}`}
+                    className="text-zinc-600 text-xs hover:text-zinc-400 transition-colors"
+                  >
+                    →
+                  </a>
+                </div>
               </div>
 
               <p className="text-4xl font-semibold tabular-nums text-zinc-100 tracking-tight mb-4">

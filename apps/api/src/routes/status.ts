@@ -124,18 +124,57 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(buildPublicStatus(tests, udRows, stateRows))
   })
 
-  app.get<{ Querystring: { period?: string; tag?: string } }>('/buckets', async (req, reply) => {
+  app.get<{ Params: { id: string } }>('/test/:id', async (req, reply) => {
+    const { id } = req.params
+    const { rows: tests } = await pool.query<TestRow>(
+      `SELECT id, name, enabled, tags FROM tests WHERE id = $1`,
+      [id],
+    )
+    if (tests.length === 0) return reply.status(404).send({ error: 'not found' })
+    const { rows: udRows } = await pool.query<UdRow>(
+      `SELECT test_id, date::text AS date, success_count, failure_count
+       FROM uptime_daily
+       WHERE test_id = $1
+         AND date >= (CURRENT_DATE - 29)
+         AND date <= CURRENT_DATE`,
+      [id],
+    )
+    const { rows: stateRows } = await pool.query<StateRow>(
+      `SELECT test_id, public_status FROM test_state WHERE test_id = $1`,
+      [id],
+    )
+    const [result] = buildPublicStatus(tests, udRows, stateRows)
+    return reply.send(result)
+  })
+
+  app.get<{ Querystring: { period?: string; tag?: string; testId?: string } }>('/buckets', async (req, reply) => {
     const period = (req.query.period ?? '24h') as StatusPeriod
     const tag = req.query.tag as string | undefined
+    const testId = req.query.testId as string | undefined
 
     if (!['1h', '24h', '7d', '30d'].includes(period)) {
       return reply.status(400).send({ error: 'invalid period' })
     }
 
-    const testQuery = tag
-      ? `SELECT id, name, enabled, tags FROM tests WHERE $1 = ANY(tags) ORDER BY created_at DESC`
-      : `SELECT id, name, enabled, tags FROM tests ORDER BY created_at DESC`
-    const { rows: tests } = await pool.query<TestRow>(tag ? testQuery : testQuery, tag ? [tag] : [])
+    let tests: TestRow[]
+    if (testId) {
+      const { rows } = await pool.query<TestRow>(
+        `SELECT id, name, enabled, tags FROM tests WHERE id = $1`,
+        [testId],
+      )
+      tests = rows
+    } else if (tag) {
+      const { rows } = await pool.query<TestRow>(
+        `SELECT id, name, enabled, tags FROM tests WHERE $1 = ANY(tags) ORDER BY created_at DESC`,
+        [tag],
+      )
+      tests = rows
+    } else {
+      const { rows } = await pool.query<TestRow>(
+        `SELECT id, name, enabled, tags FROM tests ORDER BY created_at DESC`,
+      )
+      tests = rows
+    }
     if (tests.length === 0) return reply.send([])
 
     const testIds = tests.map(t => t.id)

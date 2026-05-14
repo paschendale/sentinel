@@ -740,3 +740,20 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Grid card omits tag links (too noisy at small size) and hover tooltips on histogram buckets (too small to be useful). The list view is completely unchanged in appearance — `max-w-2xl` is re-applied inside `StatusPageContent` for that branch only. `sampleBuckets` downsamples to 30 slices when API returns 100 buckets, preserving visual shape without crowding.
 
 **Deferred:** Hover tooltips on grid card histogram could be added later if requested.
+
+## 2026-05-14 · UI · Public test detail page + grid hover popover
+
+**What was built:** Clicking any check in the status page (both grid and list views) now navigates to a dedicated public detail page at `/status/tests/[id]`. The detail page shows: test name + current status, period-selectable uptime %, full status bucket histogram (with hover tooltips), a Recharts avg-latency chart (bar for failures, line for avg), and a 30-day daily calendar row — no code or config exposed. In grid view, hovering a card shows a popover below with the full-size interactive histogram, uptime, tags, and a "view details →" link. In list view, the test name and a `→` arrow are links to the detail page.
+
+**Files changed:**
+- `apps/api/src/routes/status.ts` — added `GET /status/test/:id` (single-test public info) and `testId` query param to `GET /status/buckets`
+- `apps/web/app/status/_components/status-latency-chart.tsx` — new Recharts ComposedChart for bucket-level avg latency
+- `apps/web/app/status/_components/status-latency-chart-loader.tsx` — dynamic import wrapper (SSR disabled)
+- `apps/web/app/status/tests/[id]/page.tsx` — new public test detail server component
+- `apps/web/app/status/tests/[id]/_components/status-test-content.tsx` — client component with period selector + fetches
+- `apps/web/app/status/_components/status-grid-card.tsx` — click navigates, hover shows popover via CSS group-hover
+- `apps/web/app/status/_components/status-page-content.tsx` — list card name + arrow become links
+
+**Decisions:** Used CSS `group-hover` (Tailwind named group `group/card`) for the hover popover — avoids JS hover state and eliminates flicker when moving from card to popover since both are inside the same group div. A `pt-1.5` transparent bridge between card bottom and popover box keeps the group active during mouse movement. The latency chart reuses the same visual language as `RunLatencyChart` (red bars for failures, gray line for avg) but works on bucket aggregates instead of individual runs.
+
+**Deferred:** The detail page back-link always goes to `/status` (all tests), not back to the originating tag page. Could be improved with referrer tracking later.
