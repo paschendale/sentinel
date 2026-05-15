@@ -5,6 +5,7 @@ import {
   insertNotificationEvent,
   type NotificationEventReason,
 } from '../db/queries/notification-events.js'
+import { RESEND_API_KEY, RESEND_FROM } from '../config.js'
 
 export interface NotificationCandidate {
   test_id: string
@@ -132,11 +133,12 @@ async function dispatchForTest(
 
   const channelResult = await pool.query<{
     id: string
-    type: 'discord' | 'slack' | 'webhook'
-    webhook_url: string
+    type: 'discord' | 'slack' | 'webhook' | 'email'
+    webhook_url: string | null
+    email_to: string[] | null
     test_name: string
   }>(
-    `SELECT DISTINCT nc.id, nc.type, nc.webhook_url, t.name AS test_name
+    `SELECT DISTINCT nc.id, nc.type, nc.webhook_url, nc.email_to, t.name AS test_name
      FROM notification_channels nc
      JOIN tests t ON t.id = $1
      WHERE nc.enabled = TRUE
@@ -175,23 +177,61 @@ async function dispatchForTest(
     })
 
     try {
-      const body = buildPayload(
-        channel.type,
-        channel.test_name,
-        event,
-        consecutiveFailures,
-        testId,
-        errorMessage,
-        durationMs,
-        downtimeMs,
-      )
-      const response = await request(channel.webhook_url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      let statusCode: number
 
-      if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (channel.type === 'email') {
+        if (!RESEND_API_KEY) {
+          await logNotificationEventSafe({
+            test_id: testId,
+            channel_id: channel.id,
+            event,
+            phase: 'failed',
+            reason: 'http_error',
+            consecutive_failures: consecutiveFailures,
+            failure_threshold: failureThreshold,
+            cooldown_ms: cooldownMs,
+            error_message: 'RESEND_API_KEY not configured',
+          })
+          continue
+        }
+        const emailPayload = buildEmailPayload(
+          channel.test_name,
+          event,
+          channel.email_to ?? [],
+          consecutiveFailures,
+          errorMessage,
+          durationMs,
+          downtimeMs,
+        )
+        const response = await request('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'authorization': `Bearer ${RESEND_API_KEY}`,
+          },
+          body: JSON.stringify(emailPayload),
+        })
+        statusCode = response.statusCode
+      } else {
+        const body = buildPayload(
+          channel.type,
+          channel.test_name,
+          event,
+          consecutiveFailures,
+          testId,
+          errorMessage,
+          durationMs,
+          downtimeMs,
+        )
+        const response = await request(channel.webhook_url!, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        statusCode = response.statusCode
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
         await logNotificationEventSafe({
           test_id: testId,
           channel_id: channel.id,
@@ -201,8 +241,8 @@ async function dispatchForTest(
           consecutive_failures: consecutiveFailures,
           failure_threshold: failureThreshold,
           cooldown_ms: cooldownMs,
-          http_status: response.statusCode,
-          error_message: `non-2xx status: ${response.statusCode}`,
+          http_status: statusCode,
+          error_message: `non-2xx status: ${statusCode}`,
         })
         continue
       }
@@ -215,7 +255,7 @@ async function dispatchForTest(
         consecutive_failures: consecutiveFailures,
         failure_threshold: failureThreshold,
         cooldown_ms: cooldownMs,
-        http_status: response.statusCode,
+        http_status: statusCode,
       })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
@@ -262,6 +302,50 @@ async function logNotificationEventSafe(
   } catch (err: unknown) {
     console.error('notifier: failed to write notification event', err)
   }
+}
+
+function buildEmailPayload(
+  testName: string,
+  event: 'fail' | 'recovery' | 'warning',
+  to: string[],
+  consecutiveFailures: number,
+  errorMessage: string | null,
+  durationMs: number,
+  downtimeMs: number | null,
+): { from: string; to: string[]; subject: string; html: string } {
+  const subjects: Record<typeof event, string> = {
+    fail: `🚨 ${testName} is DOWN`,
+    warning: `⚠️ ${testName} is DEGRADED`,
+    recovery: `✅ ${testName} is back UP`,
+  }
+  const subject = subjects[event]
+
+  const details: string[] = []
+  if (event === 'fail') {
+    if (errorMessage) details.push(`<b>Reason:</b> ${escapeHtml(errorMessage)}`)
+    details.push(`<b>Consecutive failures:</b> ${consecutiveFailures}`)
+    details.push(`<b>Response time:</b> ${durationMs} ms`)
+  } else if (event === 'warning') {
+    if (errorMessage) details.push(`<b>Reason:</b> ${escapeHtml(errorMessage)}`)
+    details.push(`<b>Response time:</b> ${durationMs} ms`)
+  } else {
+    if (downtimeMs !== null) details.push(`<b>Downtime:</b> ${formatDuration(downtimeMs)}`)
+    details.push(`<b>Response time:</b> ${durationMs} ms`)
+  }
+
+  const html = `<!DOCTYPE html><html><body style="font-family:sans-serif;color:#18181b;background:#fff;padding:24px">
+<h2 style="margin-top:0">${subject}</h2>
+<p style="color:#71717a;font-size:14px">${new Date().toUTCString()}</p>
+${details.map(d => `<p style="margin:4px 0;font-size:14px">${d}</p>`).join('\n')}
+<hr style="border:none;border-top:1px solid #e4e4e7;margin:20px 0">
+<p style="color:#a1a1aa;font-size:12px">Sent by Sentinel</p>
+</body></html>`
+
+  return { from: RESEND_FROM, to, subject, html }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function buildPayload(

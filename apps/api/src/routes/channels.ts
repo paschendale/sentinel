@@ -22,10 +22,10 @@ export async function channelsRoutes(app: FastifyInstance): Promise<void> {
     const d = parsed.data
     const id = nanoid()
     const { rows } = await pool.query<NotificationChannel>(
-      `INSERT INTO notification_channels (id, name, type, webhook_url, enabled)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO notification_channels (id, name, type, webhook_url, email_to, enabled)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [id, d.name, d.type, d.webhook_url, d.enabled],
+      [id, d.name, d.type, d.webhook_url ?? null, d.email_to ?? null, d.enabled],
     )
     return reply.status(201).send(rows[0])
   })

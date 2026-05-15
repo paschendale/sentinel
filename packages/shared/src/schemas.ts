@@ -17,12 +17,22 @@ export const UpdateTestSchema = CreateTestSchema.partial()
 
 export const CreateNotificationChannelSchema = z.object({
   name: z.string().min(1).max(100),
-  type: z.enum(['discord', 'slack', 'webhook']),
-  webhook_url: z.string().url(),
+  type: z.enum(['discord', 'slack', 'webhook', 'email']),
+  webhook_url: z.string().url().optional(),
+  email_to: z.array(z.string().email()).min(1).max(10).optional(),
   enabled: z.boolean().default(true),
-})
+}).refine(
+  d => d.type === 'email' ? (d.email_to?.length ?? 0) > 0 : !!d.webhook_url,
+  { message: 'webhook_url required for webhook channels; email_to required for email channels' },
+)
 
-export const UpdateNotificationChannelSchema = CreateNotificationChannelSchema.partial()
+export const UpdateNotificationChannelSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  type: z.enum(['discord', 'slack', 'webhook', 'email']).optional(),
+  webhook_url: z.string().url().optional(),
+  email_to: z.array(z.string().email()).min(1).max(10).optional(),
+  enabled: z.boolean().optional(),
+})
 
 export const CreateAssignmentSchema = z.object({
   channel_id: z.string().min(1),

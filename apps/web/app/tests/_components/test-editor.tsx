@@ -15,6 +15,7 @@ const TYPE_BADGE_STYLES: Record<NotificationChannelType, string> = {
   discord: 'bg-indigo-950 text-indigo-400',
   slack: 'bg-emerald-950 text-emerald-400',
   webhook: 'bg-zinc-800 text-zinc-400',
+  email: 'bg-amber-950 text-amber-400',
 }
 
 function NotificationTypeBadge({ type }: { type: NotificationChannelType }) {

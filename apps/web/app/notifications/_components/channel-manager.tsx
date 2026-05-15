@@ -7,12 +7,13 @@ import { fetchWithAuth } from '../../../lib/auth-client'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
-const CHANNEL_TYPES: NotificationChannelType[] = ['discord', 'slack', 'webhook']
+const CHANNEL_TYPES: NotificationChannelType[] = ['discord', 'slack', 'webhook', 'email']
 
 const TYPE_BADGE_STYLES: Record<NotificationChannelType, string> = {
   discord: 'bg-indigo-950 text-indigo-400',
   slack: 'bg-emerald-950 text-emerald-400',
   webhook: 'bg-zinc-800 text-zinc-400',
+  email: 'bg-amber-950 text-amber-400',
 }
 
 function ChannelTypeBadge({ type }: { type: NotificationChannelType }) {
@@ -27,15 +28,39 @@ interface ChannelFormState {
   name: string
   type: NotificationChannelType
   webhook_url: string
+  email_to: string  // comma-separated for email type
   enabled: boolean
 }
 
 function emptyForm(): ChannelFormState {
-  return { name: '', type: 'discord', webhook_url: '', enabled: true }
+  return { name: '', type: 'discord', webhook_url: '', email_to: '', enabled: true }
 }
 
 function channelToForm(c: NotificationChannel): ChannelFormState {
-  return { name: c.name, type: c.type, webhook_url: c.webhook_url, enabled: c.enabled }
+  return {
+    name: c.name,
+    type: c.type,
+    webhook_url: c.webhook_url ?? '',
+    email_to: (c.email_to ?? []).join(', '),
+    enabled: c.enabled,
+  }
+}
+
+function formToPayload(form: ChannelFormState) {
+  if (form.type === 'email') {
+    return {
+      name: form.name,
+      type: form.type,
+      email_to: form.email_to.split(',').map(e => e.trim()).filter(Boolean),
+      enabled: form.enabled,
+    }
+  }
+  return {
+    name: form.name,
+    type: form.type,
+    webhook_url: form.webhook_url,
+    enabled: form.enabled,
+  }
 }
 
 interface ChannelFormProps {
@@ -87,17 +112,38 @@ function ChannelForm({ initial, submitLabel, onSubmit, onCancel, error, busy }: 
           </select>
         </div>
       </div>
-      <div>
-        <label className="block text-zinc-500 text-xs mb-1 tracking-wider uppercase">Webhook URL</label>
-        <input
-          type="url"
-          value={form.webhook_url}
-          onChange={e => set('webhook_url', e.target.value)}
-          required
-          className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
-          placeholder="https://discord.com/api/webhooks/..."
-        />
-      </div>
+      {form.type === 'email' ? (
+        <div>
+          <label className="block text-zinc-500 text-xs mb-1 tracking-wider uppercase">Recipients</label>
+          <input
+            type="text"
+            value={form.email_to}
+            onChange={e => set('email_to', e.target.value)}
+            required
+            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+            placeholder="you@example.com, team@example.com"
+          />
+          {form.email_to.trim() && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {form.email_to.split(',').map(e => e.trim()).filter(Boolean).map(email => (
+                <span key={email} className="text-xs px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded-sm">{email}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div>
+          <label className="block text-zinc-500 text-xs mb-1 tracking-wider uppercase">Webhook URL</label>
+          <input
+            type="url"
+            value={form.webhook_url}
+            onChange={e => set('webhook_url', e.target.value)}
+            required
+            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+            placeholder="https://discord.com/api/webhooks/..."
+          />
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <input
           id={`enabled-${form.name}`}
@@ -147,7 +193,7 @@ function ChannelRow({ channel, onUpdated }: ChannelRowProps) {
       const res = await fetchWithAuth(`${API_URL}/channels/${channel.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(formToPayload(data)),
       })
       if (!res.ok) {
         setError('Save failed.')
@@ -189,9 +235,16 @@ function ChannelRow({ channel, onUpdated }: ChannelRowProps) {
           <ChannelTypeBadge type={channel.type} />
           <span className="text-zinc-100 text-sm">{channel.name}</span>
           {!channel.enabled && <span className="text-zinc-600 text-xs">disabled</span>}
-          <span className="text-zinc-600 text-xs font-mono truncate max-w-xs">
-            {channel.webhook_url.replace(/^https?:\/\//, '').slice(0, 48)}…
-          </span>
+          {channel.webhook_url && (
+            <span className="text-zinc-600 text-xs font-mono truncate max-w-xs">
+              {channel.webhook_url.replace(/^https?:\/\//, '').slice(0, 48)}…
+            </span>
+          )}
+          {channel.email_to && (
+            <span className="text-zinc-600 text-xs truncate max-w-xs">
+              {channel.email_to.join(', ')}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4 text-sm">
           <button
@@ -263,7 +316,7 @@ export function ChannelManager({ channels }: { channels: NotificationChannel[] }
       const res = await fetchWithAuth(`${API_URL}/channels`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(formToPayload(data)),
       })
       if (!res.ok) {
         setCreateError('Create failed.')

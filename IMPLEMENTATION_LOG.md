@@ -773,3 +773,23 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Type badges are color-coded by service (Discord=indigo, Slack=emerald, webhook=zinc) to allow visual scanning without reading text. The custom picker uses `mousedown` + ref-based click-away to dismiss — avoids native select styling inconsistencies. API routes remain unchanged (`/channels`, `/tests/:id/channels`, `/tags/:tag/channels`); only UI copy and routes changed.
 
 **Deferred:** The `_components/` files for the old `/channels` route (channel-manager.tsx, tag-assignment-panel.tsx) remain on disk but are no longer imported; can be deleted in a cleanup pass.
+
+## 2026-05-14 · Notifier · Email notification channel via Resend
+
+**What was built:** Added `email` as a fourth notification channel type. Email is sent via the Resend REST API (called directly with undici — no new dependency). API key and sender address are configured globally via `RESEND_API_KEY` and `RESEND_FROM` env vars; recipient addresses are stored per-channel in a new `email_to TEXT[]` column. The UI conditionally swaps the webhook URL field for a comma-separated recipients input when the email type is selected.
+
+**Files changed:**
+- `apps/api/src/db/migrations/012_email_channel.sql` — new migration: `webhook_url` made nullable, `email_to TEXT[]` column added, type CHECK constraint extended to include `'email'`
+- `packages/shared/src/types.ts` — `NotificationChannelType` union extended; `NotificationChannel.webhook_url` → `string | null`, `email_to: string[] | null` added
+- `packages/shared/src/schemas.ts` — schemas updated with optional `webhook_url`/`email_to`, refinement enforces correct field per type
+- `apps/api/src/config.ts` — `RESEND_API_KEY` and `RESEND_FROM` optional env vars added
+- `apps/api/src/notifier/dispatch.ts` — channel query selects `email_to`; dispatch loop branches on `channel.type === 'email'` to call Resend API; `buildEmailPayload()` and `escapeHtml()` helpers added; guards against unconfigured `RESEND_API_KEY`
+- `apps/api/src/routes/channels.ts` — INSERT includes `email_to` column
+- `apps/web/app/notifications/_components/channel-manager.tsx` — `email` type added to CHANNEL_TYPES, amber badge style, conditional form fields (Recipients vs Webhook URL), `formToPayload()` helper separates form state from API payload
+- `apps/web/app/notifications/_components/tag-assignment-panel.tsx` — amber badge style for email type
+- `apps/web/app/tests/_components/test-editor.tsx` — amber badge style for email type
+- `apps/web/app/channels/_components/` — deleted (stale dead code, superseded by notifications route)
+
+**Decisions:** Used undici directly to call `https://api.resend.com/emails` rather than installing the `@resend/node` SDK — keeps the approved dependency list unchanged. Email HTML is hand-built (no template library) to stay minimal. If `RESEND_API_KEY` is empty the channel logs a `failed` phase event with a descriptive message rather than crashing.
+
+**Deferred:** `RESEND_FROM` and `RESEND_API_KEY` are not yet added to `docker-compose.yml` example — they should be documented there for new deployments.

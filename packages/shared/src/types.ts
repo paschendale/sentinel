@@ -1,5 +1,5 @@
 export type TestStatus = 'success' | 'warn' | 'fail' | 'timeout'
-export type NotificationChannelType = 'discord' | 'slack' | 'webhook'
+export type NotificationChannelType = 'discord' | 'slack' | 'webhook' | 'email'
 
 export interface Test {
   id: string
@@ -47,7 +47,8 @@ export interface NotificationChannel {
   id: string
   name: string
   type: NotificationChannelType
-  webhook_url: string
+  webhook_url: string | null
+  email_to: string[] | null
   enabled: boolean
 }
 
