@@ -793,3 +793,15 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Used undici directly to call `https://api.resend.com/emails` rather than installing the `@resend/node` SDK — keeps the approved dependency list unchanged. Email HTML is hand-built (no template library) to stay minimal. If `RESEND_API_KEY` is empty the channel logs a `failed` phase event with a descriptive message rather than crashing.
 
 **Deferred:** `RESEND_FROM` and `RESEND_API_KEY` are not yet added to `docker-compose.yml` example — they should be documented there for new deployments.
+
+## 2026-05-15 · Status pages · Auto-refresh every 60 seconds
+
+**What was built:** Status pages now auto-refresh every 60 seconds without a full page reload. Both the server-fetched test data (`current_status`, `days`) and client-fetched bucket data are refreshed on each tick.
+
+**Files changed:**
+- `apps/web/app/status/_components/status-page-content.tsx` — added `useRouter`; `setInterval` calls `router.refresh()` (re-runs server component) and increments `refreshKey`; `refreshKey` added to bucket-fetch `useEffect` deps
+- `apps/web/app/status/tests/[id]/_components/status-test-content.tsx` — same pattern applied
+
+**Decisions:** `router.refresh()` (Next.js App Router) invalidates the server component cache so `current_status` and `days` stay current. A `refreshKey` counter in state triggers the bucket API re-fetch independently, since that fetch lives in a separate `useEffect`.
+
+**Deferred:** No visible countdown/last-updated indicator added; purely silent background refresh.

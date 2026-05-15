@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from './status-buckets-view'
 import { StatusGridCard } from './status-grid-card'
@@ -57,6 +58,16 @@ export function StatusPageContent({ tests, tag }: Props) {
   const [bucketData, setBucketData] = useState<Map<string, StatusBucket[]>>(new Map())
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<View>('grid')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const router = useRouter()
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      router.refresh()
+      setRefreshKey(k => k + 1)
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [router])
 
   useEffect(() => {
     try {
@@ -90,7 +101,7 @@ export function StatusPageContent({ tests, tag }: Props) {
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [period, tag])
+  }, [period, tag, refreshKey])
 
   if (tests.length === 0) {
     return <p className="text-zinc-500 text-center text-sm">No tests configured.</p>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from '../../../_components/status-buckets-view'
 import { StatusLatencyChartLoader } from '../../../_components/status-latency-chart-loader'
@@ -33,6 +34,16 @@ export function StatusTestContent({ test }: { test: PublicStatusTest }) {
   const [period, setPeriod] = useState<StatusPeriod>('24h')
   const [buckets, setBuckets] = useState<StatusBucket[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const router = useRouter()
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      router.refresh()
+      setRefreshKey(k => k + 1)
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [router])
 
   useEffect(() => {
     setLoading(true)
@@ -42,7 +53,7 @@ export function StatusTestContent({ test }: { test: PublicStatusTest }) {
       .then(data => { setBuckets(data[0]?.buckets ?? []) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [period, test.id])
+  }, [period, test.id, refreshKey])
 
   const uptimePct = buckets.length > 0 ? computeUptimePct(buckets) : null
   const colors = statusColors(test.current_status)
