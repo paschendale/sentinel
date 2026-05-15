@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/territorial-dev/sentinel/compare/v1.12.0...v1.13.0) (2026-05-15)
+
+
+### Features
+
+* added email notifications ([b42eb75](https://github.com/territorial-dev/sentinel/commit/b42eb75e5eb65da0f1e289078dee05d6b452eb0d))
+
 # [1.12.0](https://github.com/territorial-dev/sentinel/compare/v1.11.1...v1.12.0) (2026-05-15)
 
 
