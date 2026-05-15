@@ -61,8 +61,14 @@ export function StatusPageContent({ tests, tag }: Props) {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(VIEW_KEY)
-      if (saved === 'list' || saved === 'grid') setView(saved)
-    } catch {}
+      if (saved === 'list' || saved === 'grid') {
+        setView(saved)
+      } else {
+        setView(window.innerWidth >= 768 ? 'grid' : 'list')
+      }
+    } catch {
+      setView(window.innerWidth >= 768 ? 'grid' : 'list')
+    }
   }, [])
 
   function switchView(v: View) {
@@ -157,7 +163,7 @@ export function StatusPageContent({ tests, tag }: Props) {
     <div className="space-y-8">
       {controls}
 
-      <div className="max-w-2xl space-y-8">
+      <div className="max-w-2xl mx-auto space-y-8">
         {tests.map(test => {
           const buckets = bucketData.get(test.id) ?? []
           const uptimePct = buckets.length > 0 ? computeUptimePct(buckets) : null

@@ -30,7 +30,7 @@ export default async function TagStatusPage({
   if (tests === null) notFound()
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-12">
+    <main className="min-h-screen bg-zinc-950 px-6 py-12 overflow-x-clip">
       <div>
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center gap-2.5">

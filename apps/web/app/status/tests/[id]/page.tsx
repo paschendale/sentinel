@@ -29,14 +29,12 @@ export default async function PublicTestPage({
   return (
     <main className="min-h-screen bg-zinc-950 px-6 py-12">
       <div className="max-w-2xl mx-auto space-y-8">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <SentinelLogo className="h-7 text-zinc-100" />
-            <span className="text-zinc-100 text-lg">sentinel</span>
-          </div>
-          <a href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
-            ← all tests
-          </a>
+        <a href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors block">
+          ← all tests
+        </a>
+        <div className="flex items-center gap-2.5">
+          <SentinelLogo className="h-7 text-zinc-100" />
+          <span className="text-zinc-100 text-lg">sentinel</span>
         </div>
         <StatusTestContent test={test} />
       </div>

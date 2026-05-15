@@ -19,7 +19,7 @@ export default async function StatusPage() {
   const tests = await getStatus()
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-12">
+    <main className="min-h-screen bg-zinc-950 px-6 py-12 overflow-x-clip">
       <div className="space-y-8">
         <div className="flex items-center gap-2.5">
           <SentinelLogo className="h-7 text-zinc-100" />
