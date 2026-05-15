@@ -726,3 +726,50 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 - `docs/DOMAINS.md`
 **Decisions:** Used batched row deletes (`ctid` + `LIMIT`) instead of partition drops to enforce an exact 7-day raw window while preserving single-process resource limits. Kept partition maintenance idempotent (`CREATE TABLE IF NOT EXISTS`) in the same daily job to avoid schema drift on long-running deployments.
 **Deferred:** Existing failing `result-buffer.integration` tests in this environment were not part of this change; targeted pruning tests pass and full-suite failure appears in pre-existing integration behavior.
+
+## 2026-05-14 · UI · Compact grid view for status page
+
+**What was built:** Added a compact grid view to the public status page (both `/status` and `/status/[slug]`). Grid is now the default; users can toggle between grid and list via two icon buttons in the top-right of the controls row. The grid uses `auto-fill minmax(220px, 1fr)` to fill 100% of the viewport, fitting 100+ checks on a wide screen without horizontal constraints. Each grid card shows a status dot, test name (truncated), uptime %, and a 30-bucket mini histogram. View preference persists in `localStorage`.
+
+**Files changed:**
+- `apps/web/app/status/_components/status-page-content.tsx` — added view state, toggle buttons, grid rendering branch, localStorage persistence
+- `apps/web/app/status/_components/status-grid-card.tsx` — new compact card component for grid view
+- `apps/web/app/status/page.tsx` — removed `max-w-2xl mx-auto` wrapper so grid can use full viewport width
+- `apps/web/app/status/[slug]/page.tsx` — same max-w removal
+
+**Decisions:** Grid card omits tag links (too noisy at small size) and hover tooltips on histogram buckets (too small to be useful). The list view is completely unchanged in appearance — `max-w-2xl` is re-applied inside `StatusPageContent` for that branch only. `sampleBuckets` downsamples to 30 slices when API returns 100 buckets, preserving visual shape without crowding.
+
+**Deferred:** Hover tooltips on grid card histogram could be added later if requested.
+
+## 2026-05-14 · UI · Public test detail page + grid hover popover
+
+**What was built:** Clicking any check in the status page (both grid and list views) now navigates to a dedicated public detail page at `/status/tests/[id]`. The detail page shows: test name + current status, period-selectable uptime %, full status bucket histogram (with hover tooltips), a Recharts avg-latency chart (bar for failures, line for avg), and a 30-day daily calendar row — no code or config exposed. In grid view, hovering a card shows a popover below with the full-size interactive histogram, uptime, tags, and a "view details →" link. In list view, the test name and a `→` arrow are links to the detail page.
+
+**Files changed:**
+- `apps/api/src/routes/status.ts` — added `GET /status/test/:id` (single-test public info) and `testId` query param to `GET /status/buckets`
+- `apps/web/app/status/_components/status-latency-chart.tsx` — new Recharts ComposedChart for bucket-level avg latency
+- `apps/web/app/status/_components/status-latency-chart-loader.tsx` — dynamic import wrapper (SSR disabled)
+- `apps/web/app/status/tests/[id]/page.tsx` — new public test detail server component
+- `apps/web/app/status/tests/[id]/_components/status-test-content.tsx` — client component with period selector + fetches
+- `apps/web/app/status/_components/status-grid-card.tsx` — click navigates, hover shows popover via CSS group-hover
+- `apps/web/app/status/_components/status-page-content.tsx` — list card name + arrow become links
+
+**Decisions:** Used CSS `group-hover` (Tailwind named group `group/card`) for the hover popover — avoids JS hover state and eliminates flicker when moving from card to popover since both are inside the same group div. A `pt-1.5` transparent bridge between card bottom and popover box keeps the group active during mouse movement. The latency chart reuses the same visual language as `RunLatencyChart` (red bars for failures, gray line for avg) but works on bucket aggregates instead of individual runs.
+
+**Deferred:** The detail page back-link always goes to `/status` (all tests), not back to the originating tag page. Could be improved with referrer tracking later.
+
+## 2026-05-14 · UI · Notification system UX overhaul
+
+**What was built:** Renamed "channels" to "notifications" throughout the UI and improved the UX for adding notifications to tests and tags. The native `<select>` pickers were replaced with custom inline popover lists that show color-coded type badges (indigo for Discord, emerald for Slack, zinc for webhook) alongside channel names. Notification pills in both the test editor and tag rules panel now show the type badge inline. The test editor empty state now links to the notifications page. The `/channels` route now redirects to `/notifications`.
+
+**Files changed:**
+- `apps/web/app/notifications/page.tsx` — new route (replaces `/channels`)
+- `apps/web/app/notifications/_components/channel-manager.tsx` — updated copy, color-coded `ChannelTypeBadge`
+- `apps/web/app/notifications/_components/tag-assignment-panel.tsx` — replaced `<select>` with `ChannelPicker`, improved pills, section renamed to "Tag Rules"
+- `apps/web/app/channels/page.tsx` — now a one-liner redirect to `/notifications`
+- `apps/web/app/page.tsx` — nav link updated to `/notifications`
+- `apps/web/app/tests/_components/test-editor.tsx` — label "NOTIFICATIONS", `NotificationPicker` + `NotificationTypeBadge` components added, improved pills and empty state
+
+**Decisions:** Type badges are color-coded by service (Discord=indigo, Slack=emerald, webhook=zinc) to allow visual scanning without reading text. The custom picker uses `mousedown` + ref-based click-away to dismiss — avoids native select styling inconsistencies. API routes remain unchanged (`/channels`, `/tests/:id/channels`, `/tags/:tag/channels`); only UI copy and routes changed.
+
+**Deferred:** The `_components/` files for the old `/channels` route (channel-manager.tsx, tag-assignment-panel.tsx) remain on disk but are no longer imported; can be deleted in a cleanup pass.
