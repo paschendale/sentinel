@@ -1,3 +1,11 @@
+# [1.12.0](https://github.com/territorial-dev/sentinel/compare/v1.11.1...v1.12.0) (2026-05-15)
+
+
+### Features
+
+* added compact test view ([039b7e7](https://github.com/territorial-dev/sentinel/commit/039b7e7a46df6cb0e840881560960474cc9e9f1c))
+* added detailed test view ([04fa4a9](https://github.com/territorial-dev/sentinel/commit/04fa4a95444ca6dbb8c2e627a96178154c7fc47b))
+
 ## [1.11.1](https://github.com/territorial-dev/sentinel/compare/v1.11.0...v1.11.1) (2026-05-09)
 
 
