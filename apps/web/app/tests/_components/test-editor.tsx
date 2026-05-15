@@ -3,13 +3,79 @@
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState, useEffect } from 'react'
-import type { Test, NotificationChannel } from '@sentinel/shared'
+import { useState, useEffect, useRef } from 'react'
+import type { Test, NotificationChannel, NotificationChannelType } from '@sentinel/shared'
 import { fetchWithAuth } from '../../../lib/auth-client'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+
+const TYPE_BADGE_STYLES: Record<NotificationChannelType, string> = {
+  discord: 'bg-indigo-950 text-indigo-400',
+  slack: 'bg-emerald-950 text-emerald-400',
+  webhook: 'bg-zinc-800 text-zinc-400',
+}
+
+function NotificationTypeBadge({ type }: { type: NotificationChannelType }) {
+  return (
+    <span className={`text-xs px-1.5 py-0.5 rounded-sm font-mono shrink-0 ${TYPE_BADGE_STYLES[type]}`}>
+      {type}
+    </span>
+  )
+}
+
+interface PickerProps {
+  options: NotificationChannel[]
+  onSelect: (id: string) => void
+  disabled?: boolean
+}
+
+function NotificationPicker({ options, onSelect, disabled }: PickerProps) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  if (options.length === 0) return null
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(o => !o)}
+        className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors disabled:opacity-50"
+      >
+        + add
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-10 bg-zinc-900 border border-zinc-800 min-w-44 shadow-lg">
+          {options.map(ch => (
+            <button
+              key={ch.id}
+              type="button"
+              onClick={() => { onSelect(ch.id); setOpen(false) }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+            >
+              <NotificationTypeBadge type={ch.type} />
+              {ch.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const DEFAULT_CODE = `const res = await ctx.http.get('https://example.com')
 ctx.assert('status ok', res.status === 200)
@@ -55,7 +121,6 @@ export default function TestEditor({ test }: Props) {
   const [runResult, setRunResult] = useState<RunResult | null>(null)
   const [availableChannels, setAvailableChannels] = useState<NotificationChannel[]>([])
   const [assignedChannelIds, setAssignedChannelIds] = useState<string[]>([])
-  const [channelPickerValue, setChannelPickerValue] = useState('')
 
   useEffect(() => {
     fetchWithAuth(`${API_URL}/channels`)
@@ -324,20 +389,21 @@ export default function TestEditor({ test }: Props) {
           )}
         </div>
 
-        {/* Channels */}
+        {/* Notifications */}
         <div>
-          <label className="block text-zinc-500 text-xs mb-1.5 tracking-wider uppercase">Channels</label>
+          <label className="block text-zinc-500 text-xs mb-1.5 tracking-wider uppercase">Notifications</label>
           {assignedChannelIds.length > 0 && (
             <div className="flex flex-wrap gap-1 mb-2">
               {assignedChannelIds.map(id => {
                 const ch = availableChannels.find(c => c.id === id)
                 return ch ? (
-                  <span key={id} className="flex items-center gap-1 text-xs px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded-sm">
+                  <span key={id} className="flex items-center gap-1.5 text-xs px-2 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-sm">
+                    <NotificationTypeBadge type={ch.type} />
                     {ch.name}
                     <button
                       type="button"
                       onClick={() => setAssignedChannelIds(prev => prev.filter(x => x !== id))}
-                      className="text-zinc-600 hover:text-zinc-300 leading-none"
+                      className="text-zinc-600 hover:text-zinc-300 leading-none ml-0.5"
                     >
                       ×
                     </button>
@@ -346,28 +412,17 @@ export default function TestEditor({ test }: Props) {
               })}
             </div>
           )}
-          {availableChannels.filter(c => !assignedChannelIds.includes(c.id)).length > 0 && (
-            <select
-              value={channelPickerValue}
-              onChange={e => {
-                const id = e.target.value
-                if (id) {
-                  setAssignedChannelIds(prev => [...prev, id])
-                  setChannelPickerValue('')
-                }
-              }}
-              className="w-full bg-zinc-900 border border-zinc-800 text-zinc-400 text-sm px-3 py-2 outline-none focus:border-zinc-600"
-            >
-              <option value="">+ add channel</option>
-              {availableChannels
-                .filter(c => !assignedChannelIds.includes(c.id))
-                .map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
-                ))}
-            </select>
-          )}
+          <NotificationPicker
+            options={availableChannels.filter(c => !assignedChannelIds.includes(c.id))}
+            onSelect={id => setAssignedChannelIds(prev => [...prev, id])}
+          />
           {availableChannels.length === 0 && (
-            <p className="text-zinc-600 text-xs">No channels configured.</p>
+            <p className="text-zinc-600 text-xs">
+              No notifications set up.{' '}
+              <Link href="/notifications" className="text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors">
+                Configure
+              </Link>
+            </p>
           )}
         </div>
 

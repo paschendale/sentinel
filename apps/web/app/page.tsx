@@ -40,7 +40,7 @@ export default async function DashboardPage({
           </div>
         <div className="flex items-center gap-6">
           <Link href="/status" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">status page</Link>
-          <Link href="/channels" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">channels</Link>
+          <Link href="/notifications" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">notifications</Link>
           <Link href="/tests/new" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">+ new test</Link>
         </div>
       </div>

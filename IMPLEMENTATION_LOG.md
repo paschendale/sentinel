@@ -757,3 +757,19 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Used CSS `group-hover` (Tailwind named group `group/card`) for the hover popover — avoids JS hover state and eliminates flicker when moving from card to popover since both are inside the same group div. A `pt-1.5` transparent bridge between card bottom and popover box keeps the group active during mouse movement. The latency chart reuses the same visual language as `RunLatencyChart` (red bars for failures, gray line for avg) but works on bucket aggregates instead of individual runs.
 
 **Deferred:** The detail page back-link always goes to `/status` (all tests), not back to the originating tag page. Could be improved with referrer tracking later.
+
+## 2026-05-14 · UI · Notification system UX overhaul
+
+**What was built:** Renamed "channels" to "notifications" throughout the UI and improved the UX for adding notifications to tests and tags. The native `<select>` pickers were replaced with custom inline popover lists that show color-coded type badges (indigo for Discord, emerald for Slack, zinc for webhook) alongside channel names. Notification pills in both the test editor and tag rules panel now show the type badge inline. The test editor empty state now links to the notifications page. The `/channels` route now redirects to `/notifications`.
+
+**Files changed:**
+- `apps/web/app/notifications/page.tsx` — new route (replaces `/channels`)
+- `apps/web/app/notifications/_components/channel-manager.tsx` — updated copy, color-coded `ChannelTypeBadge`
+- `apps/web/app/notifications/_components/tag-assignment-panel.tsx` — replaced `<select>` with `ChannelPicker`, improved pills, section renamed to "Tag Rules"
+- `apps/web/app/channels/page.tsx` — now a one-liner redirect to `/notifications`
+- `apps/web/app/page.tsx` — nav link updated to `/notifications`
+- `apps/web/app/tests/_components/test-editor.tsx` — label "NOTIFICATIONS", `NotificationPicker` + `NotificationTypeBadge` components added, improved pills and empty state
+
+**Decisions:** Type badges are color-coded by service (Discord=indigo, Slack=emerald, webhook=zinc) to allow visual scanning without reading text. The custom picker uses `mousedown` + ref-based click-away to dismiss — avoids native select styling inconsistencies. API routes remain unchanged (`/channels`, `/tests/:id/channels`, `/tags/:tag/channels`); only UI copy and routes changed.
+
+**Deferred:** The `_components/` files for the old `/channels` route (channel-manager.tsx, tag-assignment-panel.tsx) remain on disk but are no longer imported; can be deleted in a cleanup pass.
