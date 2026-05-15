@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/territorial-dev/sentinel/compare/v1.13.0...v1.14.0) (2026-05-15)
+
+
+### Features
+
+* **web:** auto-refresh status pages every 60 seconds ([29b9274](https://github.com/territorial-dev/sentinel/commit/29b9274f44329dfce1bad7b8309d4e857598a925))
+
 # [1.13.0](https://github.com/territorial-dev/sentinel/compare/v1.12.0...v1.13.0) (2026-05-15)
 
 
