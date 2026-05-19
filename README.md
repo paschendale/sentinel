@@ -415,3 +415,24 @@ curl -s -X POST \
 - [Architecture](docs/ARCHITECTURE.md)
 - [Domain Model](docs/DOMAINS.md)
 - [Repository Structure](docs/REPOSITORY.md)
+
+--- 
+
+## License
+
+Sentinel is dual-licensed:
+
+- Open Source: GNU Affero General Public License v3 (AGPL v3)
+- Commercial: Proprietary commercial license available
+
+The AGPL license allows free use, modification, and self-hosting, provided AGPL obligations are respected.
+
+Organizations that want to use Sentinel in proprietary, closed-source, or commercial SaaS environments without AGPL obligations must obtain a commercial license.
+
+See:
+- `LICENSE`
+- `LICENSE-COMMERCIAL.md`
+
+Commercial licensing contact:
+
+victor@territorial.dev
