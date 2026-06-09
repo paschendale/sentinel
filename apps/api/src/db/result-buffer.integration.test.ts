@@ -1,18 +1,33 @@
 /**
  * Integration tests for result-buffer — hits real Postgres.
  *
- * Requires DATABASE_URL to be set (reads from .env via global-setup.ts).
+ * Requires DATABASE_URL pointing to a reachable Postgres instance
+ * (reads from .env via global-setup.ts, or set directly in environment).
  * Creates a temporary test row for use as test_id (test_runs has a real FK).
  * Cleans up via CASCADE on delete in afterAll.
+ * Skips gracefully when no reachable database is available.
  */
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
 import pg from 'pg'
 import { enqueue, flush, startFlusher, stopFlusher } from './result-buffer.js'
 
 const DATABASE_URL = process.env['DATABASE_URL']
-if (!DATABASE_URL) throw new Error('DATABASE_URL is required for integration tests')
 
-const client = new pg.Client({ connectionString: DATABASE_URL })
+async function checkDbAvailable(): Promise<boolean> {
+  if (!DATABASE_URL) return false
+  const probe = new pg.Client({ connectionString: DATABASE_URL, connectionTimeoutMillis: 2000 })
+  try {
+    await probe.connect()
+    await probe.end()
+    return true
+  } catch {
+    return false
+  }
+}
+
+const dbAvailable = await checkDbAvailable()
+
+const client = new pg.Client({ connectionString: DATABASE_URL! })
 let TEST_ID: string
 
 beforeAll(async () => {
@@ -64,7 +79,7 @@ function makeResult(overrides: {
   }
 }
 
-describe('result-buffer integration', () => {
+describe.skipIf(!dbAvailable)('result-buffer integration', () => {
   it('persists a test_run row to Postgres after flush', async () => {
     const result = makeResult({ id: 'integ-run-single' })
     enqueue(result)
