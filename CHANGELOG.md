@@ -1,3 +1,10 @@
+## [1.14.1](https://github.com/paschendale/sentinel/compare/v1.14.0...v1.14.1) (2026-06-09)
+
+
+### Bug Fixes
+
+* **db:** ensure test_runs partitions exist at deploy time and startup ([f04f636](https://github.com/paschendale/sentinel/commit/f04f636e9e441a6da979d0c6c77395ce9cff96d0))
+
 # [1.14.0](https://github.com/territorial-dev/sentinel/compare/v1.13.0...v1.14.0) (2026-05-15)
 
 
