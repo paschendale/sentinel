@@ -3,6 +3,19 @@
 A running record of what was built and why. Append-only — do not edit past entries.
 AI agents must append an entry here after completing any feature from PROJECT.md.
 
+## 2026-06-09 · Bugfix · Fix missing test_runs partition on deploy
+
+**What was built:** Added migration `013_ensure_current_partitions.sql` that creates `test_runs` monthly partitions for the current month + next 3 months at deploy time. Extracted `ensurePartitions()` as an exported function in `aggregator.ts` and awaited it in `index.ts` before `startScheduler()` so partitions are guaranteed to exist before any test results are written.
+
+**Files changed:**
+- `apps/api/src/db/migrations/013_ensure_current_partitions.sql` — new migration
+- `apps/api/src/db/aggregator.ts` — extracted `ensurePartitions()`, called from `runAggregation()`
+- `apps/api/src/index.ts` — `await ensurePartitions()` added between `migrate()` and `startScheduler()`
+
+**Decisions:** The original `001_initial_schema.sql` creates partitions once at first-deploy using `NOW()`, which means long-running instances lose coverage as months pass. The daily aggregator was supposed to cover this but its `ensure_partitions` step silently swallowed errors. The fix has two layers: a migration that runs at every deploy to fix the gap immediately, and a blocking startup call that prevents the scheduler from starting until partitions exist.
+
+**Deferred:** Nothing.
+
 ## 2026-04-01 · API · Readable test + scheduler log lines
 
 **What was built:** Default local API runs now use `pino-pretty` (via `LOG_PRETTY`, on by default when `NODE_ENV` is not `production`) so test lifecycle, `ctx.log`, HTTP steps, and completion lines are readable in the terminal instead of opaque JSON. Executor log `msg` strings include `test_id`, `run_id`, trigger, HTTP summaries, and pass/fail/timeout with duration and assertion counts. Added `NODE_ENV` / `LOG_PRETTY` to config; Vitest forces `LOG_PRETTY=false`. Added `pino-pretty` as an API devDependency and documented it in `ARCHITECTURE.md`. Scheduler messages include `test_id` in the human-readable line.

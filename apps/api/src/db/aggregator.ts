@@ -3,7 +3,7 @@ import { logger } from '../logger.js'
 import { pool } from './pool.js'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-const FUTURE_PARTITIONS_TO_CREATE = 2
+export const FUTURE_PARTITIONS_TO_CREATE = 2
 
 let timeoutHandle: ReturnType<typeof setTimeout> | null = null
 let intervalHandle: ReturnType<typeof setInterval> | null = null
@@ -12,6 +12,24 @@ function msUntilMidnightUTC(): number {
   const now = new Date()
   const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
   return midnight.getTime() - now.getTime()
+}
+
+export async function ensurePartitions(): Promise<void> {
+  const now = new Date()
+  const firstOfCurrentMonthUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  const ensured: string[] = []
+  for (let i = 0; i <= FUTURE_PARTITIONS_TO_CREATE; i++) {
+    const start = new Date(Date.UTC(firstOfCurrentMonthUtc.getUTCFullYear(), firstOfCurrentMonthUtc.getUTCMonth() + i, 1))
+    const end = new Date(Date.UTC(firstOfCurrentMonthUtc.getUTCFullYear(), firstOfCurrentMonthUtc.getUTCMonth() + i + 1, 1))
+    const year = start.getUTCFullYear()
+    const month = String(start.getUTCMonth() + 1).padStart(2, '0')
+    const tableName = `test_runs_${year}_${month}`
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS ${tableName} PARTITION OF test_runs FOR VALUES FROM ('${start.toISOString()}') TO ('${end.toISOString()}')`,
+    )
+    ensured.push(tableName)
+  }
+  logger.info({ event: 'aggregator.ensure_partitions', partitions: ensured }, 'aggregator ensured monthly partitions')
 }
 
 export function startAggregator(): void {
@@ -126,20 +144,7 @@ export async function runAggregation(): Promise<void> {
   }
 
   try {
-    const firstOfCurrentMonthUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-    const ensured: string[] = []
-    for (let i = 0; i <= FUTURE_PARTITIONS_TO_CREATE; i++) {
-      const start = new Date(Date.UTC(firstOfCurrentMonthUtc.getUTCFullYear(), firstOfCurrentMonthUtc.getUTCMonth() + i, 1))
-      const end = new Date(Date.UTC(firstOfCurrentMonthUtc.getUTCFullYear(), firstOfCurrentMonthUtc.getUTCMonth() + i + 1, 1))
-      const year = start.getUTCFullYear()
-      const month = String(start.getUTCMonth() + 1).padStart(2, '0')
-      const tableName = `test_runs_${year}_${month}`
-      await pool.query(
-        `CREATE TABLE IF NOT EXISTS ${tableName} PARTITION OF test_runs FOR VALUES FROM ('${start.toISOString()}') TO ('${end.toISOString()}')`,
-      )
-      ensured.push(tableName)
-    }
-    logger.info({ event: 'aggregator.ensure_partitions', partitions: ensured }, 'aggregator ensured monthly partitions')
+    await ensurePartitions()
   } catch (err) {
     logger.error({ event: 'aggregator.ensure_partitions_failed', err }, 'aggregator failed to ensure future partitions')
   }
