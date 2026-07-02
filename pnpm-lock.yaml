@@ -38,6 +38,9 @@ importers:
       '@sentinel/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      basic-ftp:
+        specifier: ^6.0.1
+        version: 6.0.1
       fastify:
         specifier: ^5.0.0
         version: 5.8.4
@@ -1239,6 +1242,10 @@ packages:
     resolution: {integrity: sha512-sUoJ3IMxx4AyRqO4MLeHlnGDkyXRoUG0/AI9fjK+vS72ekpV0yWVY7O0BVjmBcRtkNcsAO2QDZ4tdKKGoI6YaQ==}
     engines: {node: '>=6.0.0'}
     hasBin: true
+
+  basic-ftp@6.0.1:
+    resolution: {integrity: sha512-3ilxa3n4276wGQp/ImRAuz4ALdsj/2Wd3FqoZBZlajDYnByCZ0JMb4+26Rde0wGXIbM0G2HWSfr/Fi8b21KX8g==}
+    engines: {node: '>=10.0.0'}
 
   before-after-hook@4.0.0:
     resolution: {integrity: sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==}
@@ -4126,6 +4133,8 @@ snapshots:
       fastq: 1.20.1
 
   baseline-browser-mapping@2.10.10: {}
+
+  basic-ftp@6.0.1: {}
 
   before-after-hook@4.0.0: {}
 

@@ -58,8 +58,8 @@ pnpm workspaces manage the monorepo.
 ### Test Execution Engine
 - User test code compiled **once on save** via `new Function('ctx', code)` and cached in memory
 - Execution: `Promise.race([compiledFn(ctx), timeout(ms)])` — hard kill after timeout
-- `ctx` object exposes only: `ctx.http`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
-- No filesystem access, no arbitrary network calls from user code
+- `ctx` object exposes only: `ctx.http`, `ctx.ftp`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
+- No filesystem access from user code — `ctx.ftp.get` downloads to a server-managed temp file internally, but user code only ever sees the returned string body, never a path
 - Tests must return a boolean (`true` = pass, `false`/throw = fail)
 
 ### Notification Pipeline
@@ -134,6 +134,7 @@ pnpm workspaces manage the monorepo.
 | Package | Purpose |
 |---------|---------|
 | `fastify` | HTTP API server |
+| `basic-ftp` | FTP client for `ctx.ftp` probes (zero runtime deps, no native bindings) |
 | `undici` | Outbound HTTP with connection pooling |
 | `pg` | PostgreSQL client |
 | `p-limit` | Concurrency control |
