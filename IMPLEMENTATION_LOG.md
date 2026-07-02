@@ -3,6 +3,31 @@
 A running record of what was built and why. Append-only — do not edit past entries.
 AI agents must append an entry here after completing any feature from PROJECT.md.
 
+## 2026-07-02 · Secrets · Encrypted secret store (`ctx.secrets.NAME`)
+
+**What was built:** A global, write-only secret store. Admins register named secrets (`API_KEY` → value) via a new `/secrets` dashboard page or the `POST /secrets` API; values are encrypted at rest (AES-256-GCM via `node:crypto`) and are never returned by any API response after creation — only `create`, `rotate` (submit a new value), `delete`, and metadata `list`/`status` are exposed. Test code reads them as `ctx.secrets.API_KEY` (a plain object, not a function). Secrets are decrypted once into an in-memory cache warmed at boot and refreshed synchronously on every write, so the executor's per-test-run hot path (`run.ts`/`buildCtx`) never touches the DB or does crypto — matching how `compile.ts` already caches compiled test functions.
+
+`SECRETS_ENCRYPTION_KEY` is **optional**, not required — a new required env var would break existing deployments on upgrade. If unset, secrets are stored unencrypted (still fully functional via `ctx.secrets`); the `/secrets` page shows a persistent warning banner in that case. The stored blob is version-tagged with a 1-byte mode prefix (`0x00` plaintext / `0x01` AES-256-GCM) so plaintext and encrypted secrets can coexist across a key being added later.
+
+**Files changed:**
+- `apps/api/src/db/migrations/015_secrets.sql` — new `secrets` table (`id`, `name` UNIQUE + CHECK for `UPPER_SNAKE_CASE`, `value_blob` bytea, timestamps)
+- `apps/api/src/config.ts` — optional `SECRETS_ENCRYPTION_KEY`, fails fast only if set-but-malformed
+- `apps/api/src/crypto/secret-cipher.ts` (+ `.test.ts`) — `encryptSecret`/`decryptSecret`/`isEncryptionConfigured`, version-tagged blob format
+- `apps/api/src/db/queries/secrets.ts` — `createSecret`, `rotateSecretValue`, `deleteSecret`, `listSecretsMetadata`, `listAllDecryptedSecrets`
+- `apps/api/src/executor/secrets-cache.ts` — in-memory `warmSecretsCache`/`getSecretsSnapshot`, warmed in `index.ts` before the server starts accepting traffic
+- `apps/api/src/executor/ctx.ts`, `apps/api/src/executor/run.ts` — `TestContext.secrets`, wired from the cache snapshot into every `buildCtx` call
+- `apps/api/src/routes/secrets.ts` (registered in `server.ts`) — `GET /secrets`, `GET /secrets/status`, `POST /secrets`, `POST /secrets/:id/rotate`, `DELETE /secrets/:id`
+- `packages/shared/src/types.ts`, `schemas.ts` — `Secret` type (no `value` field, ever), `CreateSecretSchema`, `RotateSecretSchema`
+- `apps/web/app/secrets/page.tsx`, `apps/web/app/secrets/_components/secret-manager.tsx` — dashboard page mirroring `notifications/`'s channel-manager pattern; nav links added to `apps/web/app/page.tsx` and `apps/web/app/notifications/page.tsx`
+
+**Decisions:**
+- Single combined `value_blob` bytea column (mode byte + payload) rather than separate ciphertext/iv/tag columns — the pieces are never queried independently.
+- Rotate is a dedicated `POST /secrets/:id/rotate`, not `PATCH /secrets/:id` — a secret's `name` is immutable (it's the literal `ctx.secrets` key; renaming would silently break test code), so only `value` is ever mutable and a generic PATCH would be ambiguous.
+- Found during live verification (Docker Postgres + real API boot, not just unit tests): if a secret was encrypted while the key was set and the key is later removed/changed, the original design let `decryptSecret`'s error propagate uncaught through `warmSecretsCache()` at startup — crashing the **entire process**, taking down all monitoring over one bad secret. Fixed in `listAllDecryptedSecrets` to catch per-row decrypt failures, log loudly (`secrets.decrypt_failed`), and skip just that secret (`ctx.secrets.NAME` reads `undefined` for it) while the rest of the app boots normally.
+- Secrets are global (no per-test scoping/`channel_assignments`-style join) — the whole app is single-tenant with one shared admin JWT and no `user_id` anywhere, so per-test assignment would be unrequested complexity.
+
+**Deferred:** Automatic re-encryption sweep for secrets created while the key was unset (stay plaintext until individually rotated); key-rotation tooling for `SECRETS_ENCRYPTION_KEY` itself; per-secret "is this one currently encrypted?" UI indicator (only the server-wide banner exists); "used by N tests" usage tracking; viewing an existing secret's value post-creation (explicitly write-only per product decision).
+
 ## 2026-06-09 · Bugfix · Fix missing test_runs partition on deploy
 
 **What was built:** Added migration `013_ensure_current_partitions.sql` that creates `test_runs` monthly partitions for the current month + next 3 months at deploy time. Extracted `ensurePartitions()` as an exported function in `aggregator.ts` and awaited it in `index.ts` before `startScheduler()` so partitions are guaranteed to exist before any test results are written.
