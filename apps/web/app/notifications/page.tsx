@@ -63,6 +63,7 @@ export default async function NotificationsPage() {
         <div className="flex items-center gap-6">
           <Link href="/status" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">status page</Link>
           <Link href="/notifications" className="text-zinc-300 text-sm">notifications</Link>
+          <Link href="/secrets" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">secrets</Link>
           <Link href="/tests/new" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">+ new test</Link>
         </div>
       </div>
