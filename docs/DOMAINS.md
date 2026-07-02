@@ -169,6 +169,10 @@ interface TestContext {
     ls(url: string, options?: FtpOptions): Promise<FtpEntry[]>
     get(url: string, options?: FtpOptions): Promise<FtpDownloadResult>
   }
+  s3: {
+    get(url: string, options: S3Options): Promise<HttpResponse>
+    head(url: string, options: S3Options): Promise<HttpResponse>
+  }
   assert: (name: string, value: boolean, message?: string) => void
   warn: (message: string) => void
   log: (message: string) => void
@@ -208,6 +212,14 @@ interface FtpOptions {
   secure?: boolean   // FTPS (explicit TLS), default false
   timeout?: number    // per-connection socket timeout, ms
 }
+
+interface S3Options {
+  accessKey: string
+  secretKey: string
+  region: string
+  sessionToken?: string           // for temporary/STS credentials
+  headers?: Record<string, string> // extra headers (e.g. Range) — included in the SigV4 signature
+}
 ```
 
 **Method behaviour:**
@@ -216,5 +228,6 @@ interface FtpOptions {
 - `ctx.log(message)` — emits a message to the run log; has no effect on status
 - `ctx.http` routes through undici with the test's timeout enforced
 - `ctx.ftp.ls`/`ctx.ftp.get` route through `basic-ftp`; `url` is a full `ftp://[user:pass@]host[:port]/path`. `get` downloads to a server-managed temp file (`FTP_TEMP_DIR`), reads it into `body`, and deletes it before returning — the file never outlives the call. Downloads are capped by `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) and aborted if exceeded. A periodic sweep job deletes any orphaned temp file older than `FTP_TEMP_MAX_AGE_MS` as a backstop for crash/timeout edge cases. User code never sees a file path — only the returned string body.
+- `ctx.s3.get`/`ctx.s3.head` sign the request with AWS Signature Version 4, hand-rolled with `node:crypto` (no AWS SDK — see Approved Dependencies) using the supplied `accessKey`/`secretKey`/`region` (and `sessionToken` if given). `url` is the full object URL — virtual-hosted-style (`https://bucket.s3.region.amazonaws.com/key`), path-style, or any S3-compatible endpoint (MinIO, R2, etc.) all work the same way since signing is derived entirely from the URL's host/path/query. `options.headers` (e.g. `Range`) are included in the signature. `ctx.s3.head` has no response body and routes through the same in-memory undici client as `ctx.http`. `ctx.s3.get` downloads through the *same* server-managed temp file mechanism as `ctx.ftp.get` — same directory (`FTP_TEMP_DIR`), same size cap (`FTP_MAX_DOWNLOAD_BYTES`), same periodic sweep backstop (`FTP_TEMP_MAX_AGE_MS`) — rather than buffering the object in memory; the file is deleted before returning, and user code never sees a path, only the returned string `body`. Both methods return the same `HttpResponse` shape as `ctx.http`. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL, thrown before any network call), `code: 'S3_FETCH_ERROR'` (the underlying request failed), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (download exceeded `FTP_MAX_DOWNLOAD_BYTES`, aborted mid-transfer).
 - `ctx.secrets` is a plain, frozen object (not a getter/method) mapping every `Secret.name` to its decrypted value — accessing a name that doesn't exist yields `undefined`, same as any missing object property; it never throws. It's backed by an in-memory cache (`apps/api/src/executor/secrets-cache.ts`) decrypted once at process startup and refreshed synchronously on every secret create/rotate/delete, so building `ctx` never queries the database or does crypto on the test-execution hot path.
 - No `ctx.fs`, no `ctx.exec`, no `require()`, no `import`
