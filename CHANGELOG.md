@@ -1,3 +1,14 @@
+# [1.17.0](https://github.com/paschendale/sentinel/compare/v1.16.0...v1.17.0) (2026-07-02)
+
+
+### Features
+
+* **db:** remove timeout_ms hard cap, enforce timeout/schedule margin ([1e7f9f5](https://github.com/paschendale/sentinel/commit/1e7f9f5361ec227fd6233b3065b3a00171c1a2c4))
+* **executor:** add ctx.ftp.ls and ctx.ftp.get for FTP probes ([394d87b](https://github.com/paschendale/sentinel/commit/394d87b66f6128e037ef0c3ee08f46b602369e7c))
+* **executor:** sweep orphaned FTP temp files periodically ([9a74bd7](https://github.com/paschendale/sentinel/commit/9a74bd78e698c0826162476e37406efccafe5d74))
+* **scheduler:** prevent overlapping runs of the same test ([6726de1](https://github.com/paschendale/sentinel/commit/6726de1978ceddc5afa422795a85d3cb634a9ead))
+* **web:** update test editor for uncapped timeout with margin validation ([17ee820](https://github.com/paschendale/sentinel/commit/17ee820ca54b3a35b54fbf571b606faf40ce976e))
+
 # [1.16.0](https://github.com/paschendale/sentinel/compare/v1.15.0...v1.16.0) (2026-07-02)
 
 
