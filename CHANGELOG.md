@@ -1,3 +1,18 @@
+# [1.18.0](https://github.com/paschendale/sentinel/compare/v1.17.0...v1.18.0) (2026-07-02)
+
+
+### Features
+
+* **api:** add AES-256-GCM secret-cipher crypto module ([9935179](https://github.com/paschendale/sentinel/commit/99351796c3f151e1b847f12e2a1051a20a6ef3db))
+* **api:** add optional SECRETS_ENCRYPTION_KEY config ([8a1554d](https://github.com/paschendale/sentinel/commit/8a1554db43acd5b4a4f23ee74a4d121c5ede2f97))
+* **api:** add secrets CRUD routes ([5043607](https://github.com/paschendale/sentinel/commit/5043607255c420628692bfdfcf9e0d650838af7e))
+* **db:** add secrets query layer ([9c9ec4e](https://github.com/paschendale/sentinel/commit/9c9ec4e9691afca5b3569a104ae59b9b231259a4))
+* **db:** add secrets table migration ([b85af52](https://github.com/paschendale/sentinel/commit/b85af52b3485b916b2cf6439993d611a2c720826))
+* **executor:** add in-memory secrets cache warmed at startup ([c4f1a47](https://github.com/paschendale/sentinel/commit/c4f1a47c6cefb0c0f6abc3f7158b05f9c0f3eef8))
+* **executor:** expose ctx.secrets in test context ([f87daab](https://github.com/paschendale/sentinel/commit/f87daabdf8ca226deb10c2e521e3e6effc7a0e00))
+* **shared:** add Secret type and secret CRUD schemas ([0266da4](https://github.com/paschendale/sentinel/commit/0266da456077e7bd3d38096fb27e3f201341ad87))
+* **web:** add secrets management page ([26f661d](https://github.com/paschendale/sentinel/commit/26f661d5a6f142b2d6b801464e3b9f314652829a))
+
 # [1.17.0](https://github.com/paschendale/sentinel/compare/v1.16.0...v1.17.0) (2026-07-02)
 
 
