@@ -180,6 +180,22 @@ When hovering a status box, a small panel should show: - the ammount of tests in
 
 ---
 
+### ✅ F-24 · FTP Probe Support
+
+Add `ctx.ftp.ls(url, options?)` and `ctx.ftp.get(url, options?)` to the test `ctx` API, using `basic-ftp` (zero runtime deps). `ls` returns directory listings (`{ name, type, size, modifiedAt }[]`); `get` downloads a file and returns `{ body, size }`. Downloads are written to a server-managed temp file, read, and deleted before the call returns — files are never persisted past the test run. Capped by `FTP_MAX_DOWNLOAD_BYTES` (default 5MB); a periodic sweep job cleans up any orphaned temp file as a backstop for crashes/timeouts.
+
+**Done when:** a test can `ctx.ftp.ls`/`ctx.ftp.get` against a real FTP server, and no file remains under `FTP_TEMP_DIR` after the run completes (normal or error path).
+
+---
+
+### ✅ F-25 · Configurable Test Timeout
+
+Remove the flat 10-second `timeout_ms` cap. Replace it with a relative rule: `timeout_ms <= schedule_ms * 0.8`, enforced in the Zod schema (create), a Postgres `CHECK` constraint (create + update), and the test editor UI. Added a per-test overlap guard in the scheduler so two scheduler-triggered runs of the same test can never be in flight simultaneously, since timeout can now approach the test's own interval.
+
+**Done when:** creating a test with `timeout_ms` close to or exceeding 80% of `schedule_ms` is rejected (API and UI); a test whose run takes longer than its own interval logs a skip instead of overlapping.
+
+---
+
 ## Maintenance Tasks
 
 ### ✅ M-01 · Semantic Release

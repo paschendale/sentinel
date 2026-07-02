@@ -11,7 +11,7 @@ The central entity. Represents a user-defined monitoring check.
 | `name` | `string` | Human-readable label |
 | `code` | `string` | JavaScript function body — must return boolean |
 | `schedule_ms` | `number` | Run interval in milliseconds (minimum: 30,000) |
-| `timeout_ms` | `number` | Max execution time per run (maximum: 10,000) |
+| `timeout_ms` | `number` | Max execution time per run (minimum: 1,000; must be ≤ 80% of `schedule_ms`) |
 | `retries` | `number` | Reserved retry budget per check (currently not applied by executor; each scheduled run records a single final outcome) |
 | `uses_browser` | `boolean` | Whether this test uses Playwright (opt-in, default false) |
 | `enabled` | `boolean` | Whether the scheduler should run this test |
@@ -20,7 +20,7 @@ The central entity. Represents a user-defined monitoring check.
 
 **Invariants:**
 - `schedule_ms >= 30000` — minimum 30-second interval
-- `timeout_ms <= 10000` — hard cap at 10 seconds
+- `timeout_ms >= 1000` and `timeout_ms <= schedule_ms * 0.8` — no flat cap, but a run's timeout budget may never approach its own interval, so the scheduler can't end up with two overlapping runs of the same test (enforced in the Zod schema on create, and as a Postgres `CHECK` constraint on both create and update — see `apps/api/src/scheduler/index.ts` for the runtime overlap guard that backs this up)
 - `code` must compile without error before saving
 - `code` must be a function body that returns a boolean
 
@@ -142,6 +142,10 @@ interface TestContext {
     get(url: string, options?: RequestOptions): Promise<HttpResponse>
     post(url: string, body: unknown, options?: RequestOptions): Promise<HttpResponse>
   }
+  ftp: {
+    ls(url: string, options?: FtpOptions): Promise<FtpEntry[]>
+    get(url: string, options?: FtpOptions): Promise<FtpDownloadResult>
+  }
   assert: (name: string, value: boolean, message?: string) => void
   warn: (message: string) => void
   log: (message: string) => void
@@ -161,6 +165,25 @@ interface RequestOptions {
   timeout?: number
   redirect?: 'follow' | 'manual' | 'error'
 }
+
+interface FtpEntry {
+  name: string
+  type: 'file' | 'directory' | 'unknown'
+  size: number
+  modifiedAt: Date | null
+}
+
+interface FtpDownloadResult {
+  body: string
+  size: number
+}
+
+interface FtpOptions {
+  user?: string
+  password?: string
+  secure?: boolean   // FTPS (explicit TLS), default false
+  timeout?: number    // per-connection socket timeout, ms
+}
 ```
 
 **Method behaviour:**
@@ -168,4 +191,5 @@ interface RequestOptions {
 - `ctx.warn(message)` — records a warning message and emits it to the run log; does **not** throw; if any warns were recorded when the test returns, status becomes `'warn'` and `error_message` holds all messages joined by `'; '`
 - `ctx.log(message)` — emits a message to the run log; has no effect on status
 - `ctx.http` routes through undici with the test's timeout enforced
+- `ctx.ftp.ls`/`ctx.ftp.get` route through `basic-ftp`; `url` is a full `ftp://[user:pass@]host[:port]/path`. `get` downloads to a server-managed temp file (`FTP_TEMP_DIR`), reads it into `body`, and deletes it before returning — the file never outlives the call. Downloads are capped by `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) and aborted if exceeded. A periodic sweep job deletes any orphaned temp file older than `FTP_TEMP_MAX_AGE_MS` as a backstop for crash/timeout edge cases. User code never sees a file path — only the returned string body.
 - No `ctx.fs`, no `ctx.exec`, no `require()`, no `import`
