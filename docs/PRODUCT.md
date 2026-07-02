@@ -21,6 +21,7 @@ Neither tool is built for developers who want to write actual test logic.
 - Executes **up to 500 tests/minute** concurrently with strict resource limits
 - Stores **30 days of uptime history** (7-day raw, 30-day aggregated)
 - Delivers **state-change alerts** to Discord, Slack, or any webhook
+- Keeps credentials out of test code via an **encrypted secret store** (`ctx.secrets.NAME`), write-only after creation
 - Exposes a **Prometheus metrics endpoint** for existing observability stacks
 - Serves **public read-only status pages** built from aggregated data
 

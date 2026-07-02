@@ -58,9 +58,16 @@ pnpm workspaces manage the monorepo.
 ### Test Execution Engine
 - User test code compiled **once on save** via `new Function('ctx', code)` and cached in memory
 - Execution: `Promise.race([compiledFn(ctx), timeout(ms)])` — hard kill after timeout
-- `ctx` object exposes only: `ctx.http`, `ctx.ftp`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
+- `ctx` object exposes only: `ctx.http`, `ctx.ftp`, `ctx.secrets`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
 - No filesystem access from user code — `ctx.ftp.get` downloads to a server-managed temp file internally, but user code only ever sees the returned string body, never a path
 - Tests must return a boolean (`true` = pass, `false`/throw = fail)
+
+### Secret Store
+- Global, write-only key-value store for credentials referenced in test code as `ctx.secrets.NAME` — keeps API keys out of `tests.code` and the Monaco editor history
+- Values encrypted at rest with AES-256-GCM (`node:crypto`, no new dependency) under an **optional** `SECRETS_ENCRYPTION_KEY` env var — optional because a newly-required env var would break existing deployments on upgrade; if unset, values are stored unencrypted and the `/secrets` dashboard page shows a warning banner
+- Stored as a version-tagged blob (mode byte + payload) so plaintext and encrypted secrets coexist across a key being configured later; secrets aren't bulk re-encrypted when the key changes — only on individual rotation
+- Decrypted once into an in-memory cache at startup (`apps/api/src/executor/secrets-cache.ts`), refreshed synchronously on every create/rotate/delete — `ctx.secrets` is a synchronous object read with no DB query or crypto on the test-execution hot path, mirroring how compiled test functions are cached rather than recompiled per run
+- A single undecryptable secret (e.g. the key was changed after that secret was encrypted) is logged and excluded from the cache rather than crashing the process — one bad secret must never take the whole scheduler down
 
 ### Notification Pipeline
 - Event-driven: `testFailed → notifier → channels`
