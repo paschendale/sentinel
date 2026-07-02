@@ -296,6 +296,43 @@ ctx.assert('name matches', fetch.json().name === 'Test User')
 return create.status === 201 && fetch.status === 200
 ```
 
+**FTP directory listing:**
+
+```js
+const entries = await ctx.ftp.ls('ftp://demo:password@test.rebex.net/')
+ctx.log(`Found ${entries.length} entries`)
+for (const e of entries) { ctx.log(`${e.type} ${e.name} (${e.size} bytes)`) }
+ctx.assert('has entries', entries.length > 0)
+return entries.length > 0
+```
+
+**FTP file download and check:**
+
+```js
+const file = await ctx.ftp.get('ftp://demo:password@test.rebex.net/readme.txt')
+ctx.log(`Downloaded ${file.size} bytes`)
+ctx.assert('file not empty', file.size > 0)
+ctx.assert('body is string', typeof file.body === 'string')
+return file.size > 0
+```
+
+**FTP error handling:**
+
+```js
+let caught = null
+try {
+  await ctx.ftp.get('ftp://demo:password@test.rebex.net/does-not-exist.txt')
+} catch (err) {
+  caught = err
+}
+ctx.log(`caught: ${caught ? caught.code : 'nothing'}`)
+ctx.assert('error was thrown', caught !== null)
+ctx.assert('error code is FTP_DOWNLOAD_ERROR', caught && caught.code === 'FTP_DOWNLOAD_ERROR')
+return caught !== null && caught.code === 'FTP_DOWNLOAD_ERROR'
+```
+
+All three examples above run as-is against [test.rebex.net](https://test.rebex.net), a public read-only FTP server Rebex maintains specifically for testing FTP clients — useful for trying out `ctx.ftp` before pointing it at your own server.
+
 ### Scheduling & Timeouts
 
 When creating a test, configure:
