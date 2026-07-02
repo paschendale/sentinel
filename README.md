@@ -67,6 +67,8 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `LOG_LEVEL` | No | Pino log level for the API process (`trace` … `fatal`; default: `info`) |
 | `LOG_PRETTY` | No | When `true`, print human-readable lines instead of JSON (default: `true` except when `NODE_ENV=production`) |
 | `NODE_ENV` | No | Set to `production` in deployment for JSON logs and `LOG_PRETTY` default off |
+| `FTP_TEMP_DIR` | No | Directory `ctx.ftp.get` writes temp downloads to (default: OS temp dir + `sentinel-ftp`) |
+| `FTP_MAX_DOWNLOAD_BYTES` | No | Max bytes `ctx.ftp.get` will download before aborting (default: `5242880`, 5MB) |
 
 ### Single Container (no Compose)
 
@@ -187,6 +189,28 @@ ctx.assert('reachable', res.status >= 200 && res.status < 400)
 
 When `redirect: 'follow'` is used and a redirect loop is detected, Sentinel throws `HttpRequestError` with code `HTTP_REDIRECT_ERROR`.
 
+#### `ctx.ftp` — FTP client
+
+```js
+const entries = await ctx.ftp.ls('ftp://user:pass@ftp.example.com/incoming')
+ctx.assert('has files', entries.length > 0)
+
+const file = await ctx.ftp.get('ftp://user:pass@ftp.example.com/incoming/daily.csv')
+// file.body → string (file contents, decoded as utf-8)
+// file.size → number (bytes)
+ctx.assert('file not empty', file.size > 0)
+```
+
+`ctx.ftp.ls(url, options?)` returns `{ name, type, size, modifiedAt }[]` for the directory at `url`. `ctx.ftp.get(url, options?)` downloads a file and returns `{ body, size }`.
+
+`ctx.ftp` options:
+
+- `user` / `password` — override credentials embedded in the URL (defaults: `anonymous` / `guest`)
+- `secure` — use FTPS (explicit TLS), default `false`
+- `timeout` — connection socket timeout in milliseconds, defaults to the test's own `timeout_ms`
+
+**Downloads are never persisted.** `ctx.ftp.get` streams the remote file into a server-managed temp file, reads it into memory, and deletes it before the call returns — your test only ever sees the string `body`, never a path. Downloads larger than `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) are aborted with an `FTP_SIZE_LIMIT_ERROR`. A periodic background sweep also removes any leftover temp file older than 15 minutes, as a backstop for crashes or timed-out runs.
+
 #### `ctx.assert(name, value, message?)` — Named assertions
 
 Record individual assertion results attached to the test run:
@@ -272,6 +296,43 @@ ctx.assert('name matches', fetch.json().name === 'Test User')
 return create.status === 201 && fetch.status === 200
 ```
 
+**FTP directory listing:**
+
+```js
+const entries = await ctx.ftp.ls('ftp://demo:password@test.rebex.net/')
+ctx.log(`Found ${entries.length} entries`)
+for (const e of entries) { ctx.log(`${e.type} ${e.name} (${e.size} bytes)`) }
+ctx.assert('has entries', entries.length > 0)
+return entries.length > 0
+```
+
+**FTP file download and check:**
+
+```js
+const file = await ctx.ftp.get('ftp://demo:password@test.rebex.net/readme.txt')
+ctx.log(`Downloaded ${file.size} bytes`)
+ctx.assert('file not empty', file.size > 0)
+ctx.assert('body is string', typeof file.body === 'string')
+return file.size > 0
+```
+
+**FTP error handling:**
+
+```js
+let caught = null
+try {
+  await ctx.ftp.get('ftp://demo:password@test.rebex.net/does-not-exist.txt')
+} catch (err) {
+  caught = err
+}
+ctx.log(`caught: ${caught ? caught.code : 'nothing'}`)
+ctx.assert('error was thrown', caught !== null)
+ctx.assert('error code is FTP_DOWNLOAD_ERROR', caught && caught.code === 'FTP_DOWNLOAD_ERROR')
+return caught !== null && caught.code === 'FTP_DOWNLOAD_ERROR'
+```
+
+All three examples above run as-is against [test.rebex.net](https://test.rebex.net), a public read-only FTP server Rebex maintains specifically for testing FTP clients — useful for trying out `ctx.ftp` before pointing it at your own server.
+
 ### Scheduling & Timeouts
 
 When creating a test, configure:
@@ -279,7 +340,7 @@ When creating a test, configure:
 | Field | Description | Default |
 |---|---|---|
 | `schedule_ms` | How often the test runs, in milliseconds | 60000 (1 min) |
-| `timeout_ms` | Max execution time before the run is marked as `timeout` | 10000 (10 s) |
+| `timeout_ms` | Max execution time before the run is marked as `timeout`. No flat cap — but must be at most 80% of `schedule_ms`, so a slow run can never overlap with the next scheduled run of the same test | 5000 (5 s) |
 | `retries` | Number of retry attempts on failure before recording a fail | 0 |
 | `failure_threshold` | Consecutive failures before a notification is sent | 3 |
 | `cooldown_ms` | Minimum time between repeat failure notifications | 300000 (5 min) |

@@ -9,6 +9,10 @@ import { getAssignedChannels, addAssignment, removeAssignment } from '../db/quer
 import { normalizeTags } from '../tags/normalize.js'
 import { buildIncidentsFromRuns } from './incident-policy.js'
 
+function isCheckViolation(err: unknown): err is { code: string; constraint?: string } {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23514'
+}
+
 export async function testsRoutes(app: FastifyInstance): Promise<void> {
   // POST /tests
   app.post<{ Body: unknown }>('/', async (req, reply) => {
@@ -19,12 +23,20 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     const d = parsed.data
     const tags = normalizeTags(d.tags)
     const id = nanoid()
-    const { rows } = await pool.query<Test>(
-      `INSERT INTO tests (id, name, code, schedule_ms, timeout_ms, retries, uses_browser, enabled, tags)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *`,
-      [id, d.name, d.code, d.schedule_ms, d.timeout_ms, d.retries, d.uses_browser, d.enabled, tags]
-    )
+    let rows: Test[]
+    try {
+      ;({ rows } = await pool.query<Test>(
+        `INSERT INTO tests (id, name, code, schedule_ms, timeout_ms, retries, uses_browser, enabled, tags)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING *`,
+        [id, d.name, d.code, d.schedule_ms, d.timeout_ms, d.retries, d.uses_browser, d.enabled, tags]
+      ))
+    } catch (err) {
+      if (isCheckViolation(err)) {
+        return reply.status(400).send({ error: 'timeout_ms must be at most 80% of schedule_ms' })
+      }
+      throw err
+    }
     testEvents.emit('test:created', rows[0])
     return reply.status(201).send(rows[0])
   })
@@ -168,10 +180,18 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     }
     const set = entries.map(([k], i) => `"${k}" = $${i + 1}`).join(', ')
     const values = [...entries.map(([, v]) => v), req.params.id]
-    const { rows } = await pool.query<Test>(
-      `UPDATE tests SET ${set}, updated_at = NOW() WHERE id = $${entries.length + 1} RETURNING *`,
-      values
-    )
+    let rows: Test[]
+    try {
+      ;({ rows } = await pool.query<Test>(
+        `UPDATE tests SET ${set}, updated_at = NOW() WHERE id = $${entries.length + 1} RETURNING *`,
+        values
+      ))
+    } catch (err) {
+      if (isCheckViolation(err)) {
+        return reply.status(400).send({ error: 'timeout_ms must be at most 80% of schedule_ms' })
+      }
+      throw err
+    }
     if (rows.length === 0) return reply.status(404).send({ error: 'not found' })
     invalidateCache(req.params.id)
     testEvents.emit('test:updated', rows[0])

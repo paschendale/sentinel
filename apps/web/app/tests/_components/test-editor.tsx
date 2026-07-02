@@ -144,7 +144,11 @@ export default function TestEditor({ test }: Props) {
     const sched = Number(scheduleS)
     if (!Number.isFinite(sched) || sched < 30) errs.schedule = 'Minimum 30 seconds.'
     const tout = Number(timeoutS)
-    if (!Number.isFinite(tout) || tout < 1 || tout > 10) errs.timeout = 'Must be between 1 and 10 seconds.'
+    if (!Number.isFinite(tout) || tout < 1) {
+      errs.timeout = 'Must be at least 1 second.'
+    } else if (Number.isFinite(sched) && tout > sched * 0.8) {
+      errs.timeout = `Must be at most 80% of the interval (max ${(sched * 0.8).toFixed(1)}s at this interval).`
+    }
     const ret = Number(retries)
     if (!Number.isFinite(ret) || ret < 0 || ret > 5) errs.retries = 'Must be between 0 and 5.'
     const ft = Number(failureThreshold)
@@ -300,7 +304,6 @@ export default function TestEditor({ test }: Props) {
             value={timeoutS}
             onChange={e => setTimeoutS(e.target.value)}
             min={1}
-            max={10}
             className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
           />
           {errors.timeout && <p className="text-red-400 text-xs mt-1">{errors.timeout}</p>}

@@ -49,6 +49,7 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
 
   const fn = getCompiledFn(test.id, test.code)
   const { ctx, getAssertions, getWarnings } = buildCtx({
+    testTimeoutMs: test.timeout_ms,
     onLog: (message) => {
       runLog.info({ event: 'test.user_log' }, `[ctx.log] ${message}`)
       options.onLog?.(message)
@@ -57,6 +58,12 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
       runLog.info(
         { event: 'test.http', ...info },
         `HTTP ${info.method} ${info.url} -> ${info.status} (${info.duration_ms}ms)`
+      )
+    },
+    onFtpComplete: (info) => {
+      runLog.info(
+        { event: 'test.ftp', ...info },
+        `FTP ${info.op} ${info.host}${info.path} (${info.duration_ms}ms${info.size !== undefined ? `, ${info.size} bytes` : ''})`
       )
     },
   })
