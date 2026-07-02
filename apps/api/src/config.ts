@@ -52,15 +52,16 @@ export const RAW_RETENTION_DAYS = parseIntEnvInRange('RAW_RETENTION_DAYS', 7, 1,
 export const AGG_RETENTION_DAYS = parseIntEnvInRange('AGG_RETENTION_DAYS', 90, 30, 180)
 export const PRUNE_BATCH_SIZE = parseIntEnvInRange('PRUNE_BATCH_SIZE', 5000, 100, 50000)
 
-/** Directory `ctx.ftp.get` writes temp downloads to. Files are deleted immediately after each call. */
+/** Directory `ctx.ftp.get` and `ctx.s3.get` write temp downloads to. Files are deleted immediately after each call. */
 export const FTP_TEMP_DIR = optionalEnv('FTP_TEMP_DIR', join(tmpdir(), 'sentinel-ftp'))
+/** Shared download size cap for `ctx.ftp.get` and `ctx.s3.get` — both abort once a download exceeds this. */
 export const FTP_MAX_DOWNLOAD_BYTES = parseIntEnvInRange(
   'FTP_MAX_DOWNLOAD_BYTES',
   5 * 1024 * 1024,
   1024,
   50 * 1024 * 1024
 )
-/** Safety-net sweep: deletes any leftover temp file older than this (covers crashes / orphaned timeouts). */
+/** Safety-net sweep (also covers ctx.s3.get temp files, same directory): deletes any leftover temp file older than this (covers crashes / orphaned timeouts). */
 export const FTP_TEMP_MAX_AGE_MS = parseIntEnvInRange('FTP_TEMP_MAX_AGE_MS', 15 * 60 * 1000, 60 * 1000, 24 * 60 * 60 * 1000)
 export const FTP_TEMP_SWEEP_INTERVAL_MS = parseIntEnvInRange('FTP_TEMP_SWEEP_INTERVAL_MS', 10 * 60 * 1000, 60 * 1000, 24 * 60 * 60 * 1000)
 

@@ -1,7 +1,8 @@
 import { fetch } from 'undici'
 import type { RequestInit } from 'undici'
 import { Client as FtpClient } from 'basic-ftp'
-import { mkdir, readFile, unlink } from 'node:fs/promises'
+import { createHash, createHmac } from 'node:crypto'
+import { mkdir, open, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { nanoid } from 'nanoid'
 import type { AssertionResult } from '@sentinel/shared'
@@ -41,6 +42,16 @@ export interface FtpOptions {
   timeout?: number
 }
 
+export interface S3Options {
+  accessKey: string
+  secretKey: string
+  region: string
+  /** For temporary/STS credentials. */
+  sessionToken?: string
+  /** Extra headers (e.g. Range) — included in the SigV4 signature. */
+  headers?: Record<string, string>
+}
+
 export interface TestContext {
   http: {
     get(url: string, options?: HttpOptions): Promise<HttpResponse>
@@ -49,6 +60,10 @@ export interface TestContext {
   ftp: {
     ls(url: string, options?: FtpOptions): Promise<FtpEntry[]>
     get(url: string, options?: FtpOptions): Promise<FtpDownloadResult>
+  }
+  s3: {
+    get(url: string, options: S3Options): Promise<HttpResponse>
+    head(url: string, options: S3Options): Promise<HttpResponse>
   }
   assert: (name: string, value: unknown, message?: string) => void
   warn: (message: string) => void
@@ -81,10 +96,19 @@ export interface FtpCompleteInfo {
   size?: number
 }
 
+export interface S3CompleteInfo {
+  method: 'GET' | 'HEAD'
+  url: string
+  status: number
+  duration_ms: number
+  region: string
+}
+
 export interface BuildCtxOptions {
   onLog?: (message: string) => void
   onHttpComplete?: (info: HttpCompleteInfo) => void
   onFtpComplete?: (info: FtpCompleteInfo) => void
+  onS3Complete?: (info: S3CompleteInfo) => void
   /** The test's overall timeout budget — used as the default FTP socket timeout. */
   testTimeoutMs?: number
   /** Decrypted secrets snapshot (see executor/secrets-cache.ts), exposed as ctx.secrets.NAME. */
@@ -132,6 +156,26 @@ export class FtpRequestError extends Error {
     this.code = code
     this.url = url
     this.path = path
+  }
+}
+
+export class S3RequestError extends Error {
+  readonly code: 'S3_SIGNING_ERROR' | 'S3_FETCH_ERROR' | 'S3_SIZE_LIMIT_ERROR'
+  readonly url: string
+  readonly method: string
+
+  constructor(
+    code: S3RequestError['code'],
+    message: string,
+    url: string,
+    method: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options)
+    this.name = 'S3RequestError'
+    this.code = code
+    this.url = url
+    this.method = method
   }
 }
 
@@ -184,6 +228,219 @@ async function doFetch(
       method,
       { cause: err instanceof Error ? err : undefined }
     )
+  }
+}
+
+function sha256Hex(data: string): string {
+  return createHash('sha256').update(data, 'utf8').digest('hex')
+}
+
+function hmac(key: Buffer, data: string): Buffer {
+  return createHmac('sha256', key).update(data, 'utf8').digest()
+}
+
+function awsUriEncode(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase()
+  )
+}
+
+function canonicalUri(pathname: string): string {
+  if (pathname === '') return '/'
+  return pathname
+    .split('/')
+    .map((segment) => awsUriEncode(decodeURIComponent(segment)))
+    .join('/')
+}
+
+function canonicalQueryString(url: URL): string {
+  const params: Array<[string, string]> = []
+  url.searchParams.forEach((value, key) => params.push([key, value]))
+  params.sort(([ka, va], [kb, vb]) => (ka === kb ? (va < vb ? -1 : va > vb ? 1 : 0) : ka < kb ? -1 : 1))
+  return params.map(([k, v]) => `${awsUriEncode(k)}=${awsUriEncode(v)}`).join('&')
+}
+
+function getSigningKey(secretKey: string, dateStamp: string, region: string, service: string): Buffer {
+  const kDate = hmac(Buffer.from(`AWS4${secretKey}`, 'utf8'), dateStamp)
+  const kRegion = hmac(kDate, region)
+  const kService = hmac(kRegion, service)
+  return hmac(kService, 'aws4_request')
+}
+
+function signS3Request(
+  method: 'GET' | 'HEAD',
+  url: URL,
+  s3Options: S3Options,
+  now: Date
+): Record<string, string> {
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
+  const dateStamp = amzDate.slice(0, 8)
+  const payloadHash = sha256Hex('')
+
+  const headersToSign: Record<string, string> = {
+    host: url.host,
+    'x-amz-content-sha256': payloadHash,
+    'x-amz-date': amzDate,
+  }
+  if (s3Options.sessionToken) headersToSign['x-amz-security-token'] = s3Options.sessionToken
+  for (const [name, value] of Object.entries(s3Options.headers ?? {})) {
+    headersToSign[name.toLowerCase()] = value.trim()
+  }
+
+  const sortedHeaderNames = Object.keys(headersToSign).sort()
+  const canonicalHeaders = sortedHeaderNames.map((name) => `${name}:${headersToSign[name]}\n`).join('')
+  const signedHeaders = sortedHeaderNames.join(';')
+
+  const canonicalRequest = [
+    method,
+    canonicalUri(url.pathname),
+    canonicalQueryString(url),
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join('\n')
+
+  const credentialScope = `${dateStamp}/${s3Options.region}/s3/aws4_request`
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    sha256Hex(canonicalRequest),
+  ].join('\n')
+
+  const signingKey = getSigningKey(s3Options.secretKey, dateStamp, s3Options.region, 's3')
+  const signature = createHmac('sha256', signingKey).update(stringToSign, 'utf8').digest('hex')
+
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${s3Options.accessKey}/${credentialScope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`
+
+  return {
+    ...(s3Options.headers ?? {}),
+    Authorization: authorization,
+    'x-amz-date': amzDate,
+    'x-amz-content-sha256': payloadHash,
+    ...(s3Options.sessionToken ? { 'x-amz-security-token': s3Options.sessionToken } : {}),
+  }
+}
+
+function signS3OrThrow(method: 'GET' | 'HEAD', url: string, s3Options: S3Options): Record<string, string> {
+  try {
+    return signS3Request(method, new URL(url), s3Options, new Date())
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new S3RequestError(
+      'S3_SIGNING_ERROR',
+      `Failed to sign S3 request for ${method} ${url}: ${message}`,
+      url,
+      method,
+      { cause: err instanceof Error ? err : undefined }
+    )
+  }
+}
+
+async function doS3Head(
+  url: string,
+  s3Options: S3Options,
+  onS3Complete?: BuildCtxOptions['onS3Complete']
+): Promise<HttpResponse> {
+  const signedHeaders = signS3OrThrow('HEAD', url, s3Options)
+  const startMs = Date.now()
+  try {
+    const response = await doFetch(url, { method: 'HEAD', headers: signedHeaders })
+    onS3Complete?.({
+      method: 'HEAD',
+      url: truncateUrl(url),
+      status: response.status,
+      duration_ms: Date.now() - startMs,
+      region: s3Options.region,
+    })
+    return response
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new S3RequestError(
+      'S3_FETCH_ERROR',
+      `S3 request failed for HEAD ${url}: ${message}`,
+      url,
+      'HEAD',
+      { cause: err instanceof Error ? err : undefined }
+    )
+  }
+}
+
+// Downloads to a server-managed temp file in FTP_TEMP_DIR — same directory (and periodic
+// sweep backstop) that ctx.ftp.get uses — rather than buffering the whole object in
+// memory, and aborts the underlying fetch as soon as FTP_MAX_DOWNLOAD_BYTES is exceeded.
+async function doS3Get(
+  url: string,
+  s3Options: S3Options,
+  onS3Complete?: BuildCtxOptions['onS3Complete']
+): Promise<HttpResponse> {
+  const signedHeaders = signS3OrThrow('GET', url, s3Options)
+
+  const startMs = Date.now()
+  const tempPath = join(FTP_TEMP_DIR, `${nanoid()}.tmp`)
+  const controller = new AbortController()
+  let sizeLimitExceeded = false
+
+  try {
+    await mkdir(FTP_TEMP_DIR, { recursive: true })
+    const res = await fetch(url, { method: 'GET', headers: signedHeaders, signal: controller.signal })
+    const headers: Record<string, string> = {}
+    res.headers.forEach((value, key) => {
+      headers[key] = value
+    })
+
+    const handle = await open(tempPath, 'w')
+    try {
+      let bytesWritten = 0
+      if (res.body) {
+        for await (const chunk of res.body) {
+          bytesWritten += chunk.length
+          if (bytesWritten > FTP_MAX_DOWNLOAD_BYTES) {
+            sizeLimitExceeded = true
+            controller.abort()
+            break
+          }
+          await handle.write(chunk)
+        }
+      }
+    } finally {
+      await handle.close()
+    }
+
+    if (sizeLimitExceeded) {
+      throw new S3RequestError(
+        'S3_SIZE_LIMIT_ERROR',
+        `S3 download exceeded max size of ${FTP_MAX_DOWNLOAD_BYTES} bytes for GET ${url}`,
+        url,
+        'GET'
+      )
+    }
+
+    const buf = await readFile(tempPath)
+    const body = buf.toString('utf-8')
+    onS3Complete?.({
+      method: 'GET',
+      url: truncateUrl(url),
+      status: res.status,
+      duration_ms: Date.now() - startMs,
+      region: s3Options.region,
+    })
+    return { status: res.status, body, headers, json: () => JSON.parse(body) }
+  } catch (err) {
+    if (err instanceof S3RequestError) throw err
+    const message = err instanceof Error ? err.message : String(err)
+    throw new S3RequestError(
+      'S3_FETCH_ERROR',
+      `S3 request failed for GET ${url}: ${message}`,
+      url,
+      'GET',
+      { cause: err instanceof Error ? err : undefined }
+    )
+  } finally {
+    await unlink(tempPath).catch(() => {})
   }
 }
 
@@ -316,6 +573,7 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
   const warnings: string[] = []
   const onHttpComplete = options?.onHttpComplete
   const onFtpComplete = options?.onFtpComplete
+  const onS3Complete = options?.onS3Complete
   const testTimeoutMs = options?.testTimeoutMs
 
   const ctx: TestContext = {
@@ -342,6 +600,14 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
       },
       async get(url, ftpOptions) {
         return doFtpGet(url, ftpOptions, testTimeoutMs, onFtpComplete)
+      },
+    },
+    s3: {
+      async get(url, s3Options) {
+        return doS3Get(url, s3Options, onS3Complete)
+      },
+      async head(url, s3Options) {
+        return doS3Head(url, s3Options, onS3Complete)
       },
     },
     assert(name, value, message) {

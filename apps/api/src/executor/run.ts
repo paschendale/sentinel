@@ -68,6 +68,12 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
         `FTP ${info.op} ${info.host}${info.path} (${info.duration_ms}ms${info.size !== undefined ? `, ${info.size} bytes` : ''})`
       )
     },
+    onS3Complete: (info) => {
+      runLog.info(
+        { event: 'test.s3', ...info },
+        `S3 ${info.method} ${info.url} -> ${info.status} (${info.duration_ms}ms, region=${info.region})`
+      )
+    },
   })
 
   const timeoutPromise = new Promise<never>((_, reject) =>
