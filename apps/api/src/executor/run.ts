@@ -3,6 +3,7 @@ import type { TestStatus } from '@sentinel/shared'
 import { logger } from '../logger.js'
 import { getCompiledFn } from './compile.js'
 import { buildCtx } from './ctx.js'
+import { getSecretsSnapshot } from './secrets-cache.js'
 
 export type RunTrigger = 'scheduler' | 'api-post' | 'api-sse'
 
@@ -50,6 +51,7 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   const fn = getCompiledFn(test.id, test.code)
   const { ctx, getAssertions, getWarnings } = buildCtx({
     testTimeoutMs: test.timeout_ms,
+    secrets: getSecretsSnapshot(),
     onLog: (message) => {
       runLog.info({ event: 'test.user_log' }, `[ctx.log] ${message}`)
       options.onLog?.(message)
