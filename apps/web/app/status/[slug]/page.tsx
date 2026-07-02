@@ -1,9 +1,24 @@
+import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 import type { PublicStatusTest } from '@sentinel/shared'
 import { StatusPageContent } from '../_components/status-page-content'
 import { SentinelLogo } from '../../_components/sentinel-logo'
 
 export const revalidate = 300
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}): Promise<Metadata> {
+  const { slug } = await params
+  const tag = decodeURIComponent(slug)
+  return {
+    title: tag,
+    description: `Live status and uptime for tests tagged "${tag}".`,
+  }
+}
 
 async function getTagStatus(tag: string): Promise<PublicStatusTest[] | null> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
@@ -43,7 +58,9 @@ export default async function TagStatusPage({
           </a>
         </div>
 
-        <StatusPageContent tests={tests} tag={tag} />
+        <Suspense fallback={null}>
+          <StatusPageContent tests={tests} tag={tag} />
+        </Suspense>
       </div>
     </main>
   )

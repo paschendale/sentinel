@@ -1,4 +1,6 @@
+import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 import type { PublicStatusTest } from '@sentinel/shared'
 import { SentinelLogo } from '../../../_components/sentinel-logo'
 import { StatusTestContent } from './_components/status-test-content'
@@ -14,6 +16,20 @@ async function getTest(id: string): Promise<PublicStatusTest | null> {
     return res.json() as Promise<PublicStatusTest>
   } catch {
     return null
+  }
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}): Promise<Metadata> {
+  const { id } = await params
+  const test = await getTest(id)
+  if (!test) return {}
+  return {
+    title: test.name,
+    description: `Live uptime status for ${test.name}.`,
   }
 }
 
@@ -36,7 +52,9 @@ export default async function PublicTestPage({
           <SentinelLogo className="h-7 text-zinc-100" />
           <span className="text-zinc-100 text-lg">sentinel</span>
         </div>
-        <StatusTestContent test={test} />
+        <Suspense fallback={null}>
+          <StatusTestContent test={test} />
+        </Suspense>
       </div>
     </main>
   )

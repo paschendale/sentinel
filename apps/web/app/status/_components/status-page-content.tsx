@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from './status-buckets-view'
 import { StatusGridCard } from './status-grid-card'
@@ -9,6 +9,14 @@ import { StatusGridCard } from './status-grid-card'
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
 const PERIODS: StatusPeriod[] = ['1h', '24h', '7d', '30d']
+
+function isPeriod(v: string | null): v is StatusPeriod {
+  return v !== null && (PERIODS as string[]).includes(v)
+}
+
+function isView(v: string | null): v is View {
+  return v === 'grid' || v === 'list'
+}
 
 function computeUptimePct(buckets: StatusBucket[]): number | null {
   let s = 0, f = 0
@@ -54,12 +62,25 @@ interface Props {
 }
 
 export function StatusPageContent({ tests, tag }: Props) {
-  const [period, setPeriod] = useState<StatusPeriod>('24h')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const period = isPeriod(searchParams.get('period')) ? (searchParams.get('period') as StatusPeriod) : '24h'
+  const [view, setView] = useState<View>('grid')
   const [bucketData, setBucketData] = useState<Map<string, StatusBucket[]>>(new Map())
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<View>('grid')
   const [refreshKey, setRefreshKey] = useState(0)
-  const router = useRouter()
+
+  function updateParam(key: string, value: string) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set(key, value)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
+
+  function setPeriod(p: StatusPeriod) {
+    updateParam('period', p)
+  }
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -70,6 +91,11 @@ export function StatusPageContent({ tests, tag }: Props) {
   }, [router])
 
   useEffect(() => {
+    const urlView = searchParams.get('view')
+    if (isView(urlView)) {
+      setView(urlView)
+      return
+    }
     try {
       const saved = localStorage.getItem(VIEW_KEY)
       if (saved === 'list' || saved === 'grid') {
@@ -80,11 +106,13 @@ export function StatusPageContent({ tests, tag }: Props) {
     } catch {
       setView(window.innerWidth >= 768 ? 'grid' : 'list')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function switchView(v: View) {
     setView(v)
     try { localStorage.setItem(VIEW_KEY, v) } catch {}
+    updateParam('view', v)
   }
 
   useEffect(() => {

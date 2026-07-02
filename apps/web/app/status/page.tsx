@@ -1,8 +1,15 @@
+import { Suspense } from 'react'
+import type { Metadata } from 'next'
 import type { PublicStatusTest } from '@sentinel/shared'
 import { StatusPageContent } from './_components/status-page-content'
 import { SentinelLogo } from '../_components/sentinel-logo'
 
 export const revalidate = 300
+
+export const metadata: Metadata = {
+  title: 'Status',
+  description: 'Live status and uptime for all tests.',
+}
 
 async function getStatus(): Promise<PublicStatusTest[]> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
@@ -25,7 +32,9 @@ export default async function StatusPage() {
           <SentinelLogo className="h-7 text-zinc-100" />
           <span className="text-zinc-100 text-lg">sentinel</span>
         </div>
-        <StatusPageContent tests={tests} />
+        <Suspense fallback={null}>
+          <StatusPageContent tests={tests} />
+        </Suspense>
       </div>
     </main>
   )

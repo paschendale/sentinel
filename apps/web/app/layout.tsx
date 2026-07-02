@@ -1,7 +1,8 @@
+import type { Metadata } from 'next'
 import './globals.css'
 
-export const metadata = {
-  title: 'Sentinel',
+export const metadata: Metadata = {
+  title: { default: 'Sentinel', template: '%s · Sentinel' },
   description: 'Synthetic testing and uptime monitoring',
 }
 

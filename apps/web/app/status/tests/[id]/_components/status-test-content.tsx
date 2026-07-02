@@ -1,13 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from '../../../_components/status-buckets-view'
 import { StatusLatencyChartLoader } from '../../../_components/status-latency-chart-loader'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 const PERIODS: StatusPeriod[] = ['1h', '24h', '7d', '30d']
+
+function isPeriod(v: string | null): v is StatusPeriod {
+  return v !== null && (PERIODS as string[]).includes(v)
+}
 
 function computeUptimePct(buckets: StatusBucket[]): number | null {
   let s = 0, f = 0
@@ -31,11 +35,20 @@ function dayColor(outcome: PublicStatusOutcome): string {
 }
 
 export function StatusTestContent({ test }: { test: PublicStatusTest }) {
-  const [period, setPeriod] = useState<StatusPeriod>('24h')
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const period = isPeriod(searchParams.get('period')) ? (searchParams.get('period') as StatusPeriod) : '24h'
   const [buckets, setBuckets] = useState<StatusBucket[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
-  const router = useRouter()
+
+  function setPeriod(p: StatusPeriod) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('period', p)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
 
   useEffect(() => {
     const id = setInterval(() => {
