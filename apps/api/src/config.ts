@@ -63,3 +63,15 @@ export const FTP_MAX_DOWNLOAD_BYTES = parseIntEnvInRange(
 /** Safety-net sweep: deletes any leftover temp file older than this (covers crashes / orphaned timeouts). */
 export const FTP_TEMP_MAX_AGE_MS = parseIntEnvInRange('FTP_TEMP_MAX_AGE_MS', 15 * 60 * 1000, 60 * 1000, 24 * 60 * 60 * 1000)
 export const FTP_TEMP_SWEEP_INTERVAL_MS = parseIntEnvInRange('FTP_TEMP_SWEEP_INTERVAL_MS', 10 * 60 * 1000, 60 * 1000, 24 * 60 * 60 * 1000)
+
+/** Optional base64-encoded 32-byte (256-bit) AES-256-GCM key for encrypting secret
+ *  values at rest. Generate with: openssl rand -base64 32
+ *  If unset, secrets are stored UNENCRYPTED — ctx.secrets still works, but values
+ *  aren't protected at rest. The /secrets page shows a warning banner when unset.
+ *  No key-rotation/re-encryption tooling exists: secrets created/rotated before this
+ *  key is set stay plaintext until individually rotated again after it's configured. */
+export const SECRETS_ENCRYPTION_KEY = optionalEnv('SECRETS_ENCRYPTION_KEY', '')
+
+if (SECRETS_ENCRYPTION_KEY && Buffer.from(SECRETS_ENCRYPTION_KEY, 'base64').length !== 32) {
+  throw new Error('SECRETS_ENCRYPTION_KEY must decode to exactly 32 bytes (base64-encoded)')
+}
