@@ -3,10 +3,12 @@ import { startScheduler, stopScheduler } from './scheduler/index.js'
 import { startFlusher, stopFlusher, flush } from './db/result-buffer.js'
 import { ensurePartitions, startAggregator, stopAggregator } from './db/aggregator.js'
 import { startFtpTempSweep, stopFtpTempSweep } from './executor/ftp-temp-sweep.js'
+import { warmSecretsCache } from './executor/secrets-cache.js'
 import { migrate } from './db/migrate.js'
 
 await migrate()
 await ensurePartitions()
+await warmSecretsCache()
 const app = await buildServer()
 await startScheduler()
 startFlusher()
