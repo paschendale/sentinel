@@ -204,3 +204,79 @@ describe('GET /status', () => {
     expect(body[0]!.enabled).toBe(false)
   })
 })
+
+describe('GET /status/test/:id/events', () => {
+  beforeEach(() => {
+    mockQuery.mockClear()
+  })
+
+  it('returns 404 when the test does not exist', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status/test/missing/events' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('returns runs with their assertions attached', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: 't1' }] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'run-1',
+            test_id: 't1',
+            started_at: '2026-07-02T12:01:40.000Z',
+            finished_at: '2026-07-02T12:01:41.000Z',
+            status: 'fail',
+            duration_ms: 576,
+            error_message: 'assertion failed',
+          },
+        ],
+      } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          { id: 'a1', test_run_id: 'run-1', name: 'status 200', passed: true, message: null },
+          { id: 'a2', test_run_id: 'run-1', name: 'body present', passed: false, message: 'missing field' },
+        ],
+      } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status/test/t1/events' })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body) as Array<{ id: string; assertions: Array<{ name: string; passed: boolean }> }>
+    expect(body).toHaveLength(1)
+    expect(body[0]!.assertions).toEqual([
+      { name: 'status 200', passed: true, message: null },
+      { name: 'body present', passed: false, message: 'missing field' },
+    ])
+  })
+
+  it('returns an empty array when the test has no runs', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: 't1' }] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status/test/t1/events' })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body)).toEqual([])
+  })
+
+  it('passes after/before/limit through to the query', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: 't1' }] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const app = await buildServer()
+    await app.inject({
+      method: 'GET',
+      url: '/status/test/t1/events?after=2026-07-01T00:00:00.000Z&before=2026-07-02T00:00:00.000Z&limit=1',
+    })
+
+    const runsCall = mockQuery.mock.calls[1]!
+    expect(runsCall[0]).toContain('started_at >= $2')
+    expect(runsCall[0]).toContain('started_at < $3')
+    expect(runsCall[1]).toEqual(['t1', '2026-07-01T00:00:00.000Z', '2026-07-02T00:00:00.000Z', 1])
+  })
+})

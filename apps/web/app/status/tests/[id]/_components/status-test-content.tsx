@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
+import type { PublicStatusEvent, PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from '../../../_components/status-buckets-view'
 import { StatusLatencyChartLoader } from '../../../_components/status-latency-chart-loader'
+import { RunHistory, type RunRow } from '../../../../tests/_components/run-history'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 const PERIODS: StatusPeriod[] = ['1h', '24h', '7d', '30d']
@@ -42,6 +43,7 @@ export function StatusTestContent({ test }: { test: PublicStatusTest }) {
   const period = isPeriod(searchParams.get('period')) ? (searchParams.get('period') as StatusPeriod) : '24h'
   const [buckets, setBuckets] = useState<StatusBucket[]>([])
   const [loading, setLoading] = useState(true)
+  const [events, setEvents] = useState<RunRow[]>([])
   const [refreshKey, setRefreshKey] = useState(0)
 
   function setPeriod(p: StatusPeriod) {
@@ -67,6 +69,20 @@ export function StatusTestContent({ test }: { test: PublicStatusTest }) {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [period, test.id, refreshKey])
+
+  useEffect(() => {
+    fetch(`${API_URL}/status/test/${test.id}/events?limit=20`)
+      .then(r => r.json() as Promise<PublicStatusEvent[]>)
+      .then(rows => setEvents(rows.map(r => ({
+        id: r.id,
+        status: r.status,
+        duration_ms: r.duration_ms,
+        error_message: r.error_message,
+        finished_at: r.finished_at,
+        assertions: r.assertions,
+      }))))
+      .catch(() => {})
+  }, [test.id, refreshKey])
 
   const uptimePct = buckets.length > 0 ? computeUptimePct(buckets) : null
   const colors = statusColors(test.current_status)
@@ -165,6 +181,12 @@ export function StatusTestContent({ test }: { test: PublicStatusTest }) {
           <span className="text-zinc-600 text-[11px]">{test.days[0]?.date}</span>
           <span className="text-zinc-600 text-[11px]">today</span>
         </div>
+      </section>
+
+      {/* Recent events */}
+      <section>
+        <h2 className="text-zinc-500 text-xs tracking-widest uppercase font-normal mb-3">Recent events</h2>
+        <RunHistory runs={events} />
       </section>
     </div>
   )

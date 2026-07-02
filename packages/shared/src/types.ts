@@ -121,3 +121,14 @@ export interface PublicStatusTest {
   uptime_pct_30d: number | null
   days: PublicStatusDay[]
 }
+
+/** A single check's outcome, shown on the public status page (mirrors the admin run history). */
+export interface PublicStatusEvent {
+  id: string
+  started_at: string
+  finished_at: string
+  status: TestStatus
+  duration_ms: number
+  error_message: string | null
+  assertions: Array<{ name: string; passed: boolean; message: string | null }>
+}

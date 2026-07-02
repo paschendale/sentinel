@@ -1,5 +1,14 @@
 import type { FastifyInstance } from 'fastify'
-import type { PublicStatusDay, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
+import type {
+  AssertionResult,
+  PublicStatusDay,
+  PublicStatusEvent,
+  PublicStatusTest,
+  StatusBucket,
+  StatusBucketTest,
+  StatusPeriod,
+  TestRun,
+} from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 
 type TestRow = { id: string; name: string; enabled: boolean; tags: string[] }
@@ -303,4 +312,60 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     }))
     return reply.send(result)
   })
+
+  // GET /status/test/:id/events — recent checks with assertion details, for the
+  // public status page (mirrors GET /tests/:id/runs). `after`/`before` scope the
+  // window to a single graph bucket for the "last check" hover detail.
+  app.get<{ Params: { id: string }; Querystring: { limit?: string; before?: string; after?: string } }>(
+    '/test/:id/events',
+    async (req, reply) => {
+      const { id } = req.params
+      const { rows: exists } = await pool.query<{ id: string }>('SELECT id FROM tests WHERE id = $1', [id])
+      if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
+
+      const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50)
+      const conditions = ['test_id = $1']
+      const params: unknown[] = [id]
+      if (req.query.after) {
+        params.push(req.query.after)
+        conditions.push(`started_at >= $${params.length}`)
+      }
+      if (req.query.before) {
+        params.push(req.query.before)
+        conditions.push(`started_at < $${params.length}`)
+      }
+      params.push(limit)
+
+      const { rows } = await pool.query<TestRun>(
+        `SELECT id, test_id, started_at, finished_at, status, duration_ms, error_message
+         FROM test_runs WHERE ${conditions.join(' AND ')}
+         ORDER BY started_at DESC LIMIT $${params.length}`,
+        params,
+      )
+      if (rows.length === 0) return reply.send([])
+
+      const runIds = rows.map(r => r.id)
+      const { rows: assertionRows } = await pool.query<AssertionResult>(
+        `SELECT id, test_run_id, name, passed, message FROM assertion_results WHERE test_run_id = ANY($1)`,
+        [runIds],
+      )
+      const byRunId = new Map<string, AssertionResult[]>()
+      for (const a of assertionRows) {
+        const list = byRunId.get(a.test_run_id) ?? []
+        list.push(a)
+        byRunId.set(a.test_run_id, list)
+      }
+
+      const events: PublicStatusEvent[] = rows.map(r => ({
+        id: r.id,
+        started_at: r.started_at as unknown as string,
+        finished_at: r.finished_at as unknown as string,
+        status: r.status,
+        duration_ms: r.duration_ms,
+        error_message: r.error_message,
+        assertions: (byRunId.get(r.id) ?? []).map(a => ({ name: a.name, passed: a.passed, message: a.message })),
+      }))
+      return reply.send(events)
+    },
+  )
 }
