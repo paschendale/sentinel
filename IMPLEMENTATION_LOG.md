@@ -818,3 +818,26 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** `router.refresh()` (Next.js App Router) invalidates the server component cache so `current_status` and `days` stay current. A `refreshKey` counter in state triggers the bucket API re-fetch independently, since that fetch lives in a separate `useEffect`.
 
 **Deferred:** No visible countdown/last-updated indicator added; purely silent background refresh.
+
+## 2026-07-02 · F-24/F-25 · FTP Probe Support + Configurable Test Timeout
+
+**What was built:** Added `ctx.ftp.ls(url, options?)` and `ctx.ftp.get(url, options?)` to the test `ctx` API using `basic-ftp` (zero runtime deps). `get` downloads to a server-managed temp file, reads it into `body`, and always deletes it before returning — files never outlive a test run — capped by `FTP_MAX_DOWNLOAD_BYTES` with a periodic sweep job as a crash/timeout backstop. Separately, removed the flat 10-second `timeout_ms` cap and replaced it with a relative rule (`timeout_ms <= schedule_ms * 0.8`) enforced in the Zod schema, a Postgres `CHECK` constraint, and the test editor UI, plus a per-test overlap guard in the scheduler so a slow run can never collide with the next scheduled tick of the same test.
+
+**Files changed:**
+- `apps/api/package.json` — added `basic-ftp`
+- `apps/api/src/config.ts` — `FTP_TEMP_DIR`, `FTP_MAX_DOWNLOAD_BYTES`, `FTP_TEMP_MAX_AGE_MS`, `FTP_TEMP_SWEEP_INTERVAL_MS`
+- `apps/api/src/executor/ctx.ts` — `FtpEntry`/`FtpOptions`/`FtpDownloadResult`/`FtpCompleteInfo` types, `FtpRequestError`, `ctx.ftp.ls`/`ctx.ftp.get` implementation
+- `apps/api/src/executor/run.ts` — passes `testTimeoutMs`/`onFtpComplete` into `buildCtx`
+- `apps/api/src/executor/ftp-temp-sweep.ts` — new periodic sweep job (same `setTimeout`-to-boundary + `setInterval` shape as `aggregator.ts`)
+- `apps/api/src/executor/ctx.test.ts` — `ctx.ftp` unit tests (mapping, cleanup-after-success, cleanup-after-error, size limit, connect failure)
+- `apps/api/src/index.ts` — wires `startFtpTempSweep`/`stopFtpTempSweep`
+- `packages/shared/src/schemas.ts` — dropped `timeout_ms` max, added cross-field `.refine()` on `CreateTestSchema`
+- `apps/api/src/db/migrations/014_timeout_schedule_margin.sql` — drops the old `timeout_ms <= 10000` CHECK, adds `timeout_ms * 5 <= schedule_ms * 4`
+- `apps/api/src/routes/tests.ts` — translates Postgres `23514` (check_violation) into a 400 on `POST /` and `PATCH /:id`
+- `apps/api/src/scheduler/index.ts` — `runningTestIds` guard prevents overlapping scheduler-triggered runs of the same test
+- `apps/web/app/tests/_components/test-editor.tsx` — removed the `max={10}` timeout input cap, added margin validation
+- `docs/ARCHITECTURE.md`, `docs/DOMAINS.md`, `README.md`, `PROJECT.md` — documented `ctx.ftp`, new config vars, and the timeout/schedule invariant
+
+**Decisions:** Chose `basic-ftp` over hand-rolling the FTP protocol over raw sockets — it has zero runtime dependencies and no native bindings, and FTP's passive-mode/multiline-response handling is easy to get subtly wrong. Downloads use disk-based temp files (not in-memory buffering) per explicit user preference, with the file deleted in a `finally` on every path (success, size-limit abort, other errors) plus a periodic sweep as a safety net for the case where `run.ts`'s `Promise.race` abandons an in-flight download without cancelling it. The 80% timeout/schedule margin ratio is a hardcoded constant (not env-configurable), matching the existing hardcoded 10% scheduler jitter. Cross-field validation for `PATCH` is deliberately left to the DB `CHECK` constraint rather than an app-level merge-and-validate, since Postgres already sees the correct final row.
+
+**Deferred:** Migration `014` was not applied/verified against a live Postgres instance in this session (no local DB available) — the constraint name (`tests_timeout_ms_check`) relies on Postgres's standard auto-naming convention for unnamed CHECK constraints and should be confirmed with `pnpm migrate` before deploying. No new automated test was added for the scheduler overlap guard (no existing scheduler test infrastructure to extend); covered by a manual verification step instead.
