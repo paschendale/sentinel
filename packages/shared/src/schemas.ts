@@ -54,8 +54,21 @@ export const CreateAssignmentSchema = z.object({
   channel_id: z.string().min(1),
 })
 
+// UPPER_SNAKE_CASE — this is the literal property key under ctx.secrets, so it must
+// be a valid JS identifier and match the ctx.secrets.SECRET_NAME convention.
+export const CreateSecretSchema = z.object({
+  name: z.string().min(1).max(100).regex(/^[A-Z][A-Z0-9_]*$/, 'name must be UPPER_SNAKE_CASE (e.g. API_KEY)'),
+  value: z.string().min(1),
+})
+
+export const RotateSecretSchema = z.object({
+  value: z.string().min(1),
+})
+
 export type CreateTestInput = z.infer<typeof CreateTestSchema>
 export type UpdateTestInput = z.infer<typeof UpdateTestSchema>
 export type CreateNotificationChannelInput = z.infer<typeof CreateNotificationChannelSchema>
 export type UpdateNotificationChannelInput = z.infer<typeof UpdateNotificationChannelSchema>
 export type CreateAssignmentInput = z.infer<typeof CreateAssignmentSchema>
+export type CreateSecretInput = z.infer<typeof CreateSecretSchema>
+export type RotateSecretInput = z.infer<typeof RotateSecretSchema>
