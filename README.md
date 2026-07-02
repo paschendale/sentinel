@@ -20,6 +20,7 @@ Sentinel lets you write synthetic tests as plain JavaScript functions that run o
 - Three-tier outcomes: **pass** (green), **warn** (yellow/degraded), **fail** (red)
 - State-transition alerts: failure, warning (degraded), and recovery notifications
 - Notification channels: Discord, Slack, and generic webhooks
+- Encrypted secret store — read via `ctx.secrets.NAME` in test code, values are write-only after creation
 - Public read-only status pages (per-tag)
 - Prometheus metrics endpoint
 - Export and import all test definitions as JSON
@@ -69,6 +70,7 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `NODE_ENV` | No | Set to `production` in deployment for JSON logs and `LOG_PRETTY` default off |
 | `FTP_TEMP_DIR` | No | Directory `ctx.ftp.get` writes temp downloads to (default: OS temp dir + `sentinel-ftp`) |
 | `FTP_MAX_DOWNLOAD_BYTES` | No | Max bytes `ctx.ftp.get` will download before aborting (default: `5242880`, 5MB) |
+| `SECRETS_ENCRYPTION_KEY` | No | Base64-encoded 32-byte AES-256-GCM key for encrypting `ctx.secrets` values at rest (generate with `openssl rand -base64 32`). If unset, secrets are stored **unencrypted** — `ctx.secrets` still works, but the dashboard shows a warning banner |
 
 ### Single Container (no Compose)
 
@@ -210,6 +212,20 @@ ctx.assert('file not empty', file.size > 0)
 - `timeout` — connection socket timeout in milliseconds, defaults to the test's own `timeout_ms`
 
 **Downloads are never persisted.** `ctx.ftp.get` streams the remote file into a server-managed temp file, reads it into memory, and deletes it before the call returns — your test only ever sees the string `body`, never a path. Downloads larger than `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) are aborted with an `FTP_SIZE_LIMIT_ERROR`. A periodic background sweep also removes any leftover temp file older than 15 minutes, as a backstop for crashes or timed-out runs.
+
+#### `ctx.secrets` — Encrypted secret access
+
+Reference values registered on the [Secrets page](#secrets) instead of hardcoding API keys or credentials in test code:
+
+```js
+const res = await ctx.http.get('https://api.example.com/health', {
+  headers: { Authorization: `Bearer ${ctx.secrets.API_KEY}` },
+})
+ctx.assert('authenticated', res.status === 200)
+return res.status === 200
+```
+
+`ctx.secrets` is a plain object, not a function — `ctx.secrets.SECRET_NAME` reads the value directly. If a secret with that name doesn't exist (or couldn't be decrypted — see [Secrets](#secrets)), the property is simply `undefined`, same as accessing a missing key on any object. Secrets are shared across all tests; there's no per-test scoping.
 
 #### `ctx.assert(name, value, message?)` — Named assertions
 
@@ -376,6 +392,36 @@ Warning and failure alerts have independent cooldown windows — a warning notif
 - **Recovery alert** — includes test name, downtime duration since the first alert, and last response time.
 
 Discord alerts use colored embeds (yellow for warning, red for failure, green for recovery). Slack alerts use attachments with the same colors. Generic webhooks receive a JSON payload with an `event` field (`"warning"`, `"fail"`, or `"recovery"`).
+
+---
+
+## Secrets
+
+Store API keys and other credentials outside test code, read them in tests via [`ctx.secrets.NAME`](#ctxsecrets--encrypted-secret-access).
+
+### Setup
+
+1. Go to the **Secrets** page in the dashboard.
+2. Create a secret with a name (`UPPER_SNAKE_CASE`, e.g. `API_KEY`) and a value.
+3. Reference it in test code as `ctx.secrets.API_KEY`.
+
+### Write-only by design
+
+Once created, a secret's value is **never returned by any API response again** — the dashboard and `GET /secrets` only ever show the name and timestamps. To change a value, use **rotate** (submit a new value); there's no "edit" or "reveal" action. Deleting a secret removes it immediately; any test still referencing it will simply see `undefined`.
+
+### Encryption at rest
+
+If `SECRETS_ENCRYPTION_KEY` is set (see [Environment Variables](#environment-variables)), values are encrypted with AES-256-GCM before being stored. If it's unset, values are stored unencrypted and the Secrets page shows a warning banner — `ctx.secrets` works either way. Secrets created while the key was unset stay unencrypted until individually rotated after the key is configured; there's no bulk re-encryption tool.
+
+### API
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/secrets` | List secret names and timestamps (never values) |
+| `GET` | `/secrets/status` | `{ encryptionEnabled: boolean }` |
+| `POST` | `/secrets` | Create a secret: `{ name, value }` |
+| `POST` | `/secrets/:id/rotate` | Replace a secret's value: `{ value }` |
+| `DELETE` | `/secrets/:id` | Delete a secret |
 
 ---
 

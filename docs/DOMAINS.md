@@ -83,6 +83,26 @@ Pre-aggregated daily stats per test. The only table queried by public dashboards
 
 ---
 
+### Secret
+A named, encrypted-at-rest value referenced in test code as `ctx.secrets.NAME`. Global — not scoped to a `Test`, no relationship to any other entity.
+
+| Field | Type | Description |
+|-------|------|--------------|
+| `id` | `string` (nanoid) | Unique identifier |
+| `name` | `string` | `UPPER_SNAKE_CASE` — this is the literal `ctx.secrets` property key |
+| `value_blob` | `bytea` | Version-tagged blob: AES-256-GCM ciphertext if `SECRETS_ENCRYPTION_KEY` was set at write time, plaintext otherwise. Never exposed via the API or shared types |
+| `created_at` | `timestamp` | Creation time |
+| `updated_at` | `timestamp` | Last rotation time |
+
+**Invariants:**
+- `name` is `UNIQUE` and must match `^[A-Z][A-Z0-9_]*$` (enforced by both a Zod schema and a Postgres `CHECK` constraint)
+- **Write-only**: no API response ever includes the decrypted value or `value_blob` after creation — only `create` (initial value), `rotate` (replace value), `delete`, and `list`/`status` (metadata only) are exposed
+- `name` is immutable — renaming would silently break any test code referencing `ctx.secrets.NAME`; changing a value means rotating it, not editing the row
+- Encryption is optional: if `SECRETS_ENCRYPTION_KEY` is unset when a secret is created or rotated, its `value_blob` stays in plaintext (mode-tagged) form; encrypted and plaintext secrets can coexist in the table
+- A secret whose `value_blob` can't be decrypted by the running process (e.g. the key was changed or removed after that secret was encrypted) is logged and excluded from `ctx.secrets` rather than crashing the process — see `apps/api/src/db/queries/secrets.ts`
+
+---
+
 ### NotificationChannel
 A delivery target for alerts related to a test.
 
@@ -128,6 +148,9 @@ Test (1) ──────────────────────→ (
 Test (1) ──────────────────────→ (1) TestState
 Test (1) ──────────────────────→ (M) UptimeDaily
 TestRun (1) ───────────────────→ (M) AssertionResult
+
+Secret is global and unrelated to any other entity — every Test can read every
+Secret via ctx.secrets, there is no join table.
 ```
 
 ---
@@ -150,6 +173,7 @@ interface TestContext {
   warn: (message: string) => void
   log: (message: string) => void
   now: () => Date
+  secrets: Readonly<Record<string, string>>
 }
 
 interface HttpResponse {
@@ -192,4 +216,5 @@ interface FtpOptions {
 - `ctx.log(message)` — emits a message to the run log; has no effect on status
 - `ctx.http` routes through undici with the test's timeout enforced
 - `ctx.ftp.ls`/`ctx.ftp.get` route through `basic-ftp`; `url` is a full `ftp://[user:pass@]host[:port]/path`. `get` downloads to a server-managed temp file (`FTP_TEMP_DIR`), reads it into `body`, and deletes it before returning — the file never outlives the call. Downloads are capped by `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) and aborted if exceeded. A periodic sweep job deletes any orphaned temp file older than `FTP_TEMP_MAX_AGE_MS` as a backstop for crash/timeout edge cases. User code never sees a file path — only the returned string body.
+- `ctx.secrets` is a plain, frozen object (not a getter/method) mapping every `Secret.name` to its decrypted value — accessing a name that doesn't exist yields `undefined`, same as any missing object property; it never throws. It's backed by an in-memory cache (`apps/api/src/executor/secrets-cache.ts`) decrypted once at process startup and refreshed synchronously on every secret create/rotate/delete, so building `ctx` never queries the database or does crypto on the test-execution hot path.
 - No `ctx.fs`, no `ctx.exec`, no `require()`, no `import`

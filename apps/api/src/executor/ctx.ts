@@ -54,6 +54,7 @@ export interface TestContext {
   warn: (message: string) => void
   log: (message: string) => void
   now: () => Date
+  secrets: Readonly<Record<string, string>>
 }
 
 type AssertionCapture = Omit<AssertionResult, 'id' | 'test_run_id'>
@@ -86,6 +87,8 @@ export interface BuildCtxOptions {
   onFtpComplete?: (info: FtpCompleteInfo) => void
   /** The test's overall timeout budget — used as the default FTP socket timeout. */
   testTimeoutMs?: number
+  /** Decrypted secrets snapshot (see executor/secrets-cache.ts), exposed as ctx.secrets.NAME. */
+  secrets?: Readonly<Record<string, string>>
 }
 
 function truncateUrl(url: string, max = 200): string {
@@ -359,6 +362,7 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
     now() {
       return new Date()
     },
+    secrets: options?.secrets ?? {},
   }
 
   return {

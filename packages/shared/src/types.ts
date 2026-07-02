@@ -52,6 +52,14 @@ export interface NotificationChannel {
   enabled: boolean
 }
 
+/** Metadata only — the value is write-only and never returned by any API response. */
+export interface Secret {
+  id: string
+  name: string
+  created_at: Date
+  updated_at: Date
+}
+
 export interface ChannelAssignment {
   channel_id: string
   scope_type: 'test' | 'tag'

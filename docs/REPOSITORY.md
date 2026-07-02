@@ -11,11 +11,12 @@ sentinel/
 ├── apps/
 │   ├── api/                    # Backend: Fastify API + scheduler + executor + notifier
 │   │   ├── src/
-│   │   │   ├── routes/         # Fastify route handlers (tests, runs, metrics, status)
+│   │   │   ├── routes/         # Fastify route handlers (tests, runs, metrics, status, secrets)
 │   │   │   ├── scheduler/      # Job scheduling engine (interval + jitter logic)
-│   │   │   ├── executor/       # Test execution engine (compile, run, timeout)
+│   │   │   ├── executor/       # Test execution engine (compile, run, timeout, secrets cache)
 │   │   │   ├── notifier/       # Notification pipeline (Discord, Slack, webhook)
 │   │   │   ├── db/             # Postgres client, connection pool, raw SQL queries
+│   │   │   ├── crypto/         # AES-256-GCM secret encryption (apps/api/src/crypto/secret-cipher.ts)
 │   │   │   ├── metrics/        # Prometheus metrics registration and endpoint
 │   │   │   └── index.ts        # App entry point
 │   │   ├── package.json
@@ -28,6 +29,7 @@ sentinel/
 │       │   │   ├── tests/
 │       │   │   │   ├── new/    # Create test
 │       │   │   │   └── [id]/   # Edit / test detail
+│       │   ├── secrets/        # Secret management page (write-only create/rotate/delete)
 │       │   └── status/
 │       │       └── [slug]/     # Public status page (SSG/ISR)
 │       ├── components/         # Shared React components
@@ -70,6 +72,7 @@ The backend is a single long-running Node.js process. It owns:
 - **Executor** — compiles user JS code, runs it with a `ctx` object, enforces timeout
 - **DB writer** — buffers results in memory, flushes in batches every 1–2 seconds
 - **Notifier** — listens for state-change events, dispatches webhooks fire-and-forget
+- **Secrets** — encrypted (AES-256-GCM, optional key) key-value store exposed to tests as `ctx.secrets.NAME`, backed by an in-memory cache so lookups never hit the DB during a test run
 - **Metrics** — registers prom-client counters/histograms, serves `/metrics`
 
 ### `apps/web`

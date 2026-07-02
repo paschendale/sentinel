@@ -196,6 +196,14 @@ Remove the flat 10-second `timeout_ms` cap. Replace it with a relative rule: `ti
 
 ---
 
+### ✅ F-26 · Encrypted Secret Store
+
+Global, write-only key-value secret store so credentials don't get hardcoded into test `code`. New `secrets` table; values encrypted at rest with AES-256-GCM (`node:crypto`) under an optional `SECRETS_ENCRYPTION_KEY` env var (optional, not required, so existing deployments don't break on upgrade — if unset, values are stored unencrypted and the dashboard shows a warning banner). Exposed to test code as `ctx.secrets.NAME`, backed by an in-memory cache decrypted once at startup and refreshed on every write so the executor never queries the DB or does crypto per test run. `POST/GET/DELETE /secrets`, `POST /secrets/:id/rotate`, `GET /secrets/status`; a `/secrets` dashboard page for create/rotate/delete.
+
+**Done when:** a test can read `ctx.secrets.API_KEY`; no API response ever includes a secret's value after creation; the API boots and `ctx.secrets` still works with `SECRETS_ENCRYPTION_KEY` unset; one undecryptable secret is skipped with a logged warning instead of crashing the process at startup.
+
+---
+
 ## Maintenance Tasks
 
 ### ✅ M-01 · Semantic Release

@@ -8,6 +8,7 @@ import { statusRoutes } from './routes/status.js'
 import { authRoutes } from './routes/auth.js'
 import { channelsRoutes } from './routes/channels.js'
 import { tagsRoutes } from './routes/tags.js'
+import { secretsRoutes } from './routes/secrets.js'
 import { verifyJwt } from './auth/jwt.js'
 
 const PUBLIC_ROUTES: Array<{ method: string; prefix: string }> = [
@@ -74,5 +75,6 @@ export async function buildServer() {
   await app.register(statusRoutes, { prefix: '/status' })
   await app.register(channelsRoutes, { prefix: '/channels' })
   await app.register(tagsRoutes, { prefix: '/tags' })
+  await app.register(secretsRoutes, { prefix: '/secrets' })
   return app
 }
