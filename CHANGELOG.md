@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/paschendale/sentinel/compare/v1.14.1...v1.15.0) (2026-07-02)
+
+
+### Features
+
+* add tag to page title and description, also add optional parameters to track period ([8dc5194](https://github.com/paschendale/sentinel/commit/8dc51942f7c75bb385e4df10625d4cb75c905057))
+
 ## [1.14.1](https://github.com/paschendale/sentinel/compare/v1.14.0...v1.14.1) (2026-06-09)
 
 
