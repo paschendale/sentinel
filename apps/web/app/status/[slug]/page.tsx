@@ -25,7 +25,8 @@ export default async function TagStatusPage({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
-  const tests = await getTagStatus(slug)
+  const tag = decodeURIComponent(slug)
+  const tests = await getTagStatus(tag)
 
   if (tests === null) notFound()
 
@@ -35,14 +36,14 @@ export default async function TagStatusPage({
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center gap-2.5">
             <SentinelLogo className="h-7 text-zinc-100" />
-            <h1 className="text-zinc-100 text-lg font-medium">{slug} · status</h1>
+            <h1 className="text-zinc-100 text-lg font-medium">{tag} · status</h1>
           </div>
           <a href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
             all tests →
           </a>
         </div>
 
-        <StatusPageContent tests={tests} tag={slug} />
+        <StatusPageContent tests={tests} tag={tag} />
       </div>
     </main>
   )
