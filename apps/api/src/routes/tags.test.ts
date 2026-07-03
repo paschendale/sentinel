@@ -49,6 +49,24 @@ describe('tags routes', () => {
     expect(res.statusCode).toBe(201)
     const insertCall = mockQuery.mock.calls[1]
     expect(insertCall?.[0]).toContain('INSERT INTO channel_assignments')
-    expect(insertCall?.[1]).toEqual(['channel-1', 'tag', 'prod'])
+    expect(insertCall?.[1]).toEqual(['channel-1', 'tag', 'prod', ['fail', 'warning', 'recovery']])
+  })
+
+  it('defaults event_types to all three when omitted, and passes through explicit subset', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: 'channel-1' }] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/tags/prod/channels',
+      headers: { authorization: 'Bearer test-token' },
+      payload: { channel_id: 'channel-1', event_types: ['warning'] },
+    })
+
+    expect(res.statusCode).toBe(201)
+    const insertCall = mockQuery.mock.calls[1]
+    expect(insertCall?.[1]).toEqual(['channel-1', 'tag', 'prod', ['warning']])
   })
 })
