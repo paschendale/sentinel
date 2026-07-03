@@ -4,25 +4,11 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { NotificationChannel, NotificationChannelType } from '@sentinel/shared'
 import { fetchWithAuth } from '../../../lib/auth-client'
+import { ChannelTypeBadge } from '../../_components/channel-type-badge'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
 const CHANNEL_TYPES: NotificationChannelType[] = ['discord', 'slack', 'webhook', 'email']
-
-const TYPE_BADGE_STYLES: Record<NotificationChannelType, string> = {
-  discord: 'bg-indigo-950 text-indigo-400',
-  slack: 'bg-emerald-950 text-emerald-400',
-  webhook: 'bg-zinc-800 text-zinc-400',
-  email: 'bg-amber-950 text-amber-400',
-}
-
-function ChannelTypeBadge({ type }: { type: NotificationChannelType }) {
-  return (
-    <span className={`text-xs px-1.5 py-0.5 rounded-sm font-mono ${TYPE_BADGE_STYLES[type]}`}>
-      {type}
-    </span>
-  )
-}
 
 interface ChannelFormState {
   name: string

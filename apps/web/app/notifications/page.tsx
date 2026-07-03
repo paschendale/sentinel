@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
-import type { NotificationChannel } from '@sentinel/shared'
+import type { NotificationChannel, AssignedChannel } from '@sentinel/shared'
 import { serverAuthHeaders } from '../../lib/auth-server'
 import { ChannelManager } from './_components/channel-manager'
 import { TagAssignmentPanel } from './_components/tag-assignment-panel'
@@ -32,7 +32,7 @@ async function getTags(hdrs: Record<string, string>): Promise<string[]> {
 async function getTagAssignments(
   tags: string[],
   hdrs: Record<string, string>,
-): Promise<Record<string, NotificationChannel[]>> {
+): Promise<Record<string, AssignedChannel[]>> {
   const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
   const entries = await Promise.all(
     tags.map(async tag => {
@@ -41,7 +41,7 @@ async function getTagAssignments(
           cache: 'no-store',
           headers: hdrs,
         })
-        const channels: NotificationChannel[] = res.ok ? await res.json() as NotificationChannel[] : []
+        const channels: AssignedChannel[] = res.ok ? await res.json() as AssignedChannel[] : []
         return [tag, channels] as const
       } catch {
         return [tag, []] as const

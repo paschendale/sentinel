@@ -78,6 +78,7 @@ pnpm workspaces manage the monorepo.
 - Fail alert only after **3 consecutive failures** (configurable `failure_threshold`)
 - Warning alert fires on first `warn` result — no threshold, just cooldown
 - `lastNotificationAt` and `lastWarningAt` are tracked independently so a warning never suppresses a subsequent fail alert
+- Channel routing is filterable per event type: each `channel_assignments` row carries an `event_types` array, and the channel-selection query filters on the event type already resolved above — so a single test can route `warning` to one channel and `fail` to another without needing separate tests per event type
 
 ### Observability
 - **Pino** for structured JSON logging — logs are the primary operational output

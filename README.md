@@ -448,7 +448,7 @@ Sentinel sends alerts on state transitions.
 
 1. Go to the **Channels** page in the dashboard.
 2. Create a channel with a name and webhook URL.
-3. Assign channels to tests (per-test) or to tags (all tests with that tag inherit the channel).
+3. Assign channels to tests (per-test) or to tags (all tests with that tag inherit the channel). Each assignment can be narrowed to a subset of event types (see below), so a single test can route warnings and failures to different channels instead of needing separate tests per event type.
 
 ### Alert types
 
@@ -459,6 +459,14 @@ Sentinel sends alerts on state transitions.
 | **Recovery** | Test returns to `success` after a warning or failure alert was sent | Green |
 
 Warning and failure alerts have independent cooldown windows — a warning notification does not suppress a subsequent failure alert.
+
+### Per-event-type routing
+
+By default, an assigned channel receives all three alert types. Each assigned channel shows three small toggle pills (F / W / R for failure / warning / recovery) — click a pill to stop that event type from routing to that channel. At least one event type must stay enabled per assignment.
+
+This means a single test can send warnings to a low-priority Slack channel while routing failures to a paging Discord webhook, without splitting the check into two separate tests.
+
+A test's **Notifications** section on its detail page (`/tests/:id`) shows the full effective scheme: every channel that will actually fire for it, merging channels assigned directly to the test with any inherited from its tags, each with its active event types and where the routing came from (`direct` or `tag: <name>`) — so tag-inherited routing isn't invisible just because it doesn't show up in the test's own editor.
 
 ### Alert payloads
 

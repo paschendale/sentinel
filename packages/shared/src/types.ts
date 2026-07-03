@@ -1,5 +1,6 @@
 export type TestStatus = 'success' | 'warn' | 'fail' | 'timeout'
 export type NotificationChannelType = 'discord' | 'slack' | 'webhook' | 'email'
+export type NotificationEventType = 'fail' | 'recovery' | 'warning'
 
 export interface Test {
   id: string
@@ -52,6 +53,28 @@ export interface NotificationChannel {
   enabled: boolean
 }
 
+/** A NotificationChannel as returned alongside a specific assignment — includes that assignment's event-type filter. */
+export interface AssignedChannel extends NotificationChannel {
+  event_types: NotificationEventType[]
+}
+
+/** One channel_assignments row backing an effective channel — where the routing came from. */
+export interface EffectiveChannelSource {
+  scope_type: 'test' | 'tag'
+  scope_value: string
+  event_types: NotificationEventType[]
+}
+
+/**
+ * A channel actually wired to notify a test, once test-scoped and tag-inherited
+ * assignments are merged. `event_types` is the union across every matching source —
+ * this is what the notifier will actually fire, not just what's assigned directly.
+ */
+export interface EffectiveChannelAssignment extends NotificationChannel {
+  event_types: NotificationEventType[]
+  sources: EffectiveChannelSource[]
+}
+
 /** Metadata only — the value is write-only and never returned by any API response. */
 export interface Secret {
   id: string
@@ -64,6 +87,7 @@ export interface ChannelAssignment {
   channel_id: string
   scope_type: 'test' | 'tag'
   scope_value: string
+  event_types: NotificationEventType[]
 }
 
 export interface TestState {

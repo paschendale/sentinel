@@ -104,19 +104,38 @@ A named, encrypted-at-rest value referenced in test code as `ctx.secrets.NAME`. 
 ---
 
 ### NotificationChannel
-A delivery target for alerts related to a test.
+A named, global delivery target for alerts. Not scoped to a `Test` directly — attached via `ChannelAssignment`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `string` (nanoid) | Unique identifier |
-| `test_id` | `string` | FK → Test |
-| `type` | `'discord' \| 'slack' \| 'webhook'` | Channel type |
-| `webhook_url` | `string` | Target URL for the notification |
+| `name` | `string` | Human-readable label |
+| `type` | `'discord' \| 'slack' \| 'webhook' \| 'email'` | Channel type |
+| `webhook_url` | `string \| null` | Target URL — required for `discord`/`slack`/`webhook` |
+| `email_to` | `string[] \| null` | Recipient addresses — required for `email` |
 | `enabled` | `boolean` | Whether this channel is active |
 
 **Invariants:**
-- `webhook_url` must be a valid HTTPS URL
-- Multiple channels can exist per test
+- `webhook_url` must be a valid HTTPS URL when set
+- `type = 'email'` requires a non-empty `email_to`; every other type requires `webhook_url`
+- A channel is global — it must be attached to a `Test` or a tag via `ChannelAssignment` before it receives anything
+
+---
+
+### ChannelAssignment
+Attaches a `NotificationChannel` to a `Test` (directly) or to a tag (inherited by every test with that tag), and filters which notification event types that attachment fires on. Backed by the `channel_assignments` table.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `channel_id` | `string` | FK → NotificationChannel |
+| `scope_type` | `'test' \| 'tag'` | Whether `scope_value` is a `Test.id` or a tag string |
+| `scope_value` | `string` | The `Test.id` or tag being targeted |
+| `event_types` | `('fail' \| 'warning' \| 'recovery')[]` | Which notification events this assignment fires on |
+
+**Invariants:**
+- Primary key is `(channel_id, scope_type, scope_value)` — one assignment per channel per scope
+- `event_types` must be non-empty and drawn only from `'fail' | 'warning' | 'recovery'`; defaults to all three (existing behavior) when not narrowed
+- A channel fires for a given test/event if **any** assignment matching that test — whether `scope_type = 'test'` directly, or `scope_type = 'tag'` via one of the test's tags — includes that event type. This lets a single test route, say, `warning` to one channel and `fail` to another without needing separate tests per event type.
 
 ---
 
@@ -144,10 +163,15 @@ Runtime state for each test. Tracks alert logic. Persisted to DB but treated as 
 
 ```
 Test (1) ──────────────────────→ (M) TestRun
-Test (1) ──────────────────────→ (M) NotificationChannel
+Test (1) ──────────────────────→ (M) ChannelAssignment (scope_type='test')
 Test (1) ──────────────────────→ (1) TestState
 Test (1) ──────────────────────→ (M) UptimeDaily
 TestRun (1) ───────────────────→ (M) AssertionResult
+NotificationChannel (1) ───────→ (M) ChannelAssignment
+
+ChannelAssignment.scope_value also matches tags (scope_type='tag'), which is a
+loose reference against Test.tags rather than a foreign key — a channel
+assigned to a tag applies to every Test carrying that tag.
 
 Secret is global and unrelated to any other entity — every Test can read every
 Secret via ctx.secrets, there is no join table.

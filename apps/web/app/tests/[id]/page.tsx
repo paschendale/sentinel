@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
-import type { Incident, Test } from '@sentinel/shared'
+import type { EffectiveChannelAssignment, Incident, Test } from '@sentinel/shared'
 import { DeleteTestButton } from '../_components/delete-test-button'
 import { RunLatencyChartLoader } from '../_components/run-latency-chart-loader'
 import { RunHistory, type RunRow } from '../_components/run-history'
 import { RunNowPanel } from '../_components/run-now-panel'
 import { IncidentTimeline } from '../_components/incident-timeline'
+import { NotificationScheme } from '../_components/notification-scheme'
 import { serverAuthHeaders } from '../../../lib/auth-server'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +35,17 @@ async function getIncidents(id: string): Promise<Incident[]> {
     const res = await fetch(`${apiUrl}/tests/${id}/incidents`, { cache: 'no-store', headers: serverAuthHeaders(await cookies()) })
     if (!res.ok) return []
     return res.json() as Promise<Incident[]>
+  } catch {
+    return []
+  }
+}
+
+async function getEffectiveChannels(id: string): Promise<EffectiveChannelAssignment[]> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
+  try {
+    const res = await fetch(`${apiUrl}/tests/${id}/channels/effective`, { cache: 'no-store', headers: serverAuthHeaders(await cookies()) })
+    if (!res.ok) return []
+    return res.json() as Promise<EffectiveChannelAssignment[]>
   } catch {
     return []
   }
@@ -72,7 +84,7 @@ export default async function TestDetailPage({ params }: { params: Promise<{ id:
   const { id } = await params
   const test = await getTest(id)
   if (!test) notFound()
-  const [runs, incidents] = await Promise.all([getRuns(id), getIncidents(id)])
+  const [runs, incidents, channels] = await Promise.all([getRuns(id), getIncidents(id), getEffectiveChannels(id)])
 
   return (
     <main className="min-h-screen w-full bg-zinc-950 px-8 py-10">
@@ -141,6 +153,11 @@ export default async function TestDetailPage({ params }: { params: Promise<{ id:
             </div>
           )}
         </div>
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-zinc-500 text-xs tracking-widest uppercase font-normal mb-3">Notifications</h2>
+        <NotificationScheme channels={channels} testId={id} />
       </section>
 
       <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-12 lg:items-start">

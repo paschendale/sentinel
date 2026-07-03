@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
+import type { NotificationEventType } from '@sentinel/shared'
 import { pool } from '../pool.js'
 
-export type NotificationEventType = 'fail' | 'recovery' | 'warning'
 export type NotificationEventPhase = 'evaluated' | 'skipped' | 'attempted' | 'sent' | 'failed'
 export type NotificationEventReason =
   | 'below_threshold'

@@ -61,6 +61,40 @@ describe('triggerNotifications', () => {
     const dispatchSql = dispatchCall?.[0]
     expect(dispatchSql).toContain('LOWER(BTRIM(ca.scope_value))')
     expect(dispatchSql).toContain('SELECT LOWER(BTRIM(tag_value))')
+    expect(dispatchSql).toContain('$2 = ANY(ca.event_types)')
+    expect(dispatchCall?.[1]).toEqual(['test-1', 'fail'])
+  })
+
+  it('passes the resolved event type as a query param when filtering channels for warning', async () => {
+    // warning path: state lookup, update last_warning_at, channel lookup
+    mockQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          test_id: 'test-1',
+          consecutive_failures: 0,
+          last_notification_at: null,
+          last_warning_at: null,
+          failure_threshold: 3,
+          cooldown_ms: 300000,
+        }],
+      } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+
+    triggerNotifications([{
+      test_id: 'test-1',
+      new_status: 'warn',
+      prev_status: 'success',
+      error_message: 'slow response',
+      duration_ms: 500,
+    }])
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const dispatchCall = mockQuery.mock.calls.find((call) => {
+      const sql = call[0]
+      return typeof sql === 'string' && sql.includes('SELECT DISTINCT nc.id, nc.type')
+    })
+    expect(dispatchCall?.[1]).toEqual(['test-1', 'warning'])
   })
 
   it('dispatches both fail and recovery events for tag-assigned channel', async () => {

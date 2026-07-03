@@ -39,7 +39,7 @@ export async function tagsRoutes(app: FastifyInstance): Promise<void> {
       [parsed.data.channel_id]
     )
     if (chExists.length === 0) return reply.status(404).send({ error: 'channel not found' })
-    await addAssignment(parsed.data.channel_id, 'tag', tag)
+    await addAssignment(parsed.data.channel_id, 'tag', tag, parsed.data.event_types)
     return reply.status(201).send()
   })
 
