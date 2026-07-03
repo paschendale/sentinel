@@ -1,3 +1,22 @@
+# [1.20.0](https://github.com/paschendale/sentinel/compare/v1.19.0...v1.20.0) (2026-07-03)
+
+
+### Bug Fixes
+
+* **web:** persist tag channel event-type toggle only after confirmed save ([4f8cbd7](https://github.com/paschendale/sentinel/commit/4f8cbd7881b6b7df291de056e7af765c420e09ca))
+
+
+### Features
+
+* **api:** add effective channel routing endpoint for a test ([333d370](https://github.com/paschendale/sentinel/commit/333d370e69564b8e5dffe5ea16d4c9ea42dcc304))
+* **api:** upsert channel assignments with per-event-type filter ([3410eb1](https://github.com/paschendale/sentinel/commit/3410eb1b9b6a23e7c78aeb587a9b5d5963df3e3c))
+* **db:** add event_types filter to channel_assignments ([3a5f14a](https://github.com/paschendale/sentinel/commit/3a5f14a7a7e9811e7227126ec5cfb7e34ef19dcf))
+* **notifier:** filter channel selection by resolved event type ([3f014b1](https://github.com/paschendale/sentinel/commit/3f014b15c9d2a1e4db9f1dd4e57256e6743f6bd5))
+* **shared:** add EffectiveChannelAssignment type ([35c5149](https://github.com/paschendale/sentinel/commit/35c5149c13b1c542fe897b2fb8930e7aa32b2ba1))
+* **shared:** add NotificationEventType and per-assignment event_types filter ([4ff517a](https://github.com/paschendale/sentinel/commit/4ff517a6165c491bf57576391f050f9b8456fc5f))
+* **web:** add per-event-type routing toggles to channel assignment UI ([6cf9fbf](https://github.com/paschendale/sentinel/commit/6cf9fbf19f3710b2439e405352a26a0c7233345f))
+* **web:** show effective notification scheme on test detail page ([5fc00ff](https://github.com/paschendale/sentinel/commit/5fc00ffce95f6c05a8bdfcee5301f63e9b474344))
+
 # [1.19.0](https://github.com/paschendale/sentinel/compare/v1.18.0...v1.19.0) (2026-07-03)
 
 
