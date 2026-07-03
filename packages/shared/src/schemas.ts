@@ -50,8 +50,11 @@ export const UpdateNotificationChannelSchema = z.object({
   enabled: z.boolean().optional(),
 })
 
+export const NotificationEventTypeSchema = z.enum(['fail', 'warning', 'recovery'])
+
 export const CreateAssignmentSchema = z.object({
   channel_id: z.string().min(1),
+  event_types: z.array(NotificationEventTypeSchema).min(1).max(3).default(['fail', 'warning', 'recovery']),
 })
 
 // UPPER_SNAKE_CASE — this is the literal property key under ctx.secrets, so it must
