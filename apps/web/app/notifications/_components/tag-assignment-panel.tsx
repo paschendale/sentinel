@@ -5,6 +5,7 @@ import type { NotificationChannel, AssignedChannel, NotificationEventType } from
 import { fetchWithAuth } from '../../../lib/auth-client'
 import { EventTypeToggles } from '../../_components/event-type-toggles'
 import { ChannelTypeBadge } from '../../_components/channel-type-badge'
+import { ALL_EVENT_TYPES } from '../../_components/event-type-styles'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -74,7 +75,7 @@ function TagRow({ tag, allChannels, initialAssigned }: TagRowProps) {
     if (!channelId) return
     setBusy(true)
     try {
-      const eventTypes: NotificationEventType[] = ['fail', 'warning', 'recovery']
+      const eventTypes: NotificationEventType[] = ALL_EVENT_TYPES
       const res = await fetchWithAuth(`${API_URL}/tags/${encodeURIComponent(tag)}/channels`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

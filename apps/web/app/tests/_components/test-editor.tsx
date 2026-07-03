@@ -8,6 +8,7 @@ import type { Test, NotificationChannel, AssignedChannel, NotificationEventType 
 import { fetchWithAuth } from '../../../lib/auth-client'
 import { EventTypeToggles } from '../../_components/event-type-toggles'
 import { ChannelTypeBadge } from '../../_components/channel-type-badge'
+import { ALL_EVENT_TYPES } from '../../_components/event-type-styles'
 
 function sameEventTypes(a: NotificationEventType[], b: NotificationEventType[]): boolean {
   if (a.length !== b.length) return false
@@ -423,7 +424,7 @@ export default function TestEditor({ test }: Props) {
             onSelect={id => {
               const ch = availableChannels.find(c => c.id === id)
               if (!ch) return
-              setAssignedChannels(prev => [...prev, { ...ch, event_types: ['fail', 'warning', 'recovery'] }])
+              setAssignedChannels(prev => [...prev, { ...ch, event_types: ALL_EVENT_TYPES }])
             }}
           />
           {availableChannels.length === 0 && (

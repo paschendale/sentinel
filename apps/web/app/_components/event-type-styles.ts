@@ -11,3 +11,6 @@ export const EVENT_TYPE_ACTIVE_STYLES: Record<NotificationEventType, string> = {
   warning: 'bg-yellow-950 text-yellow-400',
   recovery: 'bg-emerald-950 text-emerald-400',
 }
+
+/** Default event-type set for a newly-added channel assignment — every type active. */
+export const ALL_EVENT_TYPES: NotificationEventType[] = EVENT_TYPES.map(e => e.type)
