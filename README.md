@@ -68,8 +68,8 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `LOG_LEVEL` | No | Pino log level for the API process (`trace` … `fatal`; default: `info`) |
 | `LOG_PRETTY` | No | When `true`, print human-readable lines instead of JSON (default: `true` except when `NODE_ENV=production`) |
 | `NODE_ENV` | No | Set to `production` in deployment for JSON logs and `LOG_PRETTY` default off |
-| `FTP_TEMP_DIR` | No | Directory `ctx.ftp.get` writes temp downloads to (default: OS temp dir + `sentinel-ftp`) |
-| `FTP_MAX_DOWNLOAD_BYTES` | No | Max bytes `ctx.ftp.get` will download before aborting (default: `5242880`, 5MB) |
+| `FTP_TEMP_DIR` | No | Directory `ctx.ftp.get` and `ctx.s3.get` write temp downloads to (default: OS temp dir + `sentinel-ftp`) |
+| `FTP_MAX_DOWNLOAD_BYTES` | No | Max bytes `ctx.ftp.get` or `ctx.s3.get` will download before aborting (default: `5242880`, 5MB) |
 | `SECRETS_ENCRYPTION_KEY` | No | Base64-encoded 32-byte AES-256-GCM key for encrypting `ctx.secrets` values at rest (generate with `openssl rand -base64 32`). If unset, secrets are stored **unencrypted** — `ctx.secrets` still works, but the dashboard shows a warning banner |
 
 ### Single Container (no Compose)
@@ -213,6 +213,37 @@ ctx.assert('file not empty', file.size > 0)
 
 **Downloads are never persisted.** `ctx.ftp.get` streams the remote file into a server-managed temp file, reads it into memory, and deletes it before the call returns — your test only ever sees the string `body`, never a path. Downloads larger than `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) are aborted with an `FTP_SIZE_LIMIT_ERROR`. A periodic background sweep also removes any leftover temp file older than 15 minutes, as a backstop for crashes or timed-out runs.
 
+#### `ctx.s3` — S3 client (built-in SigV4 signing)
+
+```js
+const res = await ctx.s3.get('https://examplebucket.s3.us-east-1.amazonaws.com/test.txt', {
+  accessKey: ctx.secrets.S3_ACCESS_KEY,
+  secretKey: ctx.secrets.S3_SECRET_KEY,
+  region: 'us-east-1',
+})
+ctx.assert('object exists', res.status === 200)
+
+const head = await ctx.s3.head('https://examplebucket.s3.us-east-1.amazonaws.com/test.txt', {
+  accessKey: ctx.secrets.S3_ACCESS_KEY,
+  secretKey: ctx.secrets.S3_SECRET_KEY,
+  region: 'us-east-1',
+})
+ctx.assert('object metadata reachable', head.status === 200)
+```
+
+`ctx.s3.get(url, options)` downloads an object; `ctx.s3.head(url, options)` checks existence/metadata without downloading the body. Both sign the request with AWS Signature Version 4 — implemented directly with `node:crypto`, no AWS SDK — and return the same `{ status, body, headers, json() }` shape as `ctx.http`.
+
+`ctx.s3` options:
+
+- `accessKey` / `secretKey` — required credentials used to sign the request
+- `region` — required, must match the bucket's actual region (used in the SigV4 credential scope)
+- `sessionToken` — optional, for temporary/STS credentials
+- `headers` — optional extra headers (e.g. `Range: bytes=0-9`); these are included in the signature
+
+Like any other credential, store `accessKey`/`secretKey` as [secrets](#secrets) and read them via `ctx.secrets.NAME` rather than hardcoding them in test code, exactly as shown above. `url` can be virtual-hosted-style, path-style, or any S3-compatible endpoint (MinIO, Cloudflare R2, etc.) — signing only depends on the request's host, path, and query string, so nothing AWS-specific is required beyond the four SigV4 inputs. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL), `code: 'S3_FETCH_ERROR'` (the request itself failed), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (see below).
+
+**Downloads are never persisted.** Like `ctx.ftp.get`, `ctx.s3.get` streams the object into the same server-managed temp directory (`FTP_TEMP_DIR`), reads it into memory, and deletes it before the call returns — your test only ever sees the string `body`, never a path, and nothing is left behind on disk. Downloads larger than `FTP_MAX_DOWNLOAD_BYTES` (default 5MB, shared with `ctx.ftp.get`) abort the request mid-transfer with an `S3_SIZE_LIMIT_ERROR`. The same periodic background sweep that backstops `ctx.ftp.get` also covers `ctx.s3.get`, since both write into the same directory — orphaned temp files from a crash or timed-out run are removed after 15 minutes either way. `ctx.s3.head` never downloads a body, so it has nothing to clean up.
+
 #### `ctx.secrets` — Encrypted secret access
 
 Reference values registered on the [Secrets page](#secrets) instead of hardcoding API keys or credentials in test code:
@@ -348,6 +379,50 @@ return caught !== null && caught.code === 'FTP_DOWNLOAD_ERROR'
 ```
 
 All three examples above run as-is against [test.rebex.net](https://test.rebex.net), a public read-only FTP server Rebex maintains specifically for testing FTP clients — useful for trying out `ctx.ftp` before pointing it at your own server.
+
+**S3 object download:**
+
+```js
+const res = await ctx.s3.get('https://examplebucket.s3.us-east-1.amazonaws.com/hello.txt', {
+  accessKey: ctx.secrets.S3_ACCESS_KEY,
+  secretKey: ctx.secrets.S3_SECRET_KEY,
+  region: 'us-east-1',
+})
+ctx.log(`status=${res.status} body=${res.body}`)
+ctx.assert('status is 200', res.status === 200)
+ctx.assert('body not empty', res.body.length > 0)
+return res.status === 200
+```
+
+**S3 existence check (HEAD, no body downloaded):**
+
+```js
+const res = await ctx.s3.head('https://examplebucket.s3.us-east-1.amazonaws.com/hello.txt', {
+  accessKey: ctx.secrets.S3_ACCESS_KEY,
+  secretKey: ctx.secrets.S3_SECRET_KEY,
+  region: 'us-east-1',
+})
+ctx.log(`HEAD status=${res.status} content-length=${res.headers['content-length']}`)
+ctx.assert('object exists', res.status === 200)
+return res.status === 200
+```
+
+Unlike `ctx.ftp`, there's no public server you can point these at anonymously — SigV4 requires real credentials tied to an account, and S3 rejects a request carrying an invalid `Authorization` header even for objects that are otherwise publicly readable. To try `ctx.s3` locally without an AWS account, run a throwaway [MinIO](https://min.io/) container (S3-compatible) and seed it with the AWS CLI:
+
+```bash
+docker run -d --name sentinel-demo-minio -p 19000:9000 -p 19001:9001 \
+  -e MINIO_ROOT_USER=demoaccesskey \
+  -e MINIO_ROOT_PASSWORD=demosecretkey123 \
+  minio/minio server /data --console-address ":9001"
+
+AWS_ACCESS_KEY_ID=demoaccesskey AWS_SECRET_ACCESS_KEY=demosecretkey123 \
+  aws --endpoint-url http://localhost:19000 --region us-east-1 s3 mb s3://sentinel-demo
+echo "hello from ctx.s3 in Sentinel" | \
+  AWS_ACCESS_KEY_ID=demoaccesskey AWS_SECRET_ACCESS_KEY=demosecretkey123 \
+  aws --endpoint-url http://localhost:19000 --region us-east-1 s3 cp - s3://sentinel-demo/hello.txt
+```
+
+Then store `demoaccesskey`/`demosecretkey123` as the `S3_ACCESS_KEY`/`S3_SECRET_KEY` secrets and point the examples above at `http://localhost:19000/sentinel-demo/hello.txt` instead of the AWS URL. Tear down with `docker rm -f sentinel-demo-minio` when you're done — nothing here is part of `docker-compose.yml`, it's purely a local scratch fixture for trying the feature out.
 
 ### Scheduling & Timeouts
 
