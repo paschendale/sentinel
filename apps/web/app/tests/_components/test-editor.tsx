@@ -4,9 +4,10 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
-import type { Test, NotificationChannel, NotificationChannelType, AssignedChannel, NotificationEventType } from '@sentinel/shared'
+import type { Test, NotificationChannel, AssignedChannel, NotificationEventType } from '@sentinel/shared'
 import { fetchWithAuth } from '../../../lib/auth-client'
 import { EventTypeToggles } from '../../_components/event-type-toggles'
+import { ChannelTypeBadge } from '../../_components/channel-type-badge'
 
 function sameEventTypes(a: NotificationEventType[], b: NotificationEventType[]): boolean {
   if (a.length !== b.length) return false
@@ -17,21 +18,6 @@ function sameEventTypes(a: NotificationEventType[], b: NotificationEventType[]):
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
-
-const TYPE_BADGE_STYLES: Record<NotificationChannelType, string> = {
-  discord: 'bg-indigo-950 text-indigo-400',
-  slack: 'bg-emerald-950 text-emerald-400',
-  webhook: 'bg-zinc-800 text-zinc-400',
-  email: 'bg-amber-950 text-amber-400',
-}
-
-function NotificationTypeBadge({ type }: { type: NotificationChannelType }) {
-  return (
-    <span className={`text-xs px-1.5 py-0.5 rounded-sm font-mono shrink-0 ${TYPE_BADGE_STYLES[type]}`}>
-      {type}
-    </span>
-  )
-}
 
 interface PickerProps {
   options: NotificationChannel[]
@@ -75,7 +61,7 @@ function NotificationPicker({ options, onSelect, disabled }: PickerProps) {
               onClick={() => { onSelect(ch.id); setOpen(false) }}
               className="flex items-center gap-2 w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
             >
-              <NotificationTypeBadge type={ch.type} />
+              <ChannelTypeBadge type={ch.type} />
               {ch.name}
             </button>
           ))}
@@ -413,7 +399,7 @@ export default function TestEditor({ test }: Props) {
             <div className="flex flex-wrap gap-1 mb-2">
               {assignedChannels.map(ch => (
                 <span key={ch.id} className="flex items-center gap-1.5 text-xs px-2 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-sm">
-                  <NotificationTypeBadge type={ch.type} />
+                  <ChannelTypeBadge type={ch.type} />
                   {ch.name}
                   <EventTypeToggles
                     value={ch.event_types}
