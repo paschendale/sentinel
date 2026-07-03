@@ -5,6 +5,7 @@ import {
   insertNotificationEvent,
   type NotificationEventReason,
 } from '../db/queries/notification-events.js'
+import { CHANNEL_SCOPE_MATCH_SQL } from '../db/queries/assignments.js'
 import { RESEND_API_KEY, RESEND_FROM } from '../config.js'
 
 export interface NotificationCandidate {
@@ -145,18 +146,7 @@ async function dispatchForTest(
        AND nc.id IN (
          SELECT ca.channel_id FROM channel_assignments ca
          WHERE $2 = ANY(ca.event_types)
-           AND (
-             (ca.scope_type = 'test' AND ca.scope_value = $1)
-             OR (
-               ca.scope_type = 'tag'
-               AND LOWER(BTRIM(ca.scope_value)) = ANY(
-                 ARRAY(
-                   SELECT LOWER(BTRIM(tag_value))
-                   FROM unnest(t.tags) AS tag_value
-                 )
-               )
-             )
-           )
+           AND (${CHANNEL_SCOPE_MATCH_SQL})
        )`,
     [testId, event],
   )

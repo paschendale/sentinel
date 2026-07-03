@@ -1,6 +1,24 @@
 import type { AssignedChannel, EffectiveChannelAssignment, NotificationEventType } from '@sentinel/shared'
 import { pool } from '../pool.js'
 
+/**
+ * WHERE fragment matching channel_assignments rows that apply to a test — either
+ * assigned directly (scope_type='test') or inherited via one of the test's tags
+ * (scope_type='tag'). Assumes the query aliases channel_assignments as `ca` and
+ * tests as `t`, with the test id bound as $1. Shared with the notifier's dispatch
+ * query (apps/api/src/notifier/dispatch.ts) so the actual dispatch behavior and
+ * the "effective channels" display computed here can't silently drift apart.
+ */
+export const CHANNEL_SCOPE_MATCH_SQL = `
+  (ca.scope_type = 'test' AND ca.scope_value = $1)
+  OR (
+    ca.scope_type = 'tag'
+    AND LOWER(BTRIM(ca.scope_value)) = ANY(
+      ARRAY(SELECT LOWER(BTRIM(tag_value)) FROM unnest(t.tags) AS tag_value)
+    )
+  )
+`
+
 export async function getAssignedChannels(
   scopeType: 'test' | 'tag',
   scopeValue: string,
@@ -18,10 +36,11 @@ export async function getAssignedChannels(
 
 /**
  * Every channel actually wired to notify a test, merging its direct assignment
- * with any inherited via the test's tags — mirrors the scope-matching the notifier
- * uses at dispatch time (apps/api/src/notifier/dispatch.ts), minus the event filter.
- * A channel assigned via multiple matching rows gets the union of their event_types,
- * since the notifier fires it if ANY matching row includes the event.
+ * with any inherited via the test's tags — uses the same CHANNEL_SCOPE_MATCH_SQL
+ * fragment as the notifier's dispatch query (apps/api/src/notifier/dispatch.ts),
+ * minus the event filter, so the two can't drift apart. A channel assigned via
+ * multiple matching rows gets the union of their event_types, since the notifier
+ * fires it if ANY matching row includes the event.
  */
 export async function getEffectiveChannelsForTest(testId: string): Promise<EffectiveChannelAssignment[]> {
   const { rows } = await pool.query<{
@@ -40,13 +59,7 @@ export async function getEffectiveChannelsForTest(testId: string): Promise<Effec
      FROM notification_channels nc
      JOIN tests t ON t.id = $1
      JOIN channel_assignments ca ON ca.channel_id = nc.id
-     WHERE (ca.scope_type = 'test' AND ca.scope_value = $1)
-        OR (
-          ca.scope_type = 'tag'
-          AND LOWER(BTRIM(ca.scope_value)) = ANY(
-            ARRAY(SELECT LOWER(BTRIM(tag_value)) FROM unnest(t.tags) AS tag_value)
-          )
-        )
+     WHERE ${CHANNEL_SCOPE_MATCH_SQL}
      ORDER BY nc.name ASC`,
     [testId],
   )
