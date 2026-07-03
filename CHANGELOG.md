@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/paschendale/sentinel/compare/v1.18.0...v1.19.0) (2026-07-03)
+
+
+### Features
+
+* **executor:** add ctx.s3 S3 client with SigV4 signing and disk-based downloads ([81a4ddc](https://github.com/paschendale/sentinel/commit/81a4ddc7758ff726cf842e646b2f73eef00e22a2))
+
 # [1.18.0](https://github.com/paschendale/sentinel/compare/v1.17.0...v1.18.0) (2026-07-02)
 
 
