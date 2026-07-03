@@ -1,8 +1,9 @@
 'use client'
 
 import { useRef, useEffect, useState } from 'react'
-import type { NotificationChannel, NotificationChannelType } from '@sentinel/shared'
+import type { NotificationChannel, NotificationChannelType, AssignedChannel, NotificationEventType } from '@sentinel/shared'
 import { fetchWithAuth } from '../../../lib/auth-client'
+import { EventTypeToggles } from '../../_components/event-type-toggles'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -76,25 +77,26 @@ function ChannelPicker({ options, onSelect, disabled }: PickerProps) {
 interface TagRowProps {
   tag: string
   allChannels: NotificationChannel[]
-  initialAssigned: NotificationChannel[]
+  initialAssigned: AssignedChannel[]
 }
 
 function TagRow({ tag, allChannels, initialAssigned }: TagRowProps) {
-  const [assigned, setAssigned] = useState<NotificationChannel[]>(initialAssigned)
+  const [assigned, setAssigned] = useState<AssignedChannel[]>(initialAssigned)
   const [busy, setBusy] = useState(false)
 
   async function handleAdd(channelId: string) {
     if (!channelId) return
     setBusy(true)
     try {
+      const eventTypes: NotificationEventType[] = ['fail', 'warning', 'recovery']
       const res = await fetchWithAuth(`${API_URL}/tags/${encodeURIComponent(tag)}/channels`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_id: channelId }),
+        body: JSON.stringify({ channel_id: channelId, event_types: eventTypes }),
       })
       if (res.ok) {
         const ch = allChannels.find(c => c.id === channelId)
-        if (ch) setAssigned(prev => [...prev, ch])
+        if (ch) setAssigned(prev => [...prev, { ...ch, event_types: eventTypes }])
       }
     } catch {
       // fire-and-forget; silent failure
@@ -117,6 +119,19 @@ function TagRow({ tag, allChannels, initialAssigned }: TagRowProps) {
     }
   }
 
+  async function handleToggleEventTypes(channelId: string, eventTypes: NotificationEventType[]) {
+    setAssigned(prev => prev.map(c => (c.id === channelId ? { ...c, event_types: eventTypes } : c)))
+    try {
+      await fetchWithAuth(`${API_URL}/tags/${encodeURIComponent(tag)}/channels`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_id: channelId, event_types: eventTypes }),
+      })
+    } catch {
+      // fire-and-forget; silent failure
+    }
+  }
+
   const unassigned = allChannels.filter(c => !assigned.some(a => a.id === c.id))
 
   return (
@@ -128,6 +143,11 @@ function TagRow({ tag, allChannels, initialAssigned }: TagRowProps) {
             <span key={ch.id} className="flex items-center gap-1.5 text-xs px-2 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-sm">
               <ChannelTypeBadge type={ch.type} />
               {ch.name}
+              <EventTypeToggles
+                value={ch.event_types}
+                onChange={next => void handleToggleEventTypes(ch.id, next)}
+                disabled={busy}
+              />
               <button
                 type="button"
                 disabled={busy}
@@ -151,7 +171,7 @@ function TagRow({ tag, allChannels, initialAssigned }: TagRowProps) {
 interface Props {
   tags: string[]
   allChannels: NotificationChannel[]
-  tagAssignments: Record<string, NotificationChannel[]>
+  tagAssignments: Record<string, AssignedChannel[]>
 }
 
 export function TagAssignmentPanel({ tags, allChannels, tagAssignments }: Props) {

@@ -4,8 +4,15 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
-import type { Test, NotificationChannel, NotificationChannelType } from '@sentinel/shared'
+import type { Test, NotificationChannel, NotificationChannelType, AssignedChannel, NotificationEventType } from '@sentinel/shared'
 import { fetchWithAuth } from '../../../lib/auth-client'
+import { EventTypeToggles } from '../../_components/event-type-toggles'
+
+function sameEventTypes(a: NotificationEventType[], b: NotificationEventType[]): boolean {
+  if (a.length !== b.length) return false
+  const sorted = [...b].sort()
+  return [...a].sort().every((t, i) => t === sorted[i])
+}
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
@@ -121,7 +128,7 @@ export default function TestEditor({ test }: Props) {
   const [running, setRunning] = useState(false)
   const [runResult, setRunResult] = useState<RunResult | null>(null)
   const [availableChannels, setAvailableChannels] = useState<NotificationChannel[]>([])
-  const [assignedChannelIds, setAssignedChannelIds] = useState<string[]>([])
+  const [assignedChannels, setAssignedChannels] = useState<AssignedChannel[]>([])
 
   useEffect(() => {
     fetchWithAuth(`${API_URL}/channels`)
@@ -130,8 +137,8 @@ export default function TestEditor({ test }: Props) {
       .catch(() => {})
     if (test) {
       fetchWithAuth(`${API_URL}/tests/${test.id}/channels`)
-        .then(r => r.ok ? r.json() as Promise<NotificationChannel[]> : [])
-        .then(chs => setAssignedChannelIds(chs.map(c => c.id)))
+        .then(r => r.ok ? r.json() as Promise<AssignedChannel[]> : [])
+        .then(setAssignedChannels)
         .catch(() => {})
     }
   }, [test?.id])
@@ -202,23 +209,29 @@ export default function TestEditor({ test }: Props) {
       // Sync channel assignments
       if (isNew || test) {
         const existingRes = await fetchWithAuth(`${API_URL}/tests/${testId}/channels`)
-        const existing: NotificationChannel[] = existingRes.ok ? await existingRes.json() as NotificationChannel[] : []
-        const existingIds = new Set(existing.map(c => c.id))
-        const desiredIds = new Set(assignedChannelIds)
+        const existing: AssignedChannel[] = existingRes.ok ? await existingRes.json() as AssignedChannel[] : []
+        const existingMap = new Map(existing.map(c => [c.id, c.event_types]))
 
         await Promise.all([
-          ...[...desiredIds].filter(id => !existingIds.has(id)).map(id =>
-            fetchWithAuth(`${API_URL}/tests/${testId}/channels`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ channel_id: id }),
+          ...assignedChannels
+            .filter(ac => {
+              const prev = existingMap.get(ac.id)
+              return !prev || !sameEventTypes(prev, ac.event_types)
             })
-          ),
-          ...[...existingIds].filter(id => !desiredIds.has(id)).map(id =>
-            fetchWithAuth(`${API_URL}/tests/${testId}/channels/${id}`, {
-              method: 'DELETE',
-            })
-          ),
+            .map(ac =>
+              fetchWithAuth(`${API_URL}/tests/${testId}/channels`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel_id: ac.id, event_types: ac.event_types }),
+              })
+            ),
+          ...existing
+            .filter(c => !assignedChannels.some(ac => ac.id === c.id))
+            .map(c =>
+              fetchWithAuth(`${API_URL}/tests/${testId}/channels/${c.id}`, {
+                method: 'DELETE',
+              })
+            ),
         ])
       }
 
@@ -396,29 +409,36 @@ export default function TestEditor({ test }: Props) {
         {/* Notifications */}
         <div>
           <label className="block text-zinc-500 text-xs mb-1.5 tracking-wider uppercase">Notifications</label>
-          {assignedChannelIds.length > 0 && (
+          {assignedChannels.length > 0 && (
             <div className="flex flex-wrap gap-1 mb-2">
-              {assignedChannelIds.map(id => {
-                const ch = availableChannels.find(c => c.id === id)
-                return ch ? (
-                  <span key={id} className="flex items-center gap-1.5 text-xs px-2 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-sm">
-                    <NotificationTypeBadge type={ch.type} />
-                    {ch.name}
-                    <button
-                      type="button"
-                      onClick={() => setAssignedChannelIds(prev => prev.filter(x => x !== id))}
-                      className="text-zinc-600 hover:text-zinc-300 leading-none ml-0.5"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ) : null
-              })}
+              {assignedChannels.map(ch => (
+                <span key={ch.id} className="flex items-center gap-1.5 text-xs px-2 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-sm">
+                  <NotificationTypeBadge type={ch.type} />
+                  {ch.name}
+                  <EventTypeToggles
+                    value={ch.event_types}
+                    onChange={next =>
+                      setAssignedChannels(prev => prev.map(c => (c.id === ch.id ? { ...c, event_types: next } : c)))
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAssignedChannels(prev => prev.filter(c => c.id !== ch.id))}
+                    className="text-zinc-600 hover:text-zinc-300 leading-none ml-0.5"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
             </div>
           )}
           <NotificationPicker
-            options={availableChannels.filter(c => !assignedChannelIds.includes(c.id))}
-            onSelect={id => setAssignedChannelIds(prev => [...prev, id])}
+            options={availableChannels.filter(c => !assignedChannels.some(ac => ac.id === c.id))}
+            onSelect={id => {
+              const ch = availableChannels.find(c => c.id === id)
+              if (!ch) return
+              setAssignedChannels(prev => [...prev, { ...ch, event_types: ['fail', 'warning', 'recovery'] }])
+            }}
           />
           {availableChannels.length === 0 && (
             <p className="text-zinc-600 text-xs">
