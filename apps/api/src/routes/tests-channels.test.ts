@@ -73,3 +73,48 @@ describe('POST /tests/:id/channels', () => {
     expect(res.statusCode).toBe(400)
   })
 })
+
+describe('GET /tests/:id/channels/effective', () => {
+  beforeEach(() => {
+    mockQuery.mockClear()
+  })
+
+  it('404s for a missing test', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({
+      method: 'GET',
+      url: '/tests/missing/channels/effective',
+      headers: { authorization: 'Bearer test-token' },
+    })
+
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('returns the merged direct + tag-inherited channel list', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: 'test-1' }] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'channel-1', name: 'ops', type: 'webhook', webhook_url: 'https://example.com', email_to: null, enabled: true,
+            scope_type: 'tag', scope_value: 'prod', event_types: ['warning'],
+          },
+        ],
+      } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({
+      method: 'GET',
+      url: '/tests/test-1/channels/effective',
+      headers: { authorization: 'Bearer test-token' },
+    })
+
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body) as Array<{ id: string; event_types: string[]; sources: unknown[] }>
+    expect(body).toHaveLength(1)
+    expect(body[0]?.event_types).toEqual(['warning'])
+    expect(body[0]?.sources).toEqual([{ scope_type: 'tag', scope_value: 'prod', event_types: ['warning'] }])
+  })
+})

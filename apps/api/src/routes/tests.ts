@@ -5,7 +5,7 @@ import type { AssertionResult, Incident, Test, TestRun } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import { invalidateCache } from '../executor/compile.js'
 import { testEvents } from '../events.js'
-import { getAssignedChannels, addAssignment, removeAssignment } from '../db/queries/assignments.js'
+import { getAssignedChannels, getEffectiveChannelsForTest, addAssignment, removeAssignment } from '../db/queries/assignments.js'
 import { normalizeTags } from '../tags/normalize.js'
 import { buildIncidentsFromRuns } from './incident-policy.js'
 
@@ -218,6 +218,17 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     )
     if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
     const channels = await getAssignedChannels('test', req.params.id)
+    return reply.send(channels)
+  })
+
+  // GET /tests/:id/channels/effective
+  app.get<{ Params: { id: string } }>('/:id/channels/effective', async (req, reply) => {
+    const { rows: exists } = await pool.query<{ id: string }>(
+      'SELECT id FROM tests WHERE id = $1',
+      [req.params.id]
+    )
+    if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
+    const channels = await getEffectiveChannelsForTest(req.params.id)
     return reply.send(channels)
   })
 
