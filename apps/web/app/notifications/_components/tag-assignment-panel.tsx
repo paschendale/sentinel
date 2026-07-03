@@ -107,15 +107,20 @@ function TagRow({ tag, allChannels, initialAssigned }: TagRowProps) {
   }
 
   async function handleToggleEventTypes(channelId: string, eventTypes: NotificationEventType[]) {
-    setAssigned(prev => prev.map(c => (c.id === channelId ? { ...c, event_types: eventTypes } : c)))
+    setBusy(true)
     try {
-      await fetchWithAuth(`${API_URL}/tags/${encodeURIComponent(tag)}/channels`, {
+      const res = await fetchWithAuth(`${API_URL}/tags/${encodeURIComponent(tag)}/channels`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel_id: channelId, event_types: eventTypes }),
       })
+      if (res.ok) {
+        setAssigned(prev => prev.map(c => (c.id === channelId ? { ...c, event_types: eventTypes } : c)))
+      }
     } catch {
-      // fire-and-forget; silent failure
+      // silent failure
+    } finally {
+      setBusy(false)
     }
   }
 
