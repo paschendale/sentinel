@@ -466,6 +466,8 @@ By default, an assigned channel receives all three alert types. Each assigned ch
 
 This means a single test can send warnings to a low-priority Slack channel while routing failures to a paging Discord webhook, without splitting the check into two separate tests.
 
+A test's **Notifications** section on its detail page (`/tests/:id`) shows the full effective scheme: every channel that will actually fire for it, merging channels assigned directly to the test with any inherited from its tags, each with its active event types and where the routing came from (`direct` or `tag: <name>`) — so tag-inherited routing isn't invisible just because it doesn't show up in the test's own editor.
+
 ### Alert payloads
 
 - **Warning alert** — includes test name and warning message.
