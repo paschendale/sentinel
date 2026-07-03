@@ -1,12 +1,12 @@
-import type { NotificationChannel } from '@sentinel/shared'
+import type { AssignedChannel, NotificationEventType } from '@sentinel/shared'
 import { pool } from '../pool.js'
 
 export async function getAssignedChannels(
   scopeType: 'test' | 'tag',
   scopeValue: string,
-): Promise<NotificationChannel[]> {
-  const { rows } = await pool.query<NotificationChannel>(
-    `SELECT nc.id, nc.name, nc.type, nc.webhook_url, nc.enabled
+): Promise<AssignedChannel[]> {
+  const { rows } = await pool.query<AssignedChannel>(
+    `SELECT nc.id, nc.name, nc.type, nc.webhook_url, nc.email_to, nc.enabled, ca.event_types
      FROM notification_channels nc
      JOIN channel_assignments ca ON ca.channel_id = nc.id
      WHERE ca.scope_type = $1 AND ca.scope_value = $2
@@ -20,12 +20,14 @@ export async function addAssignment(
   channelId: string,
   scopeType: 'test' | 'tag',
   scopeValue: string,
+  eventTypes: NotificationEventType[],
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO channel_assignments (channel_id, scope_type, scope_value)
-     VALUES ($1, $2, $3)
-     ON CONFLICT DO NOTHING`,
-    [channelId, scopeType, scopeValue],
+    `INSERT INTO channel_assignments (channel_id, scope_type, scope_value, event_types)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (channel_id, scope_type, scope_value)
+     DO UPDATE SET event_types = excluded.event_types`,
+    [channelId, scopeType, scopeValue, eventTypes],
   )
 }
 
