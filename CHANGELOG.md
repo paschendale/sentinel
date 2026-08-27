@@ -1,3 +1,10 @@
+## [1.20.1](https://github.com/paschendale/sentinel/compare/v1.20.0...v1.20.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* Fix silent-death failure mode after host reboot ([88f0817](https://github.com/paschendale/sentinel/commit/88f081715486abb480556182825bbf4e7bd86526))
+
 # [1.20.0](https://github.com/paschendale/sentinel/compare/v1.19.0...v1.20.0) (2026-07-03)
 
 
