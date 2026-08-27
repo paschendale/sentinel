@@ -16,9 +16,34 @@ import { DATABASE_URL } from '../config.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const MIGRATIONS_DIR = join(__dirname, 'migrations')
 
+/**
+ * Retries the initial connection with backoff. On a host reboot, Docker restarts
+ * `unless-stopped` containers in no particular order — this process can easily win
+ * the race against the database container. Without a retry here, that race is fatal:
+ * this is the first thing index.ts awaits at startup, so a single failed connection
+ * attempt crashes the whole process before it ever binds a port.
+ */
+async function connectWithRetry(
+  pool: pg.Pool,
+  { maxAttempts = 10, baseDelayMs = 1000, maxDelayMs = 15000 } = {}
+): Promise<pg.PoolClient> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await pool.connect()
+    } catch (err) {
+      if (attempt >= maxAttempts) throw err
+      const delayMs = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs)
+      console.error(
+        `db: connection attempt ${attempt}/${maxAttempts} failed (${(err as Error).message}), retrying in ${delayMs}ms`
+      )
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+}
+
 async function run(): Promise<void> {
   const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 1 })
-  const client = await pool.connect()
+  const client = await connectWithRetry(pool)
 
   try {
     // Ensure the bookkeeping table exists before querying it.

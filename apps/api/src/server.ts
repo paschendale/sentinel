@@ -9,12 +9,14 @@ import { authRoutes } from './routes/auth.js'
 import { channelsRoutes } from './routes/channels.js'
 import { tagsRoutes } from './routes/tags.js'
 import { secretsRoutes } from './routes/secrets.js'
+import { healthRoutes } from './routes/health.js'
 import { verifyJwt } from './auth/jwt.js'
 
 const PUBLIC_ROUTES: Array<{ method: string; prefix: string }> = [
   { method: 'POST', prefix: '/auth/login' },
   { method: 'GET', prefix: '/status' },
   { method: 'GET', prefix: '/metrics' },
+  { method: 'GET', prefix: '/health' },
 ]
 
 function isPublic(method: string, url: string): boolean {
@@ -76,5 +78,6 @@ export async function buildServer() {
   await app.register(channelsRoutes, { prefix: '/channels' })
   await app.register(tagsRoutes, { prefix: '/tags' })
   await app.register(secretsRoutes, { prefix: '/secrets' })
+  await app.register(healthRoutes, { prefix: '/health' })
   return app
 }
