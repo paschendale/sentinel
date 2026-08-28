@@ -143,6 +143,7 @@ pnpm workspaces manage the monorepo.
 | Package | Purpose |
 |---------|---------|
 | `fastify` | HTTP API server |
+| `@modelcontextprotocol/sdk` | MCP server over Streamable HTTP at `/mcp` — subpath imports only (`server/mcp.js`, `server/streamableHttp.js`); its transitive `express` dep belongs to SDK OAuth modules that are never imported and never load at runtime |
 | `basic-ftp` | FTP client for `ctx.ftp` probes (zero runtime deps, no native bindings) |
 | `undici` | Outbound HTTP with connection pooling |
 | `pg` | PostgreSQL client |
