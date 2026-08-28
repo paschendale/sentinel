@@ -1,6 +1,8 @@
 import { z } from 'zod'
 
-const TestFieldsSchema = z.object({
+// Exported for consumers that need per-field shapes (e.g. MCP tool input schemas) —
+// CreateTestSchema is a ZodEffects (refine) and has no .shape.
+export const TestFieldsSchema = z.object({
   name: z.string().min(1).max(255),
   code: z.string().min(1),
   schedule_ms: z.number().int().min(30_000),
