@@ -958,3 +958,21 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Health check targets the API's own port (3001) rather than through Caddy on 80, so it isolates API health specifically rather than also depending on Caddy's proxy path. Entrypoint uses a portable `sh` polling loop (`kill -0` every 2s) rather than bash's `wait -n`, since the runtime image is Alpine/busybox and adding bash just for this felt like the wrong tradeoff. Retry backoff lives in `migrate.ts` specifically (not a general pool wrapper) since that's the actual first-connection chokepoint hit by `index.ts`'s top-level `await migrate()`.
 
 **Deferred:** Docker's own `unless-stopped` policy doesn't auto-restart on an `unhealthy` status (that needs an external watcher, e.g. `autoheal`, or Swarm) — the `HEALTHCHECK` here gives visibility in `docker ps`/Portainer but the crash-detection fix (entrypoint) is what actually restores auto-recovery. Did not verify against a real Docker build (no local daemon available this session) — verified via `tsc --noEmit`, the full `vitest` suite, `sh -n`, and a standalone functional test of the entrypoint's crash-detection and signal-forwarding logic instead.
+
+## 2026-08-28 · MCP · MCP server + token generation UI
+
+**What was built:** Full read/write MCP server (Streamable HTTP, stateless) at `POST /mcp` on the existing Fastify process, exposing 21 tools so MCP clients like Claude Code can operate the instance (test CRUD, run-now with buffered `ctx.log`, channels/assignments, tags, dashboard/status, write-only secrets). Plus `POST /auth/mcp-token` for long-lived tokens and a `/tokens` dashboard page that generates one and shows the ready-to-copy `claude mcp add` command.
+
+**Files changed:**
+- `apps/api/src/mcp/tools.ts` (new) — 21 `registerTool` calls; all but `run_test_now` forward to existing routes in-process via `app.inject()` with the caller's own bearer token
+- `apps/api/src/routes/mcp.ts` (new, + `mcp.test.ts`) — stateless transport per request, `reply.hijack()`, 405 for GET/DELETE
+- `apps/api/src/routes/auth.ts` (+ new `auth.test.ts`) — `POST /auth/mcp-token`, default 8760h, clamp 1–87600
+- `apps/api/src/server.ts` — registers `/mcp` (auto-protected by the global auth hook)
+- `apps/api/src/executor/run.ts` — new `'mcp'` RunTrigger variant
+- `packages/shared/src/schemas.ts` — exported `TestFieldsSchema` (create_test tool input shape; `CreateTestSchema` is a ZodEffects with no `.shape`)
+- `apps/web/app/tokens/` (new page + `_components/token-generator.tsx`); `mcp` nav link added to `app/page.tsx`, `secrets/page.tsx`, `notifications/page.tsx`
+- `apps/api/package.json`, `docs/ARCHITECTURE.md` — added `@modelcontextprotocol/sdk` + direct `zod`; new "MCP Server" section
+
+**Decisions:** Tool handlers reuse routes via `app.inject()` instead of extracting a query layer — test/channel SQL is inline in route handlers, and inject reuses Zod validation, `testEvents` emission, and `invalidateCache()` for free, keeping the scheduler coherent. `@modelcontextprotocol/sdk` pulls banned `express` transitively (SDK OAuth modules only); user-approved with subpath-imports-only note in ARCHITECTURE.md. Omitted `sessionIdGenerator` rather than passing `undefined` (exactOptionalPropertyTypes); cast transport at `server.connect()` for the same reason. Tokens are stateless JWTs (`sub: 'mcp'`) — no DB, no new entity, no new env vars.
+
+**Deferred:** No per-token revocation (rotating `JWT_SECRET` is the only kill switch — documented in UI and docs). No MCP-side rate limiting or read-only mode toggle. `packages/shared` requires a rebuild (`pnpm build`) for the runtime `dist/` to pick up the new export — worth remembering since types resolve from `src/` and can mask a stale build.

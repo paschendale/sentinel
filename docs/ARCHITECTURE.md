@@ -84,6 +84,14 @@ pnpm workspaces manage the monorepo.
 - **Pino** for structured JSON logging — logs are the primary operational output
 - **prom-client**: exposes `/metrics` with `check_duration_ms`, `check_failures_total`, `check_success_rate`
 
+### MCP Server
+- `POST /mcp` speaks MCP Streamable HTTP (stateless — fresh `McpServer` + transport per request, no session state) via `@modelcontextprotocol/sdk`, so MCP clients like Claude Code can operate the instance
+- 21 read/write tools (`apps/api/src/mcp/tools.ts`) wrap the existing REST routes **in-process via `app.inject()`** — Zod validation, `testEvents` emission, compiled-code cache invalidation, and error mapping are reused, never duplicated; `run_test_now` calls `runTest` directly (trigger `'mcp'`) to buffer `ctx.log` output into the result
+- Secret values remain write-only through MCP — the wrapped routes never return them
+- Auth: the same global bearer-JWT hook that guards the REST API (`/mcp` is not in `PUBLIC_ROUTES`). Long-lived tokens are minted by `POST /auth/mcp-token` (itself auth-protected; default 1-year expiry) — the `/tokens` dashboard page generates one and shows the matching `claude mcp add sentinel --transport http <url>/mcp --header "Authorization: Bearer <token>"` command
+- Multiple instances: each Sentinel deployment is an independent MCP server — one `claude mcp add` entry per instance, nothing shared
+- **Limitation**: no per-token revocation — rotating `JWT_SECRET` invalidates every token and dashboard session
+
 ---
 
 ## Frontend (`apps/web`)
