@@ -5,7 +5,7 @@ import { getCompiledFn } from './compile.js'
 import { buildCtx } from './ctx.js'
 import { getSecretsSnapshot } from './secrets-cache.js'
 
-export type RunTrigger = 'scheduler' | 'api-post' | 'api-sse'
+export type RunTrigger = 'scheduler' | 'api-post' | 'api-sse' | 'mcp'
 
 export interface RunTestOptions {
   trigger: RunTrigger
