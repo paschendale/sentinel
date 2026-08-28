@@ -106,6 +106,7 @@ pnpm workspaces manage the monorepo.
 - **Test editor**: Monaco Editor (lazy-loaded, not bundled eagerly) for JS code editing
 - **Test detail**: recent runs, pass/fail history, duration chart
 - **Public status page**: SSG/ISR from `UptimeDaily` only — never queries raw `test_runs`
+- **Tokens page**: generates long-lived MCP bearer tokens and the matching `claude mcp add` command
 
 ### Design System
 

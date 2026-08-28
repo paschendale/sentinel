@@ -24,6 +24,7 @@ Sentinel lets you write synthetic tests as plain JavaScript functions that run o
 - Public read-only status pages (per-tag)
 - Prometheus metrics endpoint
 - Export and import all test definitions as JSON
+- MCP server for AI coding agents (e.g. Claude Code) to manage tests, channels, and secrets programmatically
 
 ---
 
@@ -145,6 +146,29 @@ curl -H "Authorization: Bearer <token>" http://localhost:3001/tests
 ```
 
 The web dashboard handles authentication automatically via a login page and a cookie.
+
+---
+
+## MCP Server
+
+Sentinel exposes a full [MCP](https://modelcontextprotocol.io) server at `POST /mcp` (Streamable HTTP), so AI coding agents like Claude Code can manage an instance directly — list/create/update/delete tests, run a test now and read back its logs and assertions, manage notification channels and their assignments, and manage secrets (write-only, same as the REST API).
+
+### Setup
+
+1. Go to the **Tokens** page in the dashboard (or `POST /auth/mcp-token` directly).
+2. Generate a long-lived token — default expiry is 1 year, selectable up to 5 years.
+3. Copy the generated command and run it:
+
+```bash
+claude mcp add sentinel --transport http http://localhost:3001/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+### Notes
+
+- The token is shown once and is not stored — if you lose it, generate a new one.
+- There's no per-token revocation: rotating `JWT_SECRET` invalidates every MCP token and dashboard session at once.
+- Each Sentinel instance runs its own independent MCP server — add one `claude mcp add` entry per instance.
 
 ---
 

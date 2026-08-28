@@ -24,6 +24,7 @@ Neither tool is built for developers who want to write actual test logic.
 - Keeps credentials out of test code via an **encrypted secret store** (`ctx.secrets.NAME`), write-only after creation
 - Exposes a **Prometheus metrics endpoint** for existing observability stacks
 - Serves **public read-only status pages** built from aggregated data
+- Exposes a full **MCP server** (`/mcp`) so AI coding agents (e.g. Claude Code) can manage tests, channels, and secrets programmatically
 
 ## Who It's For
 
