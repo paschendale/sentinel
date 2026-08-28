@@ -1,3 +1,15 @@
+# [1.21.0](https://github.com/paschendale/sentinel/compare/v1.20.1...v1.21.0) (2026-08-28)
+
+
+### Features
+
+* add mcp documentation ([bf5d968](https://github.com/paschendale/sentinel/commit/bf5d968de15f046e6d37e3dc9b310c03a53262cf))
+* **api:** add MCP server over streamable HTTP at /mcp ([5eb5af7](https://github.com/paschendale/sentinel/commit/5eb5af795b4df884c7d656f75233cab5473ecdc7))
+* **api:** add POST /auth/mcp-token for long-lived MCP tokens ([d82564f](https://github.com/paschendale/sentinel/commit/d82564ffb633ab177274188d1425a95439bdd3e3))
+* **executor:** add mcp run trigger ([9c8940a](https://github.com/paschendale/sentinel/commit/9c8940a95ed419d17d54f8daf078de7be50c95b5))
+* **shared:** export TestFieldsSchema for external tool schemas ([333ee74](https://github.com/paschendale/sentinel/commit/333ee7432d102a0a6b3eb19df587299cca705514))
+* **web:** add /tokens page for MCP token generation ([eafa5c9](https://github.com/paschendale/sentinel/commit/eafa5c9e1d27326a031cc913c813b17bccccffbd))
+
 ## [1.20.1](https://github.com/paschendale/sentinel/compare/v1.20.0...v1.20.1) (2026-08-27)
 
 
