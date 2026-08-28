@@ -44,6 +44,7 @@ export default async function SecretsPage() {
           <Link href="/status" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">status page</Link>
           <Link href="/notifications" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">notifications</Link>
           <Link href="/secrets" className="text-zinc-300 text-sm">secrets</Link>
+          <Link href="/tokens" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">mcp</Link>
           <Link href="/tests/new" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">+ new test</Link>
         </div>
       </div>
