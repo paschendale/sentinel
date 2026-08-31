@@ -91,6 +91,7 @@ pnpm workspaces manage the monorepo.
 - Auth: the same global bearer-JWT hook that guards the REST API (`/mcp` is not in `PUBLIC_ROUTES`). Long-lived tokens are minted by `POST /auth/mcp-token` (itself auth-protected; default 1-year expiry) — the `/tokens` dashboard page generates one and shows the matching `claude mcp add sentinel --transport http <url>/mcp --header "Authorization: Bearer <token>"` command
 - Multiple instances: each Sentinel deployment is an independent MCP server — one `claude mcp add` entry per instance, nothing shared
 - **Limitation**: no per-token revocation — rotating `JWT_SECRET` invalidates every token and dashboard session
+- **This section, and the tool descriptions in `apps/api/src/mcp/tools.ts`, is the documentation an MCP agent actually sees** (via the `instructions` field on `McpServer` and per-tool `description`s) — it never reads the rest of `docs/`. Keep the `instructions` string and tool descriptions in sync whenever a capability changes here or in `docs/DOMAINS.md`; see `RULES.md` #28a.
 
 ---
 

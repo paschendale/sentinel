@@ -976,3 +976,18 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Tool handlers reuse routes via `app.inject()` instead of extracting a query layer — test/channel SQL is inline in route handlers, and inject reuses Zod validation, `testEvents` emission, and `invalidateCache()` for free, keeping the scheduler coherent. `@modelcontextprotocol/sdk` pulls banned `express` transitively (SDK OAuth modules only); user-approved with subpath-imports-only note in ARCHITECTURE.md. Omitted `sessionIdGenerator` rather than passing `undefined` (exactOptionalPropertyTypes); cast transport at `server.connect()` for the same reason. Tokens are stateless JWTs (`sub: 'mcp'`) — no DB, no new entity, no new env vars.
 
 **Deferred:** No per-token revocation (rotating `JWT_SECRET` is the only kill switch — documented in UI and docs). No MCP-side rate limiting or read-only mode toggle. `packages/shared` requires a rebuild (`pnpm build`) for the runtime `dist/` to pick up the new export — worth remembering since types resolve from `src/` and can mask a stale build.
+
+## 2026-08-31 · MCP · Server-level capability instructions + doc-sync rule
+
+**What was built:** Agents connecting over MCP had no top-level orientation — only per-tool descriptions — and defaulted to assuming Sentinel tests are JS/HTTP-only, missing `ctx.ftp`/`ctx.s3`, tags-as-notification-routing, and secrets. Added an `instructions` string to the `McpServer` constructor summarizing the full capability surface (three `ctx` protocols, tags driving both dashboard and notification routing, channel event-type scoping, write-only secrets), and rewrote the `create_test` tool description to foreground `ctx.ftp`/`ctx.s3` instead of burying them mid-sentence. Also added a repo-wide rule (`.metaprompt`, `RULES.md` #28a/28b, `docs/ARCHITECTURE.md`) that any future capability change in `docs/` or `RULES.md` must update the MCP `instructions` string and/or tool descriptions in the same change, since MCP agents never read `docs/*.md` directly.
+
+**Files changed:**
+- `apps/api/src/routes/mcp.ts` — added `instructions` to the `McpServer` constructor's second (`ServerOptions`) argument
+- `apps/api/src/mcp/tools.ts` — expanded `create_test` tool description to explicitly enumerate `ctx.http`/`ctx.ftp`/`ctx.s3` and the tag→notification-routing relationship
+- `.metaprompt` — new "Documentation must also reach MCP agents" section
+- `RULES.md` — new "MCP Surface" rules #28a/#28b, plus a submission-checklist item
+- `docs/ARCHITECTURE.md` — note in the "MCP Server" section pointing at RULES.md #28a
+
+**Decisions:** Used `ServerOptions.instructions` (confirmed present in `@modelcontextprotocol/sdk@1.30.0`'s `server/index.d.ts`) rather than an MCP resource, since most clients surface `instructions` once at session init with no extra round-trip — a resource would only help agents that already know to look for one, which is the same discovery gap being fixed. Kept tool-level descriptions as the second layer for capability details too long for the top-level primer.
+
+**Deferred:** No MCP resource (e.g. `sentinel://capabilities`) added yet for a deeper ctx API reference (protocol error codes, signatures) — `instructions` + tightened tool descriptions were judged sufficient for now; revisit if agents still miss capabilities in practice.

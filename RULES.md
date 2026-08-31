@@ -67,6 +67,13 @@ These rules are non-negotiable. They exist because of hard constraints (1GB RAM,
 
 ---
 
+## MCP Surface
+
+28a. **Documentation is not done until MCP agents can see it.** MCP clients (Claude Code, etc.) never read `docs/*.md` — their only view of Sentinel's capabilities is the `instructions` string on the `McpServer` in `apps/api/src/routes/mcp.ts` and the tool `description` fields in `apps/api/src/mcp/tools.ts`. Any change that adds, removes, or changes a capability described in `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, `docs/DOMAINS.md`, or this file must update the matching `instructions`/tool descriptions in the same change — do not let the two drift.
+28b. **New agent-operable REST routes get an MCP tool**, not just a route. If a route is meant to be usable by an MCP agent, add or update the corresponding `server.registerTool` call.
+
+---
+
 ## Commits
 
 29. **Use conventional commits** — format: `<type>(<scope>): <description>`. Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`. Scopes: `api`, `web`, `shared`, `db`, `scheduler`, `executor`, `notifier`.
@@ -90,3 +97,4 @@ These rules are non-negotiable. They exist because of hard constraints (1GB RAM,
 - [ ] Does this add a new environment variable? Could it be optional instead of required?
 - [ ] Does this load rows into an in-memory cache at startup? Does one bad row degrade gracefully instead of crashing the process?
 - [ ] Has `IMPLEMENTATION_LOG.md` been updated?
+- [ ] Does this change a capability described in `docs/` or `RULES.md`? Does the MCP `instructions` string or an MCP tool description in `apps/api/src/mcp/tools.ts` need updating too?

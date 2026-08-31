@@ -9,7 +9,23 @@ import { registerMcpTools } from '../mcp/tools.js'
 // Auth is the global bearer-JWT onRequest hook in server.ts — /mcp is not in PUBLIC_ROUTES.
 export async function mcpRoutes(app: FastifyInstance): Promise<void> {
   app.post('/', async (req, reply) => {
-    const server = new McpServer({ name: 'sentinel', version: '1.0.0' })
+    const server = new McpServer(
+      { name: 'sentinel', version: '1.0.0' },
+      {
+        instructions:
+          'Sentinel is a synthetic testing & uptime monitoring platform. Tests are JavaScript ' +
+          'functions receiving a `ctx` object with three protocols — ctx.http (HTTP via undici), ' +
+          'ctx.ftp (ctx.ftp.ls/get via basic-ftp), and ctx.s3 (ctx.s3.get/head, SigV4-signed, works ' +
+          'against any S3-compatible endpoint) — plus ctx.assert, ctx.warn, ctx.log, ctx.now, and ' +
+          'ctx.secrets. Tests are organized by free-form tags, which drive both the dashboard summary ' +
+          '(get_dashboard_summary) and notification routing: a channel (Discord, Slack, webhook, or ' +
+          'email) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
+          'fail/warning/recovery event types, and only fires on state transitions past a failure ' +
+          'threshold and cooldown. Secrets are write-only (never readable back) and reach test code as ' +
+          'ctx.secrets.NAME. Before creating a test, call list_tags to see existing tag conventions and ' +
+          'list_channels to see what notification targets already exist.',
+      }
+    )
     registerMcpTools(server, app, req.headers['authorization'] ?? '')
     // Omitting sessionIdGenerator selects the SDK's stateless mode (its docs spell this
     // as `sessionIdGenerator: undefined`, which exactOptionalPropertyTypes rejects).

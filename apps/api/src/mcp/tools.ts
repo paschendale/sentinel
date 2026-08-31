@@ -70,7 +70,13 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'create_test',
     {
       description:
-        'Create a monitoring test. code is a JavaScript function body receiving ctx (ctx.http, ctx.ftp, ctx.s3, ctx.assert, ctx.warn, ctx.log, ctx.now, ctx.secrets) and must return a boolean. timeout_ms must be at most 80% of schedule_ms.',
+        'Create a monitoring test. code is a JavaScript function body receiving ctx and must return a ' +
+        'boolean. ctx supports three protocols — ctx.http (HTTP/undici), ctx.ftp.ls/get (FTP), and ' +
+        'ctx.s3.get/head (S3-compatible object storage, SigV4-signed) — not just HTTP checks. Also ' +
+        'available: ctx.assert(name, value, message?) for named assertions, ctx.warn(message) for a ' +
+        'non-fatal warning status, ctx.log(message), ctx.now(), and ctx.secrets.NAME for values created ' +
+        'via create_secret. timeout_ms must be at most 80% of schedule_ms. Use tags to group related ' +
+        'tests — tags drive both the dashboard summary and notification-channel routing.',
       inputSchema: TestFieldsSchema.shape,
     },
     async (input) => forward('POST', '/tests', input)

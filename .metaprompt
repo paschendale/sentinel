@@ -12,6 +12,15 @@ Repo layout:     docs/REPOSITORY.md
 
 Key constraints: 1GB RAM / 0.5 vCPU. Single async process. No ORMs. No Redis. Batch DB writes. Notifications fire-and-forget. Monaco lazy-loaded. Public pages use aggregated data only.
 
+## Documentation must also reach MCP agents
+
+Sentinel is operated by MCP clients (Claude Code, etc.) via `POST /mcp`, not just by people reading `docs/`. An MCP agent never reads `docs/*.md` — its only view of what Sentinel can do is the `instructions` string on the `McpServer` in `apps/api/src/routes/mcp.ts` and the per-tool `description` fields in `apps/api/src/mcp/tools.ts`. Docs and MCP surface routinely drift, and when they do, agents default to the narrowest interpretation they can infer from a tool name (e.g. assuming "tests" means HTTP-only JS checks when `ctx` also has `ftp`/`s3`/`assert`/`secrets`).
+
+**Whenever a change adds, removes, or changes a capability documented in `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, `docs/DOMAINS.md`, or `RULES.md`, update the matching MCP surface in the same change**:
+- New or changed capability on the `ctx` object, a new entity, a new tag/channel/secret behavior → update the `instructions` string in `apps/api/src/routes/mcp.ts` and the relevant tool `description`(s) in `apps/api/src/mcp/tools.ts`.
+- New REST route meant to be agent-operable → add a corresponding MCP tool, not just the route.
+- Do not let a doc update land without asking "would an MCP agent, seeing only tool descriptions and the server `instructions`, still know this exists?"
+
 ## When committing
 
 Use conventional commits. Format: `<type>(<scope>): <description>`
