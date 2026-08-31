@@ -20,39 +20,36 @@ export function TagBrowser({ tags, activeTag }: Props) {
 
   return (
     <div className="mb-8 space-y-3">
-      {tags.length > 8 && (
-        <input
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder={`Filter ${tags.length} tags…`}
-          className="w-full max-w-xs bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-1.5 rounded-sm outline-none focus:border-zinc-600"
-        />
-      )}
       <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
         <a
           href="/status"
           className={`text-xs px-3 py-1 rounded-sm transition-colors ${
-            !activeTag ? 'bg-zinc-100 text-zinc-950' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+            !activeTag
+              ? "bg-zinc-100 text-zinc-950"
+              : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
           }`}
         >
           all
         </a>
-        {filtered.map(t => (
+        {filtered.map((t) => (
           <a
             key={t}
             href={`/status/${encodeURIComponent(t)}`}
             className={`text-xs px-3 py-1 rounded-sm transition-colors ${
-              activeTag === t ? 'bg-emerald-900 text-emerald-300' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+              activeTag === t
+                ? "bg-emerald-900 text-emerald-300"
+                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
             }`}
           >
             {t}
           </a>
         ))}
         {filtered.length === 0 && (
-          <span className="text-zinc-600 text-xs">No tags match &quot;{query}&quot;.</span>
+          <span className="text-zinc-600 text-xs">
+            No tags match &quot;{query}&quot;.
+          </span>
         )}
       </div>
     </div>
-  )
+  );
 }
