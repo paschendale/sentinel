@@ -1,3 +1,10 @@
+# [1.23.0](https://github.com/paschendale/sentinel/compare/v1.22.0...v1.23.0) (2026-08-31)
+
+
+### Features
+
+* added MCP server instructions and rules ([f0656bd](https://github.com/paschendale/sentinel/commit/f0656bd4e4cec473cdf883587e8bbb92fc951299))
+
 # [1.22.0](https://github.com/paschendale/sentinel/compare/v1.21.0...v1.22.0) (2026-08-31)
 
 
