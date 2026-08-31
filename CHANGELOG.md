@@ -1,3 +1,10 @@
+# [1.22.0](https://github.com/paschendale/sentinel/compare/v1.21.0...v1.22.0) (2026-08-31)
+
+
+### Features
+
+* added tag discovery on status page + backling navigation ([e309d0c](https://github.com/paschendale/sentinel/commit/e309d0cbf85c08286fa157ae747dbc3d5c0c24b9))
+
 # [1.21.0](https://github.com/paschendale/sentinel/compare/v1.20.1...v1.21.0) (2026-08-28)
 
 
