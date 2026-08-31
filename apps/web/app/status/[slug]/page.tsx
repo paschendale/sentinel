@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import type { PublicStatusTest } from '@sentinel/shared'
 import { StatusPageContent } from '../_components/status-page-content'
+import { TagBrowser } from '../_components/tag-browser'
+import { BackLink } from '../../_components/back-link'
 import { SentinelLogo } from '../../_components/sentinel-logo'
 
 export const revalidate = 300
@@ -34,6 +36,17 @@ async function getTagStatus(tag: string): Promise<PublicStatusTest[] | null> {
   }
 }
 
+async function getTags(): Promise<string[]> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
+  try {
+    const res = await fetch(`${apiUrl}/status/tags`, { next: { revalidate: 300 } })
+    if (!res.ok) return []
+    return res.json() as Promise<string[]>
+  } catch {
+    return []
+  }
+}
+
 export default async function TagStatusPage({
   params,
 }: {
@@ -41,7 +54,7 @@ export default async function TagStatusPage({
 }) {
   const { slug } = await params
   const tag = decodeURIComponent(slug)
-  const tests = await getTagStatus(tag)
+  const [tests, tags] = await Promise.all([getTagStatus(tag), getTags()])
 
   if (tests === null) notFound()
 
@@ -53,10 +66,12 @@ export default async function TagStatusPage({
             <SentinelLogo className="h-7 text-zinc-100" />
             <h1 className="text-zinc-100 text-lg font-medium">{tag} · status</h1>
           </div>
-          <a href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
+          <BackLink href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
             all tests →
-          </a>
+          </BackLink>
         </div>
+
+        <TagBrowser tags={tags} activeTag={tag} />
 
         <Suspense fallback={null}>
           <StatusPageContent tests={tests} tag={tag} />

@@ -2,7 +2,9 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
 import type { EffectiveChannelAssignment, Incident, Test } from '@sentinel/shared'
+import { BackLink } from '../../_components/back-link'
 import { DeleteTestButton } from '../_components/delete-test-button'
+import { TestTags } from '../_components/test-tags'
 import { RunLatencyChartLoader } from '../_components/run-latency-chart-loader'
 import { RunHistory, type RunRow } from '../_components/run-history'
 import { RunNowPanel } from '../_components/run-now-panel'
@@ -88,12 +90,12 @@ export default async function TestDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <main className="min-h-screen w-full bg-zinc-950 px-8 py-10">
-      <Link
+      <BackLink
         href="/"
         className="text-zinc-500 text-xs hover:text-zinc-300 transition-opacity duration-150 block mb-8"
       >
         ← back
-      </Link>
+      </BackLink>
 
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-6">
         <h1 className="text-zinc-100 text-lg tracking-tight">{test.name}</h1>
@@ -145,11 +147,7 @@ export default async function TestDetailPage({ params }: { params: Promise<{ id:
           {test.tags.length > 0 && (
             <div>
               <p className="text-zinc-500 text-xs tracking-wider uppercase mb-1">Tags</p>
-              <div className="flex flex-wrap gap-1">
-                {test.tags.map(tag => (
-                  <span key={tag} className="text-xs px-2 py-0.5 bg-zinc-800 text-zinc-400 rounded-sm">{tag}</span>
-                ))}
-              </div>
+              <TestTags tags={test.tags} />
             </div>
           )}
         </div>

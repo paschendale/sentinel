@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
 import type { Test, NotificationChannel, AssignedChannel, NotificationEventType } from '@sentinel/shared'
 import { fetchWithAuth } from '../../../lib/auth-client'
+import { BackLink } from '../../_components/back-link'
 import { EventTypeToggles } from '../../_components/event-type-toggles'
 import { ChannelTypeBadge } from '../../_components/channel-type-badge'
 import { ALL_EVENT_TYPES } from '../../_components/event-type-styles'
@@ -259,13 +260,13 @@ export default function TestEditor({ test }: Props) {
       {/* Left: form fields */}
       <aside className="flex flex-col gap-6 px-6 py-8 border-r border-zinc-800 overflow-y-auto">
         {isNew ? (
-          <Link href="/" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
+          <BackLink href="/" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
             ← back
-          </Link>
+          </BackLink>
         ) : (
-          <Link href={`/tests/${test.id}`} className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
+          <BackLink href={`/tests/${test.id}`} className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
             ← back
-          </Link>
+          </BackLink>
         )}
 
         <h1 className="text-zinc-100 text-sm">{isNew ? 'new test' : 'edit test'}</h1>

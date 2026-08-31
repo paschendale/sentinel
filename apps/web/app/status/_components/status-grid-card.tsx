@@ -2,6 +2,7 @@
 
 import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from './status-buckets-view'
+import { TagList } from '../../_components/tag-list'
 
 interface Props {
   test: PublicStatusTest
@@ -115,8 +116,12 @@ export function StatusGridCard({ test, buckets, loading, period }: Props) {
             <div className="min-w-0">
               <p className="text-zinc-100 text-sm font-medium leading-snug">{test.name}</p>
               {test.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1.5">
-                  {test.tags.map(tag => (
+                <TagList
+                  tags={test.tags}
+                  size="2xs"
+                  interactive={false}
+                  className="mt-1.5"
+                  renderTag={tag => (
                     <a
                       key={tag}
                       href={`/status/${encodeURIComponent(tag)}`}
@@ -124,8 +129,8 @@ export function StatusGridCard({ test, buckets, loading, period }: Props) {
                     >
                       {tag}
                     </a>
-                  ))}
-                </div>
+                  )}
+                />
               )}
             </div>
             <span className={`shrink-0 text-xs uppercase tracking-wide ${labelClass(test.current_status)}`}>

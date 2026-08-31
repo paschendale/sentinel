@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import type { PublicStatusTest } from '@sentinel/shared'
+import { BackLink } from '../../../_components/back-link'
 import { SentinelLogo } from '../../../_components/sentinel-logo'
 import { StatusTestContent } from './_components/status-test-content'
 
@@ -45,9 +46,9 @@ export default async function PublicTestPage({
   return (
     <main className="min-h-screen bg-zinc-950 px-6 py-12">
       <div className="max-w-2xl mx-auto space-y-8">
-        <a href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors block">
+        <BackLink href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors block">
           ← all tests
-        </a>
+        </BackLink>
         <div className="flex items-center gap-2.5">
           <SentinelLogo className="h-7 text-zinc-100" />
           <span className="text-zinc-100 text-lg">sentinel</span>

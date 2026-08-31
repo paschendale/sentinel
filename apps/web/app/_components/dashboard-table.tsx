@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { TestSummary, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from '../status/_components/status-buckets-view'
+import { TagList } from './tag-list'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -177,19 +178,23 @@ export function DashboardTable({ tests, tag }: Props) {
               <tr key={test.id} className="hover:bg-zinc-900/50 transition-opacity duration-150">
                 <td className="py-3 pr-8">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Link href={`/tests/${test.id}`} className="text-zinc-100 hover:text-white transition-colors">
+                    <Link href={`/tests/${test.id}`} className="text-zinc-100 hover:text-white transition-colors shrink-0">
                       {test.name}
                     </Link>
-                    {!test.enabled && <span className="text-zinc-600 text-xs">disabled</span>}
-                    {(test.tags ?? []).map(t => (
-                      <Link
-                        key={t}
-                        href={`/?tag=${encodeURIComponent(t)}`}
-                        className="text-xs px-1.5 py-0.5 bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-sm transition-colors"
-                      >
-                        {t}
-                      </Link>
-                    ))}
+                    {!test.enabled && <span className="text-zinc-600 text-xs shrink-0">disabled</span>}
+                    <TagList
+                      tags={test.tags ?? []}
+                      className="min-w-0"
+                      renderTag={t => (
+                        <Link
+                          key={t}
+                          href={`/?tag=${encodeURIComponent(t)}`}
+                          className="text-xs px-1.5 py-0.5 bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-sm transition-colors"
+                        >
+                          {t}
+                        </Link>
+                      )}
+                    />
                   </div>
                 </td>
                 <td className="py-3 pr-8">

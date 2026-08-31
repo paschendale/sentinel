@@ -10,6 +10,7 @@ import type {
   TestRun,
 } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
+import { getDistinctTags } from '../db/queries/assignments.js'
 
 type TestRow = { id: string; name: string; enabled: boolean; tags: string[] }
 
@@ -108,6 +109,13 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       [testIds],
     )
     return reply.send(buildPublicStatus(tests, udRows, stateRows))
+  })
+
+  // GET /status/tags — public tag directory so status pages can be browsed
+  // without already knowing a tag name.
+  app.get('/tags', async (_req, reply) => {
+    const tags = await getDistinctTags()
+    return reply.send(tags)
   })
 
   app.get<{ Params: { tag: string } }>('/tag/:tag', async (req, reply) => {

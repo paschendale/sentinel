@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { PublicStatusEvent, PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from '../../../_components/status-buckets-view'
 import { StatusLatencyChartLoader } from '../../../_components/status-latency-chart-loader'
+import { TagList } from '../../../../_components/tag-list'
 import { RunHistory, type RunRow } from '../../../../tests/_components/run-history'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
@@ -96,8 +97,10 @@ export function StatusTestContent({ test }: { test: PublicStatusTest }) {
             <h1 className="text-zinc-100 text-2xl font-semibold tracking-tight truncate">{test.name}</h1>
             {!test.enabled && <p className="text-zinc-500 text-xs mt-1">disabled</p>}
             {test.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-3">
-                {test.tags.map(tag => (
+              <TagList
+                tags={test.tags}
+                className="mt-3"
+                renderTag={tag => (
                   <a
                     key={tag}
                     href={`/status/${encodeURIComponent(tag)}`}
@@ -105,8 +108,8 @@ export function StatusTestContent({ test }: { test: PublicStatusTest }) {
                   >
                     {tag}
                   </a>
-                ))}
-              </div>
+                )}
+              />
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
