@@ -3,9 +3,6 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import type { PublicStatusTest, RbmcMapCollection } from '@sentinel/shared'
 import { StatusPageContent } from '../_components/status-page-content'
-import { TagBrowser } from '../_components/tag-browser'
-import { BackLink } from '../../_components/back-link'
-import { SentinelLogo } from '../../_components/sentinel-logo'
 
 export const revalidate = 300
 
@@ -72,24 +69,17 @@ export default async function TagStatusPage({
   if (tests === null) notFound()
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-12 overflow-x-clip">
-      <div>
-        <div className="flex items-center justify-between mb-10">
-          <div className="flex items-center gap-2.5">
-            <SentinelLogo className="h-7 text-zinc-100" />
-            <h1 className="text-zinc-100 text-lg font-medium">{tag} · status</h1>
-          </div>
-          <BackLink href="/status" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
-            all tests →
-          </BackLink>
-        </div>
-
-        <TagBrowser tags={tags} activeTag={tag} />
-
-        <Suspense fallback={null}>
-          <StatusPageContent tests={tests} tag={tag} {...(map ? { map } : {})} />
-        </Suspense>
-      </div>
+    <main className="min-h-screen bg-zinc-950 px-4 sm:px-6 py-5 sm:py-8 overflow-x-clip">
+      <Suspense fallback={null}>
+        <StatusPageContent
+          tests={tests}
+          tag={tag}
+          tags={tags}
+          heading={`${tag} · status`}
+          backHref="/status"
+          {...(map ? { map } : {})}
+        />
+      </Suspense>
     </main>
   )
 }

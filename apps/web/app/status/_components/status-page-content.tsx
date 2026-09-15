@@ -6,7 +6,10 @@ import type { PublicStatusOutcome, PublicStatusTest, RbmcMapCollection, StatusBu
 import { StatusBucketsView } from './status-buckets-view'
 import { StatusGridCard } from './status-grid-card'
 import { RbmcMapLoader } from './rbmc-map-loader'
+import { TagBrowser } from './tag-browser'
 import { TagList } from '../../_components/tag-list'
+import { SentinelLogo } from '../../_components/sentinel-logo'
+import { BackLink } from '../../_components/back-link'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -66,14 +69,62 @@ function ListIcon() {
 type View = 'map' | 'grid' | 'list'
 const VIEW_KEY = 'sentinel-status-view'
 
+function ViewSwitcher({ view, switchView, hasMap }: { view: View; switchView: (v: View) => void; hasMap: boolean }) {
+  return (
+    <div className="flex gap-1 shrink-0">
+      {hasMap && (
+        <button
+          onClick={() => switchView('map')}
+          title="Map view"
+          className={`p-1.5 rounded-sm transition-colors ${
+            view === 'map'
+              ? 'bg-zinc-100 text-zinc-950'
+              : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+          }`}
+        >
+          <MapIcon />
+        </button>
+      )}
+      <button
+        onClick={() => switchView('grid')}
+        title="Grid view"
+        className={`p-1.5 rounded-sm transition-colors ${
+          view === 'grid'
+            ? 'bg-zinc-100 text-zinc-950'
+            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+        }`}
+      >
+        <GridIcon />
+      </button>
+      <button
+        onClick={() => switchView('list')}
+        title="List view"
+        className={`p-1.5 rounded-sm transition-colors ${
+          view === 'list'
+            ? 'bg-zinc-100 text-zinc-950'
+            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+        }`}
+      >
+        <ListIcon />
+      </button>
+    </div>
+  )
+}
+
 interface Props {
   tests: PublicStatusTest[]
   tag?: string
   /** RBMC station GeoJSON — when present (and non-empty) the map is the default view. */
   map?: RbmcMapCollection
+  /** All known tags, rendered as a single-line browser next to the logo. */
+  tags?: string[]
+  /** Text shown next to the logo. Defaults to "sentinel". */
+  heading?: string
+  /** When set, renders a "all tests →" link back to the untagged status page. */
+  backHref?: string
 }
 
-export function StatusPageContent({ tests, tag, map }: Props) {
+export function StatusPageContent({ tests, tag, map, tags = [], heading = 'sentinel', backHref }: Props) {
   const hasMap = map !== undefined && map.features.length > 0
   const router = useRouter()
   const pathname = usePathname()
@@ -146,64 +197,52 @@ export function StatusPageContent({ tests, tag, map }: Props) {
       .finally(() => setLoading(false))
   }, [period, tag, refreshKey])
 
+  const header = (
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="flex items-center gap-2 shrink-0">
+        <SentinelLogo className="h-6 sm:h-7 text-zinc-100" />
+        <span className="text-zinc-100 text-base sm:text-lg whitespace-nowrap">{heading}</span>
+      </div>
+      <div className="flex items-center gap-3 shrink-0 order-2 sm:order-3">
+        {backHref && (
+          <BackLink href={backHref} className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors whitespace-nowrap">
+            all tests →
+          </BackLink>
+        )}
+        <ViewSwitcher view={view} switchView={switchView} hasMap={hasMap} />
+      </div>
+      <TagBrowser
+        tags={tags}
+        activeTag={tag}
+        className="order-3 sm:order-2 w-full sm:w-auto sm:flex-1 sm:min-w-0"
+      />
+    </div>
+  )
+
   if (tests.length === 0 && !hasMap) {
-    return <p className="text-zinc-500 text-center text-sm">No tests configured.</p>
+    return (
+      <div className="space-y-8">
+        {header}
+        <p className="text-zinc-500 text-center text-sm">No tests configured.</p>
+      </div>
+    )
   }
 
-  const controls = (
-    <div className="flex items-center justify-between gap-4">
-      <div className="flex gap-2">
-        {view !== 'map' && PERIODS.map(p => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`text-xs px-3 py-1 rounded-sm transition-colors ${
-              period === p
-                ? 'bg-zinc-100 text-zinc-950'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
-            }`}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-      <div className="flex gap-1">
-        {hasMap && (
-          <button
-            onClick={() => switchView('map')}
-            title="Map view"
-            className={`p-1.5 rounded-sm transition-colors ${
-              view === 'map'
-                ? 'bg-zinc-100 text-zinc-950'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
-            }`}
-          >
-            <MapIcon />
-          </button>
-        )}
+  const periodControls = view !== 'map' && (
+    <div className="flex gap-2">
+      {PERIODS.map(p => (
         <button
-          onClick={() => switchView('grid')}
-          title="Grid view"
-          className={`p-1.5 rounded-sm transition-colors ${
-            view === 'grid'
+          key={p}
+          onClick={() => setPeriod(p)}
+          className={`text-xs px-3 py-1 rounded-sm transition-colors ${
+            period === p
               ? 'bg-zinc-100 text-zinc-950'
               : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
           }`}
         >
-          <GridIcon />
+          {p}
         </button>
-        <button
-          onClick={() => switchView('list')}
-          title="List view"
-          className={`p-1.5 rounded-sm transition-colors ${
-            view === 'list'
-              ? 'bg-zinc-100 text-zinc-950'
-              : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
-          }`}
-        >
-          <ListIcon />
-        </button>
-      </div>
+      ))}
     </div>
   )
 
@@ -213,7 +252,7 @@ export function StatusPageContent({ tests, tag, map }: Props) {
       : `${API_URL}/status/rbmc/map`
     return (
       <div className="space-y-4">
-        {controls}
+        {header}
         <RbmcMapLoader initial={map} refreshUrl={mapRefreshUrl} linkBase="/status/tests" />
       </div>
     )
@@ -222,8 +261,9 @@ export function StatusPageContent({ tests, tag, map }: Props) {
   if (view === 'grid' || view === 'map') {
     return (
       <div className="space-y-4">
-        {controls}
-        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+        {header}
+        {periodControls}
+        <div className="grid grid-cols-1 gap-3 sm:[grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
           {tests.map(test => (
             <StatusGridCard
               key={test.id}
@@ -239,8 +279,9 @@ export function StatusPageContent({ tests, tag, map }: Props) {
   }
 
   return (
-    <div className="space-y-8">
-      {controls}
+    <div className="space-y-4">
+      {header}
+      {periodControls}
 
       <div className="max-w-2xl mx-auto space-y-8">
         {tests.map(test => {

@@ -221,7 +221,7 @@ export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, linkBase, cl
   }, [refreshUrl, refreshMs])
 
   return (
-    <div className={`relative w-full overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950 ${className ?? 'h-[72vh] min-h-[420px]'}`}>
+    <div className={`relative w-full overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950 ${className ?? 'h-[85vh] min-h-[480px]'}`}>
       {/* Inline position: maplibre-gl.css sets `.maplibregl-map { position: relative }`, which would beat a Tailwind `absolute` class and collapse the map to 0 height. */}
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
 

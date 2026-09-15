@@ -9,7 +9,7 @@ const RbmcMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[72vh] min-h-[420px] w-full rounded-lg border border-zinc-800/80 bg-zinc-900/30" aria-hidden />
+      <div className="h-[85vh] min-h-[480px] w-full rounded-lg border border-zinc-800/80 bg-zinc-900/30" aria-hidden />
     ),
   }
 )

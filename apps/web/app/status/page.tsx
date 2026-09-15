@@ -2,8 +2,6 @@ import { Suspense } from 'react'
 import type { Metadata } from 'next'
 import type { PublicStatusTest, RbmcMapCollection } from '@sentinel/shared'
 import { StatusPageContent } from './_components/status-page-content'
-import { TagBrowser } from './_components/tag-browser'
-import { SentinelLogo } from '../_components/sentinel-logo'
 
 export const revalidate = 300
 
@@ -50,17 +48,10 @@ export default async function StatusPage() {
   const [tests, tags, map] = await Promise.all([getStatus(), getTags(), getRbmcMap()])
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-12 overflow-x-clip">
-      <div className="space-y-8">
-        <div className="flex items-center gap-2.5">
-          <SentinelLogo className="h-7 text-zinc-100" />
-          <span className="text-zinc-100 text-lg">sentinel</span>
-        </div>
-        <TagBrowser tags={tags} />
-        <Suspense fallback={null}>
-          <StatusPageContent tests={tests} {...(map ? { map } : {})} />
-        </Suspense>
-      </div>
+    <main className="min-h-screen bg-zinc-950 px-4 sm:px-6 py-5 sm:py-8 overflow-x-clip">
+      <Suspense fallback={null}>
+        <StatusPageContent tests={tests} tags={tags} {...(map ? { map } : {})} />
+      </Suspense>
     </main>
   )
 }
