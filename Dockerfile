@@ -28,6 +28,9 @@ FROM deps AS build-web
 # Bake /api as the client-side API base path so browser calls go through Caddy
 ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# RBMC branch: optional MapLibre style URL for the station map (build-time inlined; empty = CARTO Dark Matter)
+ARG NEXT_PUBLIC_MAP_STYLE_URL=
+ENV NEXT_PUBLIC_MAP_STYLE_URL=$NEXT_PUBLIC_MAP_STYLE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY packages/shared packages/shared
 COPY apps/web apps/web
@@ -48,6 +51,8 @@ COPY --from=build-api /app/apps/api/dist /app/apps/api/dist
 COPY --from=build-api /app/apps/api/src/db/migrations /app/apps/api/dist/db/migrations
 # package.json needed so Node resolves the dist as ESM ("type": "module")
 COPY --from=build-api /app/apps/api/package.json /app/apps/api/package.json
+# RBMC branch: default IBGE station shapefile (dist/../data/rbmc); bind-mount over it to replace
+COPY --from=build-api /app/apps/api/data /app/apps/api/data
 
 # Web: outputFileTracingRoot places standalone relative to repo root, so server.js
 # ends up at apps/web/server.js inside the standalone directory

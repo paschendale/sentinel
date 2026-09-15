@@ -25,6 +25,10 @@ services:
       ADMIN_PASSWORD: changeme
       JWT_SECRET: change-this-to-a-random-secret
       PORT: 3001
+    # RBMC branch: replace the station shapefile by mounting a directory with
+    # RBMCPoint.{shp,shx,dbf,prj,cst} over the shipped copy (see README).
+    # volumes:
+    #   - ./rbmc:/app/data/rbmc:ro
     depends_on:
       db:
         condition: service_healthy

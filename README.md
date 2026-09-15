@@ -72,6 +72,10 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `FTP_TEMP_DIR` | No | Directory `ctx.ftp.get` and `ctx.s3.get` write temp downloads to (default: OS temp dir + `sentinel-ftp`) |
 | `FTP_MAX_DOWNLOAD_BYTES` | No | Max bytes `ctx.ftp.get` or `ctx.s3.get` will download before aborting (default: `5242880`, 5MB) |
 | `SECRETS_ENCRYPTION_KEY` | No | Base64-encoded 32-byte AES-256-GCM key for encrypting `ctx.secrets` values at rest (generate with `openssl rand -base64 32`). If unset, secrets are stored **unencrypted** — `ctx.secrets` still works, but the dashboard shows a warning banner |
+| `RBMC_SHAPEFILE_DIR` | No | *(RBMC branch)* Directory holding `RBMCPoint.{shp,dbf}` — the source of truth for stations (default: the copy shipped in the image at `apps/api/data/rbmc`) |
+| `RBMC_NTRIP_URL` | No | *(RBMC branch)* NTRIP caster sourcetable URL used by `ctx.ntrip.sourcetable()` and the station tests (default: `http://gps-ntrip.ibge.gov.br:2101/`) |
+| `RBMC_SYNC_POLL_MS` | No | *(RBMC branch)* How often the shapefile mtime is checked for changes (default: `60000`) |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | No | *(RBMC branch, web build-time)* MapLibre style JSON for the station map (default: CARTO Dark Matter, keyless). Falls back to a plain dark background if the style fails to load |
 
 ### Single Container (no Compose)
 
@@ -532,11 +536,23 @@ If `SECRETS_ENCRYPTION_KEY` is set (see [Environment Variables](#environment-var
 
 ---
 
+## RBMC Station Monitoring (this branch)
+
+This branch of Sentinel is specialised for IBGE's **RBMC** (Rede Brasileira de Monitoramento Contínuo dos Sistemas GNSS). It checks, every 15 minutes, that each station streams on the public **RBMC-IP** NTRIP caster (`gps-ntrip.ibge.gov.br:2101`) by looking for mountpoints whose prefix is the station's `SG_RBMC` code (`VICO` → `VICO0`, `VICO1`) in the caster's sourcetable.
+
+- **The shapefile is the source of truth.** `apps/api/data/rbmc/RBMCPoint.{shp,shx,dbf,prj,cst}` (IBGE's *RBMC/GNSS Permanente* download) lists the stations. A sync job reads it at startup and whenever its mtime changes, and reconciles the tests: one test per station, tagged `rbmc`, named `RBMC - CODE - City`, with generated code that calls `ctx.ntrip.sourcetable()`. Existing hand-made `RBMC - CODE0 - City` tests are adopted (history kept); tests for stations that leave the shapefile are disabled, never deleted. Do not edit station tests by hand — the sync rewrites their name and code (toggling `enabled` is fine).
+- **To update the station list**, replace the five files (bind-mount a directory over the shipped copy, see the commented `volumes:` in `docker-compose.yml`, or point `RBMC_SHAPEFILE_DIR` at one). The sync picks the change up within `RBMC_SYNC_POLL_MS`; to apply it immediately call `POST /rbmc/sync` (JWT) or the MCP tool `sync_rbmc_stations`.
+- **Map.** `/status` opens on a MapLibre map of every station coloured by status (green up, yellow degraded, red down, grey unknown/disabled), fed by the public `GET /status/rbmc/map` GeoJSON (aggregated data only, refreshed every 5 minutes). Click a station for its mountpoints and 30-day uptime. The authenticated home `/` shows the same map; the test table moved to `/tests`. Anonymous visitors of `/` are sent to `/status`.
+- **Admin API.** `GET /rbmc` lists stations with their test and last status; `POST /rbmc/sync` re-reads the shapefile. Both are also MCP tools (`list_rbmc_stations`, `sync_rbmc_stations`).
+- **`ctx.ntrip.sourcetable(url?)`** is available to every test: it returns the parsed `STR` rows (`mountpoint`, `identifier`, `format`, `formatDetails`, `navSystem`, `network`, `country`, `lat`, `lon`, `generator`) through a shared 60-second cache, so all station tests cost one download per minute.
+
+---
+
 ## Public Status Pages
 
 Every test can be tagged. Tags power group-level public status pages — no authentication required.
 
-- `/status` — overview of all tests with current status and 30-day uptime
+- `/status` — overview of all tests with current status and 30-day uptime (on this branch the default view is the RBMC station map; grid and list views remain one click away)
 - `/status/[tag]` — filtered status page for a specific tag (e.g. `/status/production`)
 
 Each status page shows:

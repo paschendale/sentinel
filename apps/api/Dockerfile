@@ -23,6 +23,11 @@ WORKDIR /app
 
 COPY --from=build /api-prod/node_modules /app/node_modules
 COPY --from=build /app/apps/api/dist /app/dist
+# SQL migrations are not processed by tsc — copy from source
+COPY --from=build /app/apps/api/src/db/migrations /app/dist/db/migrations
+# RBMC branch: default IBGE station shapefile; bind-mount over /app/data/rbmc to replace
+COPY --from=build /app/apps/api/data /app/data
+ENV RBMC_SHAPEFILE_DIR=/app/data/rbmc
 
 ENV NODE_ENV=production
 

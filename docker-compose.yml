@@ -24,6 +24,11 @@ services:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: changeme
       JWT_SECRET: change-this-to-a-random-secret
+    # RBMC branch: the station list comes from the IBGE RBMCPoint shapefile. The image
+    # ships a copy; to replace it, drop RBMCPoint.{shp,shx,dbf,prj,cst} into ./rbmc and
+    # uncomment the mount — the API re-syncs stations when the files' mtime changes.
+    # volumes:
+    #   - ./rbmc:/app/apps/api/data/rbmc:ro
     depends_on:
       db:
         condition: service_healthy
