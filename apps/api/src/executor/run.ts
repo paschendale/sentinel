@@ -74,6 +74,12 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
         `S3 ${info.method} ${info.url} -> ${info.status} (${info.duration_ms}ms, region=${info.region})`
       )
     },
+    onNtripComplete: (info) => {
+      runLog.info(
+        { event: 'test.ntrip', ...info },
+        `NTRIP sourcetable ${info.url} -> ${info.rows} streams (${info.cached ? 'cached' : 'fetched'}, ${info.duration_ms}ms)`
+      )
+    },
   })
 
   const timeoutPromise = new Promise<never>((_, reject) =>

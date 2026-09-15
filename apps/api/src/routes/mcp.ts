@@ -14,10 +14,11 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
       {
         instructions:
           'Sentinel is a synthetic testing & uptime monitoring platform. Tests are JavaScript ' +
-          'functions receiving a `ctx` object with three protocols — ctx.http (HTTP via undici), ' +
-          'ctx.ftp (ctx.ftp.ls/get via basic-ftp), and ctx.s3 (ctx.s3.get/head, SigV4-signed, works ' +
-          'against any S3-compatible endpoint) — plus ctx.assert, ctx.warn, ctx.log, ctx.now, and ' +
-          'ctx.secrets. Tests are organized by free-form tags, which drive both the dashboard summary ' +
+          'functions receiving a `ctx` object with four protocols — ctx.http (HTTP via undici), ' +
+          'ctx.ftp (ctx.ftp.ls/get via basic-ftp), ctx.s3 (ctx.s3.get/head, SigV4-signed, works ' +
+          'against any S3-compatible endpoint), and ctx.ntrip.sourcetable(url?) (parsed STR rows of an ' +
+          'NTRIP caster sourcetable, served from a shared 60-second cache) — plus ctx.assert, ctx.warn, ' +
+          'ctx.log, ctx.now, and ctx.secrets. Tests are organized by free-form tags, which drive both the dashboard summary ' +
           '(get_dashboard_summary) and notification routing: a channel (Discord, Slack, webhook, or ' +
           'email) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
           'fail/warning/recovery event types, and only fires on state transitions past a failure ' +

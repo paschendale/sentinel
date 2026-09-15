@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildCtx, FtpRequestError, HttpRequestError, S3RequestError } from './ctx.js'
+import { buildCtx, FtpRequestError, HttpRequestError, S3RequestError, ntripSourcetableCache } from './ctx.js'
 import { FTP_MAX_DOWNLOAD_BYTES, FTP_TEMP_DIR } from '../config.js'
 
 const { fetchMock } = vi.hoisted(() => ({
@@ -94,6 +94,59 @@ describe('executor ctx http', () => {
         code: 'HTTP_FETCH_ERROR',
       })
     }
+  })
+})
+
+describe('executor ctx ntrip', () => {
+  const TABLE = [
+    'STR;VICO1;Vicosa;RTCM 3.0;1004(1);2;GPS+GLO;RBMC-IP;BRA;-20.76;-42.87;0;0;TRIMBLE NETR9;none;B;N;1500;RBMC',
+    'STR;VICO0;Vicosa;RTCM 3.2;1077(1);2;GPS+GLO+GAL;RBMC-IP;BRA;-20.76;-42.87;0;0;TRIMBLE NETR9;none;B;N;1500;RBMC',
+    'ENDSOURCETABLE',
+  ].join('\r\n')
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    ntripSourcetableCache.clear()
+  })
+
+  it('always sends the Ntrip-Version header and shares the download across ctx instances', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      text: vi.fn().mockResolvedValue(TABLE),
+      headers: { forEach: vi.fn() },
+    })
+    const onNtripComplete = vi.fn()
+    const { ctx } = buildCtx({ onNtripComplete })
+    const rows = await ctx.ntrip.sourcetable('http://caster:2101/')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://caster:2101/',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ 'Ntrip-Version': 'Ntrip/2.0' }),
+      })
+    )
+    expect(rows.map((r) => r.mountpoint)).toEqual(['VICO1', 'VICO0'])
+    expect(onNtripComplete).toHaveBeenCalledWith(expect.objectContaining({ rows: 2, cached: false }))
+
+    const { ctx: other } = buildCtx({ onNtripComplete })
+    await other.ntrip.sourcetable('http://caster:2101/')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(onNtripComplete).toHaveBeenLastCalledWith(expect.objectContaining({ cached: true }))
+  })
+
+  it('surfaces non-200 responses and network failures as NtripRequestError', async () => {
+    fetchMock.mockResolvedValue({ status: 503, text: vi.fn().mockResolvedValue(''), headers: { forEach: vi.fn() } })
+    const { ctx } = buildCtx()
+    await expect(ctx.ntrip.sourcetable('http://caster:2101/')).rejects.toMatchObject({
+      name: 'NtripRequestError',
+      code: 'NTRIP_FETCH_ERROR',
+    })
+
+    fetchMock.mockRejectedValue(new TypeError('connect ECONNREFUSED'))
+    await expect(ctx.ntrip.sourcetable('http://caster:2101/')).rejects.toMatchObject({ code: 'NTRIP_FETCH_ERROR' })
+    expect(ntripSourcetableCache.peek('http://caster:2101/')).toBeNull()
   })
 })
 

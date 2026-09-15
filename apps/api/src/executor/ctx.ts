@@ -6,7 +6,9 @@ import { mkdir, open, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { nanoid } from 'nanoid'
 import type { AssertionResult } from '@sentinel/shared'
-import { FTP_MAX_DOWNLOAD_BYTES, FTP_TEMP_DIR } from '../config.js'
+import { FTP_MAX_DOWNLOAD_BYTES, FTP_TEMP_DIR, RBMC_NTRIP_URL } from '../config.js'
+import { createSourcetableCache, NTRIP_HEADERS, NtripRequestError } from './ntrip-sourcetable.js'
+import type { NtripStreamRow } from './ntrip-sourcetable.js'
 
 export interface HttpResponse {
   status: number
@@ -65,6 +67,10 @@ export interface TestContext {
     get(url: string, options: S3Options): Promise<HttpResponse>
     head(url: string, options: S3Options): Promise<HttpResponse>
   }
+  ntrip: {
+    /** Parsed `STR` rows of an NTRIP caster's sourcetable (defaults to `RBMC_NTRIP_URL`). Shared 60 s cache across tests. */
+    sourcetable(url?: string): Promise<ReadonlyArray<NtripStreamRow>>
+  }
   assert: (name: string, value: unknown, message?: string) => void
   warn: (message: string) => void
   log: (message: string) => void
@@ -104,11 +110,19 @@ export interface S3CompleteInfo {
   region: string
 }
 
+export interface NtripCompleteInfo {
+  url: string
+  rows: number
+  cached: boolean
+  duration_ms: number
+}
+
 export interface BuildCtxOptions {
   onLog?: (message: string) => void
   onHttpComplete?: (info: HttpCompleteInfo) => void
   onFtpComplete?: (info: FtpCompleteInfo) => void
   onS3Complete?: (info: S3CompleteInfo) => void
+  onNtripComplete?: (info: NtripCompleteInfo) => void
   /** The test's overall timeout budget — used as the default FTP socket timeout. */
   testTimeoutMs?: number
   /** Decrypted secrets snapshot (see executor/secrets-cache.ts), exposed as ctx.secrets.NAME. */
@@ -230,6 +244,40 @@ async function doFetch(
     )
   }
 }
+
+/** Sourcetable downloads are capped independently of the test timeout so a hung caster can't pin a slot. */
+const NTRIP_FETCH_TIMEOUT_MS = 10_000
+const NTRIP_CACHE_TTL_MS = 60_000
+
+/**
+ * One process-wide sourcetable cache shared by every test's `ctx.ntrip` — on the RBMC
+ * instance ~157 station tests read the same ~30 KB table, so this turns a burst of
+ * downloads into one per minute. Also read (via `peek`) by the public map route.
+ */
+export const ntripSourcetableCache = createSourcetableCache({
+  ttlMs: NTRIP_CACHE_TTL_MS,
+  fetchText: async (url) => {
+    let res: HttpResponse
+    try {
+      res = await doFetch(url, {
+        method: 'GET',
+        headers: { ...NTRIP_HEADERS },
+        signal: AbortSignal.timeout(NTRIP_FETCH_TIMEOUT_MS),
+      })
+    } catch (err) {
+      throw new NtripRequestError(
+        'NTRIP_FETCH_ERROR',
+        `Sourcetable request failed for ${url}: ${err instanceof Error ? err.message : String(err)}`,
+        url,
+        { cause: err instanceof Error ? err : undefined }
+      )
+    }
+    if (res.status !== 200) {
+      throw new NtripRequestError('NTRIP_FETCH_ERROR', `Sourcetable request for ${url} returned HTTP ${res.status}`, url)
+    }
+    return res.body
+  },
+})
 
 function sha256Hex(data: string): string {
   return createHash('sha256').update(data, 'utf8').digest('hex')
@@ -574,6 +622,7 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
   const onHttpComplete = options?.onHttpComplete
   const onFtpComplete = options?.onFtpComplete
   const onS3Complete = options?.onS3Complete
+  const onNtripComplete = options?.onNtripComplete
   const testTimeoutMs = options?.testTimeoutMs
 
   const ctx: TestContext = {
@@ -608,6 +657,14 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
       },
       async head(url, s3Options) {
         return doS3Head(url, s3Options, onS3Complete)
+      },
+    },
+    ntrip: {
+      async sourcetable(url = RBMC_NTRIP_URL) {
+        const startMs = Date.now()
+        const { rows, cached } = await ntripSourcetableCache.get(url)
+        onNtripComplete?.({ url: truncateUrl(url), rows: rows.length, cached, duration_ms: Date.now() - startMs })
+        return rows
       },
     },
     assert(name, value, message) {

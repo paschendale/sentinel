@@ -58,7 +58,8 @@ pnpm workspaces manage the monorepo.
 ### Test Execution Engine
 - User test code compiled **once on save** via `new Function('ctx', code)` and cached in memory
 - Execution: `Promise.race([compiledFn(ctx), timeout(ms)])` — hard kill after timeout
-- `ctx` object exposes only: `ctx.http`, `ctx.ftp`, `ctx.s3`, `ctx.secrets`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
+- `ctx` object exposes only: `ctx.http`, `ctx.ftp`, `ctx.s3`, `ctx.ntrip` (RBMC branch), `ctx.secrets`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
+- `ctx.ntrip.sourcetable()` reads an NTRIP caster sourcetable through a single process-wide 60 s cache with in-flight de-duplication (`executor/ntrip-sourcetable.ts`) — the RBMC instance runs ~157 station tests against the same table, so the cache is what keeps that at one download per minute
 - `ctx.s3.get`/`ctx.s3.head` sign requests with AWS Signature Version 4, hand-rolled via `node:crypto` — no AWS SDK dependency, works against any S3-compatible endpoint since signing only depends on the request URL
 - No filesystem access from user code — `ctx.ftp.get` and `ctx.s3.get` both download to the same server-managed temp file mechanism internally (same directory, same size cap, same periodic sweep), but user code only ever sees the returned string body, never a path
 - Tests must return a boolean (`true` = pass, `false`/throw = fail)
