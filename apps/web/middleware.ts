@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const PUBLIC_PATHS = ['/login', '/status']
+// maplibre-gl's tile-processing worker (RBMC branch, served from public/ — see next.config.ts):
+// must be reachable by anonymous visitors of the public /status map, same as /status itself.
+const PUBLIC_PATHS = ['/login', '/status', '/maplibre-gl-worker.mjs', '/maplibre-gl-shared.mjs']
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(

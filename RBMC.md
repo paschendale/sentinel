@@ -108,7 +108,7 @@ sync rewrites every station test.
 | `RBMC_SHAPEFILE_DIR` | `apps/api/data/rbmc` (module-relative, works under `tsx` and `dist/`) | Directory holding `RBMCPoint.shp`/`.dbf` |
 | `RBMC_NTRIP_URL` | `http://gps-ntrip.ibge.gov.br:2101/` | Sourcetable URL used by `ctx.ntrip.sourcetable()` when no URL is passed and by the sync to learn city names |
 | `RBMC_SYNC_POLL_MS` | `60000` | mtime poll interval (5 s – 1 h) |
-| `NEXT_PUBLIC_MAP_STYLE_URL` | CARTO Dark Matter | MapLibre style JSON for the map; **web build-time** (Docker `ARG`) |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | An OCI Object Storage-hosted Brazil PMTiles extract, dark flavor | Overrides the map basemap: a `pmtiles://` source URL or a full MapLibre style JSON URL; **web build-time** (Docker `ARG`) |
 
 ---
 
@@ -122,14 +122,37 @@ sync rewrites every station test.
 | `/status/[tag]` | unchanged | unchanged (no map) |
 
 The map (`apps/web/app/status/_components/rbmc-map.tsx`, lazy-loaded with
-`ssr: false` like Monaco and Recharts) uses **maplibre-gl** — the only new
-dependency — with the CARTO Dark Matter vector style (free, keyless). If the
-style fails to load it falls back to a plain dark background with the stations
-still drawn. Stations are circles coloured emerald/yellow/red/zinc for
+`ssr: false` like Monaco and Recharts) uses **maplibre-gl**, **pmtiles** and
+**@protomaps/basemaps**. The basemap is read directly from a single remote
+`.pmtiles` file over `pmtiles://` (HTTP range requests, no tile server),
+styled with Protomaps' dark flavor. The default file is a small Brazil-only
+extract hosted in an OCI Object Storage bucket with CORS enabled — Protomaps'
+own public PMTiles buckets (`build.protomaps.com`, `latest.protomaps.com`) have
+no CORS headers and can't be range-fetched from a browser, so hotlinking them
+directly doesn't work (confirmed against the live endpoints; also documented:
+"hotlinking to these downloads are discouraged"). If the style fails to load it
+falls back to a plain dark background with the stations still drawn. The map is
+constructed with `bounds` set to Brazil (with slack for offshore/Uruguayan
+stations) so the initial view fits every station regardless of basemap.
+Stations are circles coloured emerald/yellow/red/zinc for
 up/degraded/down/unknown, disabled ones dimmed with a grey ring; a legend shows
 the counts; clicking a station opens a React-rendered panel (code, city, UF,
 30-day uptime, live mountpoints, link to the test history). The map refreshes
 itself from `GET /status/rbmc/map` every 5 minutes; the page itself stays ISR.
+
+**Worker URL gotcha:** maplibre-gl v6 locates its tile-processing worker via
+`import.meta.url` relative to its own module. That resolves fine when the
+library is loaded directly from a real static URL, but once webpack bundles it
+(as Next does), `import.meta.url` resolves to a chunk URL, not a servable path
+— the worker then gets constructed from an empty string and never processes a
+single tile, so *nothing* renders (no basemap, no station dots) with no error
+surfaced anywhere. `next.config.ts` copies `maplibre-gl-worker.mjs` and
+`maplibre-gl-shared.mjs` into `public/` on every dev/build run, and
+`rbmc-map.tsx` calls `maplibregl.setWorkerUrl('/maplibre-gl-worker.mjs')`
+before creating the map. `middleware.ts`'s `PUBLIC_PATHS` also had to list
+both files explicitly — anything outside `_next/static`/`_next/image`/
+`favicon.ico` otherwise goes through the auth redirect, which would serve the
+login page in place of the worker script to anonymous `/status` visitors.
 
 Note for local checks: `/status` is prerendered at build time with 5-minute ISR,
 so right after a deploy it can show the build-time state (no map, no tests) for

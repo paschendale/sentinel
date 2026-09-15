@@ -11,3 +11,7 @@ packages/shared/dist/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+
+# Copied from node_modules/maplibre-gl by apps/web/next.config.ts on every dev/build run
+apps/web/public/maplibre-gl-worker.mjs
+apps/web/public/maplibre-gl-shared.mjs

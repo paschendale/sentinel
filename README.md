@@ -75,7 +75,7 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `RBMC_SHAPEFILE_DIR` | No | *(RBMC branch)* Directory holding `RBMCPoint.{shp,dbf}` — the source of truth for stations (default: the copy shipped in the image at `apps/api/data/rbmc`) |
 | `RBMC_NTRIP_URL` | No | *(RBMC branch)* NTRIP caster sourcetable URL used by `ctx.ntrip.sourcetable()` and the station tests (default: `http://gps-ntrip.ibge.gov.br:2101/`) |
 | `RBMC_SYNC_POLL_MS` | No | *(RBMC branch)* How often the shapefile mtime is checked for changes (default: `60000`) |
-| `NEXT_PUBLIC_MAP_STYLE_URL` | No | *(RBMC branch, web build-time)* MapLibre style JSON for the station map (default: CARTO Dark Matter, keyless). Falls back to a plain dark background if the style fails to load |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | No | *(RBMC branch, web build-time)* Overrides the station map basemap: a `pmtiles://` source URL or a full MapLibre style JSON URL (default: a Brazil-only PMTiles extract hosted in OCI Object Storage, dark flavor). Falls back to a plain dark background if the style fails to load |
 
 ### Single Container (no Compose)
 

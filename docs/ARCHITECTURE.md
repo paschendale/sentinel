@@ -187,7 +187,9 @@ pnpm workspaces manage the monorepo.
 | `lucide-react` | Icon set (used by shadcn) |
 | `@monaco-editor/react` | Code editor (lazy-loaded) |
 | `recharts` | Internal charts (e.g. test detail latency; lazy-loaded) |
-| `maplibre-gl` | RBMC branch — station status map on `/status` and `/` (lazy-loaded, `ssr: false`); basemap is CARTO Dark Matter by default, `NEXT_PUBLIC_MAP_STYLE_URL` overrides, plain dark fallback when the style fails |
+| `maplibre-gl` | RBMC branch — station status map on `/status` and `/` (lazy-loaded, `ssr: false`); basemap is a Brazil-only PMTiles extract hosted in an OCI Object Storage bucket with CORS enabled (dark themed), `NEXT_PUBLIC_MAP_STYLE_URL` overrides (a `pmtiles://` URL or a full style JSON URL), plain dark fallback when the style fails |
+| `pmtiles` | RBMC branch — registers the `pmtiles://` MapLibre protocol so the basemap vector tiles can be read directly from a single remote `.pmtiles` file (HTTP range requests, no tile server); the bucket must have CORS enabled for browser range-fetches (Protomaps' own public PMTiles buckets don't, which is why this branch hosts its own extract) |
+| `@protomaps/basemaps` | RBMC branch — generates the MapLibre style layers (dark flavor) for the Protomaps basemap vector schema |
 | `zod` | Schema validation (shared) |
 
 **Explicitly banned**: `axios`, `express`, `redis`, `bullmq`, `prisma`, `typeorm`, `sequelize`, `lodash`, `moment`, `@mui/material`, `@chakra-ui/react`, `antd`, `styled-components`

@@ -1,14 +1,58 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Map as MapLibreMap, NavigationControl } from 'maplibre-gl'
+import { Map as MapLibreMap, NavigationControl, addProtocol, setWorkerUrl } from 'maplibre-gl'
 import type { ErrorEvent, GeoJSONSource, MapLayerMouseEvent, MapMouseEvent, StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { Protocol as PmtilesProtocol } from 'pmtiles'
+import { layers as protomapsLayers, namedFlavor } from '@protomaps/basemaps'
 import type { PublicStatusOutcome, RbmcMapCollection, RbmcMapFeatureProperties } from '@sentinel/shared'
 
-/** CARTO Dark Matter — free, keyless, MapLibre-ready. Override with NEXT_PUBLIC_MAP_STYLE_URL. */
-const DEFAULT_STYLE_URL = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
-const STYLE_URL = process.env.NEXT_PUBLIC_MAP_STYLE_URL || DEFAULT_STYLE_URL
+// `pmtiles://` is a custom MapLibre protocol; register it once per page load, module-scope so
+// remounting this component (e.g. client navigation) never calls addProtocol twice.
+addProtocol('pmtiles', new PmtilesProtocol().tile)
+
+// maplibre-gl locates its tile-processing worker via `import.meta.url` relative to its own
+// module, which resolves to a bundler chunk URL (not a servable path) once webpack bundles it —
+// the worker then gets created from an empty URL and silently never processes a single tile, so
+// nothing ever renders (no basemap, no station markers, no visible error). `next.config.ts`
+// copies the two files this needs into `public/`; point the library at them explicitly.
+setWorkerUrl('/maplibre-gl-worker.mjs')
+
+const PMTILES_SOURCE_ID = 'protomaps-basemap'
+
+/**
+ * Protomaps' own public PMTiles buckets (`build.protomaps.com`, `latest.protomaps.com`) have no
+ * CORS headers, so a browser can't range-fetch them directly — confirmed against the live
+ * endpoints, not just documented ("hotlinking discouraged"). This branch instead hosts a small
+ * Brazil-only extract in an OCI Object Storage bucket with CORS enabled. Override with
+ * NEXT_PUBLIC_MAP_STYLE_URL (a `pmtiles://...` source URL or a full style JSON URL).
+ */
+const DEFAULT_PMTILES_URL =
+  'pmtiles://https://objectstorage.sa-saopaulo-1.oraclecloud.com/n/gr6tkdct0hgi/b/brazil-tiles/o/brazil.pmtiles'
+
+function buildProtomapsDarkStyle(pmtilesUrl: string): StyleSpecification {
+  return {
+    version: 8,
+    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+    sprite: 'https://protomaps.github.io/basemaps-assets/sprites/v4/dark',
+    sources: {
+      [PMTILES_SOURCE_ID]: {
+        type: 'vector',
+        url: pmtilesUrl,
+        attribution: '<a href="https://protomaps.com">Protomaps</a> © <a href="https://openstreetmap.org">OpenStreetMap</a>',
+      },
+    },
+    layers: protomapsLayers(PMTILES_SOURCE_ID, namedFlavor('dark'), { lang: 'en' }),
+  } as StyleSpecification
+}
+
+const STYLE_OVERRIDE = process.env.NEXT_PUBLIC_MAP_STYLE_URL
+const STYLE_URL: string | StyleSpecification = STYLE_OVERRIDE
+  ? STYLE_OVERRIDE.startsWith('pmtiles://')
+    ? buildProtomapsDarkStyle(STYLE_OVERRIDE)
+    : STYLE_OVERRIDE
+  : buildProtomapsDarkStyle(DEFAULT_PMTILES_URL)
 
 /** Used when the remote style cannot be loaded: plain dark ground, stations still drawn. */
 const FALLBACK_STYLE: StyleSpecification = {
