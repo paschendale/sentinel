@@ -159,6 +159,31 @@ Runtime state for each test. Tracks alert logic. Persisted to DB but treated as 
 
 ---
 
+### RbmcStation (RBMC branch only)
+One IBGE RBMC GNSS station, sourced from the `RBMCPoint` shapefile shipped at `apps/api/data/rbmc/` (or `RBMC_SHAPEFILE_DIR`). The shapefile is the **source of truth**: stations are created, updated, and flagged from it by the sync job (`apps/api/src/rbmc/sync.ts`); operators change the station list by replacing the shapefile files, never by editing rows.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `code` | `string` | PK — the 4-character `SG_RBMC` code, also the NTRIP mountpoint prefix (`VICO` → `VICO0`, `VICO1`) |
+| `test_id` | `string \| null` | FK → Test (unique). The generated station test; set by the sync |
+| `station_id` | `string \| null` | IBGE station id (`ESTACAO`) |
+| `uf` | `string \| null` | State (`UF`) |
+| `geocodigo` | `string \| null` | IBGE municipality code |
+| `lat` / `lon` | `number \| null` | From the `.shp` point (SIRGAS 2000 geographic, EPSG:4674) |
+| `alt_geom` | `string \| null` | Geometric altitude as written in the DBF |
+| `name` | `string \| null` | City / identifier, learned from the NTRIP sourcetable |
+| `in_shapefile` | `boolean` | False once the code disappears from the shapefile |
+| `template_version` | `number \| null` | Version of the generated test code linked to this station |
+| `synced_at` | `timestamp \| null` | Last time the sync touched the row |
+
+**Rules:**
+- Exactly one Test per station. The sync **adopts** an existing test named `RBMC - <CODE>0 - City` (or `<CODE>1`, or `<CODE>`) instead of creating a duplicate, so history is preserved; other tests matching the same code are disabled
+- The sync never deletes tests and never changes `enabled`, `schedule_ms`, or `timeout_ms` on a linked test — it only rewrites `name`/`code` when the template changes
+- A station removed from the shapefile keeps its row (`in_shapefile = false`), its test is disabled, and it drops off the map
+- Station test code is generated from `apps/api/src/rbmc/template.ts` and calls `ctx.ntrip.sourcetable()`; manual edits are overwritten on the next sync
+
+---
+
 ## Relationships
 
 ```
@@ -168,6 +193,7 @@ Test (1) ──────────────────────→ (
 Test (1) ──────────────────────→ (M) UptimeDaily
 TestRun (1) ───────────────────→ (M) AssertionResult
 NotificationChannel (1) ───────→ (M) ChannelAssignment
+RbmcStation (1) ───────────────→ (0..1) Test           (RBMC branch)
 
 ChannelAssignment.scope_value also matches tags (scope_type='tag'), which is a
 loose reference against Test.tags rather than a foreign key — a channel
