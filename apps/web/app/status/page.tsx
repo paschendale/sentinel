@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
 import type { Metadata } from 'next'
-import type { PublicStatusTest } from '@sentinel/shared'
+import type { PublicStatusTest, RbmcMapCollection } from '@sentinel/shared'
 import { StatusPageContent } from './_components/status-page-content'
 import { TagBrowser } from './_components/tag-browser'
 import { SentinelLogo } from '../_components/sentinel-logo'
@@ -9,7 +9,7 @@ export const revalidate = 300
 
 export const metadata: Metadata = {
   title: 'Status',
-  description: 'Live status and uptime for all tests.',
+  description: 'Live status map of IBGE RBMC GNSS stations and uptime for all tests.',
 }
 
 async function getStatus(): Promise<PublicStatusTest[]> {
@@ -20,6 +20,18 @@ async function getStatus(): Promise<PublicStatusTest[]> {
     return res.json() as Promise<PublicStatusTest[]>
   } catch {
     return []
+  }
+}
+
+async function getRbmcMap(): Promise<RbmcMapCollection | undefined> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
+  try {
+    const res = await fetch(`${apiUrl}/status/rbmc/map`, { next: { revalidate: 300 } })
+    if (!res.ok) return undefined
+    const fc = (await res.json()) as RbmcMapCollection
+    return fc.type === 'FeatureCollection' ? fc : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -35,7 +47,7 @@ async function getTags(): Promise<string[]> {
 }
 
 export default async function StatusPage() {
-  const [tests, tags] = await Promise.all([getStatus(), getTags()])
+  const [tests, tags, map] = await Promise.all([getStatus(), getTags(), getRbmcMap()])
 
   return (
     <main className="min-h-screen bg-zinc-950 px-6 py-12 overflow-x-clip">
@@ -46,7 +58,7 @@ export default async function StatusPage() {
         </div>
         <TagBrowser tags={tags} />
         <Suspense fallback={null}>
-          <StatusPageContent tests={tests} />
+          <StatusPageContent tests={tests} {...(map ? { map } : {})} />
         </Suspense>
       </div>
     </main>

@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
+import type { PublicStatusOutcome, PublicStatusTest, RbmcMapCollection, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from './status-buckets-view'
 import { StatusGridCard } from './status-grid-card'
+import { RbmcMapLoader } from './rbmc-map-loader'
 import { TagList } from '../../_components/tag-list'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
@@ -16,7 +17,7 @@ function isPeriod(v: string | null): v is StatusPeriod {
 }
 
 function isView(v: string | null): v is View {
-  return v === 'grid' || v === 'list'
+  return v === 'map' || v === 'grid' || v === 'list'
 }
 
 function computeUptimePct(buckets: StatusBucket[]): number | null {
@@ -44,6 +45,14 @@ function GridIcon() {
   )
 }
 
+function MapIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+      <path d="M7 0.5C4.8 0.5 3 2.3 3 4.5c0 3 4 8.5 4 8.5s4-5.5 4-8.5c0-2.2-1.8-4-4-4zm0 5.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" />
+    </svg>
+  )
+}
+
 function ListIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
@@ -54,15 +63,18 @@ function ListIcon() {
   )
 }
 
-type View = 'grid' | 'list'
+type View = 'map' | 'grid' | 'list'
 const VIEW_KEY = 'sentinel-status-view'
 
 interface Props {
   tests: PublicStatusTest[]
   tag?: string
+  /** RBMC station GeoJSON — when present (and non-empty) the map is the default view. */
+  map?: RbmcMapCollection
 }
 
-export function StatusPageContent({ tests, tag }: Props) {
+export function StatusPageContent({ tests, tag, map }: Props) {
+  const hasMap = map !== undefined && map.features.length > 0
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -92,20 +104,21 @@ export function StatusPageContent({ tests, tag }: Props) {
   }, [router])
 
   useEffect(() => {
+    const fallback = (): View => (hasMap ? 'map' : window.innerWidth >= 768 ? 'grid' : 'list')
     const urlView = searchParams.get('view')
-    if (isView(urlView)) {
+    if (isView(urlView) && (urlView !== 'map' || hasMap)) {
       setView(urlView)
       return
     }
     try {
       const saved = localStorage.getItem(VIEW_KEY)
-      if (saved === 'list' || saved === 'grid') {
+      if (isView(saved) && (saved !== 'map' || hasMap)) {
         setView(saved)
       } else {
-        setView(window.innerWidth >= 768 ? 'grid' : 'list')
+        setView(fallback())
       }
     } catch {
-      setView(window.innerWidth >= 768 ? 'grid' : 'list')
+      setView(fallback())
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -132,14 +145,14 @@ export function StatusPageContent({ tests, tag }: Props) {
       .finally(() => setLoading(false))
   }, [period, tag, refreshKey])
 
-  if (tests.length === 0) {
+  if (tests.length === 0 && !hasMap) {
     return <p className="text-zinc-500 text-center text-sm">No tests configured.</p>
   }
 
   const controls = (
     <div className="flex items-center justify-between gap-4">
       <div className="flex gap-2">
-        {PERIODS.map(p => (
+        {view !== 'map' && PERIODS.map(p => (
           <button
             key={p}
             onClick={() => setPeriod(p)}
@@ -154,6 +167,19 @@ export function StatusPageContent({ tests, tag }: Props) {
         ))}
       </div>
       <div className="flex gap-1">
+        {hasMap && (
+          <button
+            onClick={() => switchView('map')}
+            title="Map view"
+            className={`p-1.5 rounded-sm transition-colors ${
+              view === 'map'
+                ? 'bg-zinc-100 text-zinc-950'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+            }`}
+          >
+            <MapIcon />
+          </button>
+        )}
         <button
           onClick={() => switchView('grid')}
           title="Grid view"
@@ -180,7 +206,16 @@ export function StatusPageContent({ tests, tag }: Props) {
     </div>
   )
 
-  if (view === 'grid') {
+  if (view === 'map' && hasMap) {
+    return (
+      <div className="space-y-4">
+        {controls}
+        <RbmcMapLoader initial={map} refreshUrl={`${API_URL}/status/rbmc/map`} linkBase="/status/tests" />
+      </div>
+    )
+  }
+
+  if (view === 'grid' || view === 'map') {
     return (
       <div className="space-y-4">
         {controls}

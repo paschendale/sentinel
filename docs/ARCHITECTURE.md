@@ -107,7 +107,7 @@ pnpm workspaces manage the monorepo.
 - **Dashboard**: test list with last status, last run time, 7-day sparkline
 - **Test editor**: Monaco Editor (lazy-loaded, not bundled eagerly) for JS code editing
 - **Test detail**: recent runs, pass/fail history, duration chart
-- **Public status page**: SSG/ISR from `UptimeDaily` only — never queries raw `test_runs`
+- **Public status page**: SSG/ISR from `UptimeDaily` only — never queries raw `test_runs`; on the RBMC branch its default view is a MapLibre map of station status fed by `GET /status/rbmc/map` (aggregated GeoJSON, refreshed client-side every 5 min)
 - **Tokens page**: generates long-lived MCP bearer tokens and the matching `claude mcp add` command
 
 ### Design System
@@ -133,7 +133,7 @@ pnpm workspaces manage the monorepo.
 **Components:** Use **shadcn/ui** (Radix UI headless primitives + Tailwind). Install components individually with `npx shadcn@latest add <component>`. Never wrap shadcn components in additional abstraction layers — edit the generated component file directly if customization is needed.
 
 ### Bundle discipline
-- Monaco and **Recharts** are large client-side dependencies — both must be **dynamically imported** (`ssr: false`) where used
+- Monaco, **Recharts** and **MapLibre** are large client-side dependencies — all must be **dynamically imported** (`ssr: false`) where used
 - No heavy UI libraries (no MUI, no Chakra, no Ant Design)
 - shadcn/ui components are code-owned (not a runtime package) — acceptable
 - Public status pages must load fast — no client-side data fetching
@@ -178,6 +178,7 @@ pnpm workspaces manage the monorepo.
 | `lucide-react` | Icon set (used by shadcn) |
 | `@monaco-editor/react` | Code editor (lazy-loaded) |
 | `recharts` | Internal charts (e.g. test detail latency; lazy-loaded) |
+| `maplibre-gl` | RBMC branch — station status map on `/status` and `/` (lazy-loaded, `ssr: false`); basemap is CARTO Dark Matter by default, `NEXT_PUBLIC_MAP_STYLE_URL` overrides, plain dark fallback when the style fails |
 | `zod` | Schema validation (shared) |
 
 **Explicitly banned**: `axios`, `express`, `redis`, `bullmq`, `prisma`, `typeorm`, `sequelize`, `lodash`, `moment`, `@mui/material`, `@chakra-ui/react`, `antd`, `styled-components`
