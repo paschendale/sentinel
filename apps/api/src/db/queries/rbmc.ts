@@ -231,8 +231,10 @@ export interface RbmcMapRow {
   uptime_pct_30d: number | null
 }
 
-/** Public map data — aggregated tables only (RULES #10: never `test_runs` on a public route). */
-export async function listStationsForMap(): Promise<RbmcMapRow[]> {
+/** Public map data — aggregated tables only (RULES #10: never `test_runs` on a public route).
+ *  `tag`, when given, restricts to stations whose linked test carries that tag (mirrors the
+ *  `$1 = ANY(tags)` pattern used by `GET /status/tag/:tag`). */
+export async function listStationsForMap(tag?: string): Promise<RbmcMapRow[]> {
   const { rows } = await pool.query<RbmcMapRow>(
     `SELECT s.code, s.name, s.uf, s.lat, s.lon, s.test_id, t.enabled,
             COALESCE(ts.public_status, 'unknown') AS public_status,
@@ -244,8 +246,10 @@ export async function listStationsForMap(): Promise<RbmcMapRow[]> {
      LEFT JOIN uptime_daily ud
        ON ud.test_id = s.test_id AND ud.date >= (CURRENT_DATE - 29) AND ud.date <= CURRENT_DATE
      WHERE s.in_shapefile = TRUE AND s.lat IS NOT NULL AND s.lon IS NOT NULL
+       AND ($1::text IS NULL OR $1 = ANY(t.tags))
      GROUP BY s.code, s.name, s.uf, s.lat, s.lon, s.test_id, t.enabled, ts.public_status
-     ORDER BY s.code`
+     ORDER BY s.code`,
+    [tag ?? null]
   )
   return rows
 }

@@ -108,6 +108,15 @@ describe('rbmc routes', () => {
     expect(res.body).not.toContain('error_message')
   })
 
+  it('GET /status/rbmc/map?tag= passes the tag through to the query as the ANY(tags) filter param', async () => {
+    mockVerify.mockReturnValue(null)
+    mockQuery.mockResolvedValueOnce({ rows: [mapRow()] } as never)
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status/rbmc/map?tag=ggc-go' })
+    expect(res.statusCode).toBe(200)
+    expect(mockQuery).toHaveBeenCalledWith(expect.stringContaining('ANY(t.tags)'), ['ggc-go'])
+  })
+
   it('map builder attaches live RBMC-IP mountpoints per station and ignores other networks', async () => {
     const table = [
       'STR;VICO1;Vicosa;RTCM 3.0;1004(1);2;GPS+GLO;RBMC-IP;BRA;-20.76;-42.87;0;0;TRIMBLE NETR9;none;B;N;1500;RBMC',

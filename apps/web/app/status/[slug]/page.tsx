@@ -1,7 +1,7 @@
 import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
-import type { PublicStatusTest } from '@sentinel/shared'
+import type { PublicStatusTest, RbmcMapCollection } from '@sentinel/shared'
 import { StatusPageContent } from '../_components/status-page-content'
 import { TagBrowser } from '../_components/tag-browser'
 import { BackLink } from '../../_components/back-link'
@@ -47,6 +47,19 @@ async function getTags(): Promise<string[]> {
   }
 }
 
+/** Same aggregated GeoJSON as the main /status map, scoped to this tag via ?tag= (RBMC branch). */
+async function getRbmcMap(tag: string): Promise<RbmcMapCollection | undefined> {
+  const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
+  try {
+    const res = await fetch(`${apiUrl}/status/rbmc/map?tag=${encodeURIComponent(tag)}`, { next: { revalidate: 300 } })
+    if (!res.ok) return undefined
+    const fc = (await res.json()) as RbmcMapCollection
+    return fc.type === 'FeatureCollection' ? fc : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export default async function TagStatusPage({
   params,
 }: {
@@ -54,7 +67,7 @@ export default async function TagStatusPage({
 }) {
   const { slug } = await params
   const tag = decodeURIComponent(slug)
-  const [tests, tags] = await Promise.all([getTagStatus(tag), getTags()])
+  const [tests, tags, map] = await Promise.all([getTagStatus(tag), getTags(), getRbmcMap(tag)])
 
   if (tests === null) notFound()
 
@@ -74,7 +87,7 @@ export default async function TagStatusPage({
         <TagBrowser tags={tags} activeTag={tag} />
 
         <Suspense fallback={null}>
-          <StatusPageContent tests={tests} tag={tag} />
+          <StatusPageContent tests={tests} tag={tag} {...(map ? { map } : {})} />
         </Suspense>
       </div>
     </main>

@@ -118,8 +118,10 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
   // GET /status/rbmc/map — public GeoJSON of RBMC stations (RBMC branch). Built from
   // rbmc_stations + test_state.public_status + uptime_daily only (RULES #10); live
   // mountpoints are added from the in-process sourcetable cache when it is warm.
-  app.get('/rbmc/map', async (_req, reply) => {
-    const rows = await listStationsForMap()
+  // Optional ?tag= restricts to stations whose test carries that tag, same filter as
+  // GET /status/tag/:tag, so the map can be scoped to a tag like the grid/list views.
+  app.get<{ Querystring: { tag?: string } }>('/rbmc/map', async (req, reply) => {
+    const rows = await listStationsForMap(req.query.tag)
     const live = mountpointsByCode(ntripSourcetableCache.peek(RBMC_NTRIP_URL))
     reply.header('Cache-Control', 'public, max-age=60')
     return reply.send(buildRbmcMapCollection(rows, live))

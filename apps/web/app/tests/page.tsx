@@ -42,7 +42,6 @@ export default async function TestsPage({
             <span className="text-zinc-100 text-lg">sentinel</span>
           </Link>
         <div className="flex items-center gap-6">
-          <Link href="/" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">map</Link>
           <Link href="/status" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">status page</Link>
           <Link href="/notifications" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">notifications</Link>
           <Link href="/secrets" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">secrets</Link>

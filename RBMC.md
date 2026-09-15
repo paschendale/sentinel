@@ -2,7 +2,7 @@
 
 This branch (`rbmc`) turns Sentinel into a monitor for the real-time stations of
 IBGE's **RBMC** (Rede Brasileira de Monitoramento Contínuo dos Sistemas GNSS).
-It is a long-lived fork: it is **never merged into `main`**, it has its own CI
+It is a long-lived fork: it is **never merged into** `main`, it has its own CI
 and its own Docker image, and it keeps everything mainline Sentinel does
 (tests, tags, channels, secrets, MCP) while adding the station layer described
 below. Everything not listed here behaves exactly as on `main`.
@@ -29,6 +29,8 @@ Test defaults mirror the hand-made tests the instance started with:
 
 ---
 
+
+
 ## 2. The shapefile is the source of truth
 
 The station list is IBGE's *RBMC/GNSS Permanente* shapefile,
@@ -42,13 +44,13 @@ key; `ESTACAO`, `UF`, `GEOCODIGO`, `ALTGEOM` and the point coordinates
 station tests by hand:
 
 - bind-mount a directory with the five files over `/app/apps/api/data/rbmc`
-  (see the commented `volumes:` block in `docker-compose.yml`), or point
-  `RBMC_SHAPEFILE_DIR` at one;
+(see the commented `volumes:` block in `docker-compose.yml`), or point
+`RBMC_SHAPEFILE_DIR` at one;
 - the API polls the files' mtime every `RBMC_SYNC_POLL_MS` (default 60 s) and
-  re-syncs once the mtime has been stable for two polls (guards against a
-  half-copied mount);
+re-syncs once the mtime has been stable for two polls (guards against a
+half-copied mount);
 - to apply immediately, call `POST /rbmc/sync` (JWT) or the MCP tool
-  `sync_rbmc_stations`.
+`sync_rbmc_stations`.
 
 The reader is hand-written and dependency-free (`apps/api/src/rbmc/shapefile.ts`).
 A corrupt or missing file fails the sync and is logged; a bad row (blank or
@@ -57,18 +59,22 @@ The process never crashes because of the shapefile (RULES #16).
 
 ---
 
+
+
 ## 3. The sync (`apps/api/src/rbmc/sync.ts`)
 
 Runs once after the API starts listening (in the background, never awaited),
 on every mtime change, and on demand. Per station it:
 
-| Situation | Action |
-|---|---|
-| Station already linked to a test that still exists | Leave it alone; rewrite `name`/`code` only if they drifted from the current template version |
+
+| Situation                                                                                                                                     | Action                                                                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Station already linked to a test that still exists                                                                                            | Leave it alone; rewrite `name`/`code` only if they drifted from the current template version                                                                                                                   |
 | Not linked, but a test named `RBMC - CODE0 - City` / `RBMC - CODE1 - City` / `RBMC - CODE - City` exists (or its JS contains the quoted code) | **Adopt** it: rename to `RBMC - CODE - City`, replace the code, link it. History and incidents are kept. Prefers `0`, then unsuffixed, then `1`; oldest wins. Other matches for the same code are **disabled** |
-| Nothing adoptable | **Create** a test with the defaults above; the city label comes from the sourcetable identifier when the caster is reachable, otherwise the code |
-| Station disappeared from the shapefile | Row flagged `in_shapefile = false`, its test **disabled**, it drops off the map |
-| Station is back in the shapefile | Its test is **re-enabled** |
+| Nothing adoptable                                                                                                                             | **Create** a test with the defaults above; the city label comes from the sourcetable identifier when the caster is reachable, otherwise the code                                                               |
+| Station disappeared from the shapefile                                                                                                        | Row flagged `in_shapefile = false`, its test **disabled**, it drops off the map                                                                                                                                |
+| Station is back in the shapefile                                                                                                              | Its test is **re-enabled**                                                                                                                                                                                     |
+
 
 Rules the sync never breaks: it never deletes a test, never changes
 `schedule_ms`/`timeout_ms`, and never touches `enabled` on a test that is
@@ -83,17 +89,21 @@ disabled 24 `…1` siblings (157 stations total).
 
 ---
 
+
+
 ## 4. New pieces of the API
 
-| Piece | Mainline | RBMC branch |
-|---|---|---|
-| Table `rbmc_stations` (migration `017`) | — | `code` PK, `test_id` (unique FK → tests), `station_id`, `uf`, `geocodigo`, `lat`, `lon`, `alt_geom`, `name`, `in_shapefile`, `template_version`, `synced_at` |
-| `ctx.ntrip.sourcetable(url?)` | — | Returns the parsed `STR` rows (`mountpoint`, `identifier`, `format`, `formatDetails`, `navSystem`, `network`, `country`, `lat`, `lon`, `generator`). Sends the `Ntrip-Version: Ntrip/2.0` handshake headers itself (without them IBGE's caster answers a non-HTTP status line that undici rejects). One process-wide 60 s cache with in-flight de-duplication, so 157 tests cost one download per minute; failures are never cached. Errors are `NtripRequestError` with `NTRIP_FETCH_ERROR` or `NTRIP_PARSE_ERROR` |
-| `GET /rbmc` (JWT) | — | Every station with its test, coordinates, `last_status`, `last_run_at`, `in_shapefile` |
-| `POST /rbmc/sync` (JWT) | — | Re-read the shapefile now; `200` with a summary (`stations`, `created`, `adopted`, `updated`, `disabled`, `reenabled`, `skipped`) or `503` when the file could not be read |
-| `GET /status/rbmc/map` (public) | — | GeoJSON `FeatureCollection`, one Point per station in the shapefile, built only from `rbmc_stations`, `test_state.public_status` and `uptime_daily` (RULES #10). Properties: `code`, `name`, `uf`, `test_id`, `status` (`up`/`degraded`/`down`/`unknown`; disabled → `unknown`), `enabled`, `uptime_pct_30d`, and `mountpoints` when the sourcetable cache is warm. `Cache-Control: max-age=60` |
-| MCP tools | 21 | 23: adds `list_rbmc_stations` and `sync_rbmc_stations`; the server `instructions` explain the RBMC purpose and that the sync owns station tests |
-| Log events | — | `test.ntrip` (per run: rows, cached/fetched, ms), `rbmc.sync.*` (`complete`, `failed`, `row_skipped`, `shapefile_changed`, `shapefile_missing`, `sourcetable_unavailable`) |
+
+| Piece                                   | Mainline | RBMC branch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Table `rbmc_stations` (migration `017`) | —        | `code` PK, `test_id` (unique FK → tests), `station_id`, `uf`, `geocodigo`, `lat`, `lon`, `alt_geom`, `name`, `in_shapefile`, `template_version`, `synced_at`                                                                                                                                                                                                                                                                                                                                                        |
+| `ctx.ntrip.sourcetable(url?)`           | —        | Returns the parsed `STR` rows (`mountpoint`, `identifier`, `format`, `formatDetails`, `navSystem`, `network`, `country`, `lat`, `lon`, `generator`). Sends the `Ntrip-Version: Ntrip/2.0` handshake headers itself (without them IBGE's caster answers a non-HTTP status line that undici rejects). One process-wide 60 s cache with in-flight de-duplication, so 157 tests cost one download per minute; failures are never cached. Errors are `NtripRequestError` with `NTRIP_FETCH_ERROR` or `NTRIP_PARSE_ERROR` |
+| `GET /rbmc` (JWT)                       | —        | Every station with its test, coordinates, `last_status`, `last_run_at`, `in_shapefile`                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `POST /rbmc/sync` (JWT)                 | —        | Re-read the shapefile now; `200` with a summary (`stations`, `created`, `adopted`, `updated`, `disabled`, `reenabled`, `skipped`) or `503` when the file could not be read                                                                                                                                                                                                                                                                                                                                          |
+| `GET /status/rbmc/map` (public)         | —        | GeoJSON `FeatureCollection`, one Point per station in the shapefile, built only from `rbmc_stations`, `test_state.public_status` and `uptime_daily` (RULES #10). Properties: `code`, `name`, `uf`, `test_id`, `status` (`up`/`degraded`/`down`/`unknown`; disabled → `unknown`), `enabled`, `uptime_pct_30d`, and `mountpoints` when the sourcetable cache is warm. Optional `?tag=` restricts to stations whose test carries that tag (same `$1 = ANY(tags)` filter as `GET /status/tag/:tag`), for the per-tag map on `/status/[tag]`. `Cache-Control: max-age=60`                                                                                                                     |
+| MCP tools                               | 21       | 23: adds `list_rbmc_stations` and `sync_rbmc_stations`; the server `instructions` explain the RBMC purpose and that the sync owns station tests                                                                                                                                                                                                                                                                                                                                                                     |
+| Log events                              | —        | `test.ntrip` (per run: rows, cached/fetched, ms), `rbmc.sync.*` (`complete`, `failed`, `row_skipped`, `shapefile_changed`, `shapefile_missing`, `sourcetable_unavailable`)                                                                                                                                                                                                                                                                                                                                          |
+
 
 Generated test code lives in `apps/api/src/rbmc/template.ts`
 (`RBMC_TEMPLATE_VERSION`). Bump the version when the body changes and the next
@@ -101,25 +111,33 @@ sync rewrites every station test.
 
 ---
 
+
+
 ## 5. New environment variables (all optional)
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `RBMC_SHAPEFILE_DIR` | `apps/api/data/rbmc` (module-relative, works under `tsx` and `dist/`) | Directory holding `RBMCPoint.shp`/`.dbf` |
-| `RBMC_NTRIP_URL` | `http://gps-ntrip.ibge.gov.br:2101/` | Sourcetable URL used by `ctx.ntrip.sourcetable()` when no URL is passed and by the sync to learn city names |
-| `RBMC_SYNC_POLL_MS` | `60000` | mtime poll interval (5 s – 1 h) |
-| `NEXT_PUBLIC_MAP_STYLE_URL` | An OCI Object Storage-hosted Brazil PMTiles extract, dark flavor | Overrides the map basemap: a `pmtiles://` source URL or a full MapLibre style JSON URL; **web build-time** (Docker `ARG`) |
+
+| Variable                    | Default                                                               | Purpose                                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `RBMC_SHAPEFILE_DIR`        | `apps/api/data/rbmc` (module-relative, works under `tsx` and `dist/`) | Directory holding `RBMCPoint.shp`/`.dbf`                                                                                  |
+| `RBMC_NTRIP_URL`            | `http://gps-ntrip.ibge.gov.br:2101/`                                  | Sourcetable URL used by `ctx.ntrip.sourcetable()` when no URL is passed and by the sync to learn city names               |
+| `RBMC_SYNC_POLL_MS`         | `60000`                                                               | mtime poll interval (5 s – 1 h)                                                                                           |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | An OCI Object Storage-hosted Brazil PMTiles extract, dark flavor      | Overrides the map basemap: a `pmtiles://` source URL or a full MapLibre style JSON URL; **web build-time** (Docker `ARG`) |
+
 
 ---
 
+
+
 ## 6. Web app changes
 
-| Route | Mainline | RBMC branch |
-|---|---|---|
-| `/` | Test table | The **station map** (authenticated). Anonymous visitors are redirected to `/status` instead of `/login` |
-| `/tests` | — | The test table that used to be `/`. Every "back"/"after save"/"after delete"/tag link now points here |
-| `/status` | Grid/list of tests | Opens on the **map**; grid and list stay one click away (toggle, `?view=map|grid|list`, remembered in `localStorage`). Period pills are hidden in map view |
-| `/status/[tag]` | unchanged | unchanged (no map) |
+
+| Route           | Mainline           | RBMC branch                                                                                                                                        |
+| --------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`             | Test table         | Redirects: anonymous → `/login`, authenticated → `/tests`. No page renders here — auth gating is the only thing left at `/`                          |
+| `/tests`        | —                  | The test table that used to be `/`. Every "back"/"after save"/"after delete"/tag link now points here                                              |
+| `/status`       | Grid/list of tests | Opens on the **map**; grid and list stay one click away (toggle, `?view=map\|grid\|list`, remembered in `localStorage`). Period pills are hidden in map view |
+| `/status/[tag]` | unchanged          | Also gets the map, scoped to that tag via `GET /status/rbmc/map?tag=`; same map/grid/list toggle as `/status`                                        |
+
 
 The map (`apps/web/app/status/_components/rbmc-map.tsx`, lazy-loaded with
 `ssr: false` like Monaco and Recharts) uses **maplibre-gl**, **pmtiles** and
@@ -161,42 +179,48 @@ exposes the map instance.
 
 ---
 
+
+
 ## 7. Build, CI and deployment
 
 - `Dockerfile` copies `apps/api/data/` into the image and accepts
-  `NEXT_PUBLIC_MAP_STYLE_URL` as a build arg; `apps/api/Dockerfile` also copies
-  the migrations and sets `RBMC_SHAPEFILE_DIR=/app/data/rbmc`.
+`NEXT_PUBLIC_MAP_STYLE_URL` as a build arg; `apps/api/Dockerfile` also copies
+the migrations and sets `RBMC_SHAPEFILE_DIR=/app/data/rbmc`.
 - `.github/workflows/rbmc.yml` is this branch's CI: on every push to `rbmc`
-  (or manual dispatch) it typechecks, runs the whole API suite against a
-  Postgres service (integration tests included — `DATABASE_URL` is exported, and
-  `apps/api/vitest.config.ts` now lets an external `DATABASE_URL` reach
-  `*.integration.test.ts`), then builds and pushes
-  `paschendale/sentinel-rbmc:latest` and `paschendale/sentinel-rbmc:sha-<12>`.
-  No semantic-release, no `CHANGELOG`, no version bumps on this branch.
+(or manual dispatch) it typechecks, runs the whole API suite against a
+Postgres service (integration tests included — `DATABASE_URL` is exported, and
+`apps/api/vitest.config.ts` now lets an external `DATABASE_URL` reach
+`*.integration.test.ts`), then builds and pushes
+`paschendale/sentinel-rbmc:latest` and `paschendale/sentinel-rbmc:sha-<12>`.
+No semantic-release, no `CHANGELOG`, no version bumps on this branch.
 - The deployment lives in the paschendale.net repo:
-  `disbelief/sentinel-rbmc/docker-compose.yml` tracks
-  `paschendale/sentinel-rbmc:latest` (was `paschendale/sentinel:latest`) and
-  What's Up Docker rolls new images out. A commented `volumes:` block shows how
-  to mount a replacement shapefile.
+`disbelief/sentinel-rbmc/docker-compose.yml` tracks
+`paschendale/sentinel-rbmc:latest` (was `paschendale/sentinel:latest`) and
+What's Up Docker rolls new images out. A commented `volumes:` block shows how
+to mount a replacement shapefile.
 
 ---
+
+
 
 ## 8. Tests added
 
 - `apps/api/src/rbmc/shapefile.test.ts` — the shipped file (157 stations,
-  unique codes, sane coordinates) plus synthetic bad files.
+unique codes, sane coordinates) plus synthetic bad files.
 - `apps/api/src/rbmc/sync.test.ts` — the pure planner: adoption preferences,
-  duplicates, drift, removal, return, idempotency; the generated code runs
-  against a fake `ctx`.
+duplicates, drift, removal, return, idempotency; the generated code runs
+against a fake `ctx`.
 - `apps/api/src/rbmc/sync.integration.test.ts` — the transactional core against
-  a real database, everything rolled back, pre-existing stations passed through
-  untouched (safe on a populated database).
+a real database, everything rolled back, pre-existing stations passed through
+untouched (safe on a populated database).
 - `apps/api/src/executor/ntrip-sourcetable.test.ts`, `ctx.test.ts` — parser,
-  cache sharing/TTL/failure behaviour, handshake headers.
+cache sharing/TTL/failure behaviour, handshake headers.
 - `apps/api/src/routes/rbmc.test.ts`, `mcp.test.ts` — routes, auth, GeoJSON
-  shape, tool list.
+shape, tool list.
 
 ---
+
+
 
 ## 9. Where to read more
 
@@ -204,3 +228,4 @@ exposes the map instance.
 - `docs/ARCHITECTURE.md` — "RBMC Station Sync" section, approved dependency `maplibre-gl`
 - `README.md` — "RBMC Station Monitoring" section, env-var table
 - `IMPLEMENTATION_LOG.md` — entry "2026-09-15 · RBMC"
+

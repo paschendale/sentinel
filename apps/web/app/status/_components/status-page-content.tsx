@@ -208,10 +208,13 @@ export function StatusPageContent({ tests, tag, map }: Props) {
   )
 
   if (view === 'map' && hasMap) {
+    const mapRefreshUrl = tag
+      ? `${API_URL}/status/rbmc/map?tag=${encodeURIComponent(tag)}`
+      : `${API_URL}/status/rbmc/map`
     return (
       <div className="space-y-4">
         {controls}
-        <RbmcMapLoader initial={map} refreshUrl={`${API_URL}/status/rbmc/map`} linkBase="/status/tests" />
+        <RbmcMapLoader initial={map} refreshUrl={mapRefreshUrl} linkBase="/status/tests" />
       </div>
     )
   }
