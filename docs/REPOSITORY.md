@@ -10,10 +10,12 @@ Sentinel is organized as a **pnpm monorepo** with two applications and one share
 sentinel/
 ├── apps/
 │   ├── api/                    # Backend: Fastify API + scheduler + executor + notifier
+│   │   ├── data/rbmc/          # RBMC branch: shipped IBGE RBMCPoint shapefile (source of truth for stations)
 │   │   ├── src/
-│   │   │   ├── routes/         # Fastify route handlers (tests, runs, metrics, status, secrets)
+│   │   │   ├── routes/         # Fastify route handlers (tests, runs, metrics, status, secrets, rbmc)
+│   │   │   ├── rbmc/           # RBMC branch: shapefile reader, station sync/poller, test template, map builder
 │   │   │   ├── scheduler/      # Job scheduling engine (interval + jitter logic)
-│   │   │   ├── executor/       # Test execution engine (compile, run, timeout, secrets cache)
+│   │   │   ├── executor/       # Test execution engine (compile, run, timeout, secrets cache, NTRIP sourcetable cache)
 │   │   │   ├── notifier/       # Notification pipeline (Discord, Slack, webhook)
 │   │   │   ├── db/             # Postgres client, connection pool, raw SQL queries
 │   │   │   ├── crypto/         # AES-256-GCM secret encryption (apps/api/src/crypto/secret-cipher.ts)
@@ -24,14 +26,15 @@ sentinel/
 │   │
 │   └── web/                    # Frontend: Next.js dashboard + public status pages
 │       ├── app/                # Next.js App Router
-│       │   ├── (dashboard)/    # Authenticated dashboard routes
-│       │   │   ├── page.tsx    # Test list
-│       │   │   ├── tests/
-│       │   │   │   ├── new/    # Create test
-│       │   │   │   └── [id]/   # Edit / test detail
+│       │   ├── page.tsx        # RBMC branch: authenticated home = station map
+│       │   ├── tests/
+│       │   │   ├── page.tsx    # Test list (was the home page before the RBMC branch)
+│       │   │   ├── new/        # Create test
+│       │   │   └── [id]/       # Edit / test detail
 │       │   ├── secrets/        # Secret management page (write-only create/rotate/delete)
-│       │   └── status/
-│       │       └── [slug]/     # Public status page (SSG/ISR)
+│       │   └── status/         # Public status page (SSG/ISR); default view is the RBMC map
+│       │       ├── _components/rbmc-map.tsx   # MapLibre map (lazy-loaded via rbmc-map-loader.tsx)
+│       │       └── [slug]/     # Per-tag public status page
 │       ├── components/         # Shared React components
 │       │   ├── editor/         # Monaco Editor wrapper (lazy-loaded)
 │       │   ├── status/         # Status badge, uptime bar components

@@ -64,6 +64,15 @@ pnpm workspaces manage the monorepo.
 - No filesystem access from user code — `ctx.ftp.get` and `ctx.s3.get` both download to the same server-managed temp file mechanism internally (same directory, same size cap, same periodic sweep), but user code only ever sees the returned string body, never a path
 - Tests must return a boolean (`true` = pass, `false`/throw = fail)
 
+### RBMC Station Sync (RBMC branch only)
+- The IBGE `RBMCPoint` shapefile (`apps/api/data/rbmc/`, overridable via `RBMC_SHAPEFILE_DIR`) is the **source of truth** for stations; operators replace the files, never edit rows
+- `rbmc/shapefile.ts` is a ~150-line dependency-free reader for Point `.shp` + latin-1 `.dbf` (async `readFile`, NUL/space padding stripped, per-row try/catch — a bad row is skipped and logged, a bad file fails the sync and is logged; the process never crashes, RULES #16)
+- `rbmc/sync.ts` runs after `app.listen` (not awaited) and then polls the files' mtime every `RBMC_SYNC_POLL_MS`; a change that is stable for two polls triggers a re-sync (guards against half-copied bind mounts). `POST /rbmc/sync` / MCP `sync_rbmc_stations` trigger it on demand; concurrent calls share one run
+- `planSync()` is pure and unit-tested: per station it **adopts** an existing `RBMC - CODE0 - City` test (preferring `0`, then unsuffixed, then `1`; oldest wins; siblings disabled), **creates** one from `rbmc/template.ts` when nothing is adoptable, **rewrites** name/code when the template version or the stored code drifted, **disables** tests of stations that left the shapefile and **re-enables** them when the station returns. It never deletes and never touches `schedule_ms`/`timeout_ms`
+- All writes happen in one transaction with multi-row statements (RULES #8); `testEvents` are emitted and the compiled-code cache invalidated only after `COMMIT`, disables first so leftover timers stop before new ones start
+- Generated station code calls `ctx.ntrip.sourcetable()` and asserts that an `RBMC-IP` mountpoint with the station's 4-letter prefix exists, logging the mountpoints found (`VICO0: RTCM 3.2 …`)
+- Public map data: `GET /status/rbmc/map` joins `rbmc_stations` with `test_state.public_status` and `uptime_daily` only (RULES #10) and adds live mountpoints from the sourcetable cache when it is warm; `Cache-Control: max-age=60`
+
 ### Secret Store
 - Global, write-only key-value store for credentials referenced in test code as `ctx.secrets.NAME` — keeps API keys out of `tests.code` and the Monaco editor history
 - Values encrypted at rest with AES-256-GCM (`node:crypto`, no new dependency) under an **optional** `SECRETS_ENCRYPTION_KEY` env var — optional because a newly-required env var would break existing deployments on upgrade; if unset, values are stored unencrypted and the `/secrets` dashboard page shows a warning banner
