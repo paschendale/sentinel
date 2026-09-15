@@ -1,0 +1,103 @@
+# CI/CD for the long-lived `rbmc` branch (IBGE RBMC station monitoring).
+#
+# This branch is never merged into main and never goes through semantic-release:
+# every push runs the test suite and, when green, publishes the full-stack image as
+# paschendale/sentinel-rbmc:latest (+ a sha tag). The sentinel-rbmc deployment in the
+# paschendale.net repo (disbelief/sentinel-rbmc/docker-compose.yml) tracks that tag
+# and What's Up Docker rolls it out.
+name: RBMC
+
+on:
+  push:
+    branches: [rbmc]
+  workflow_dispatch:
+
+concurrency:
+  group: rbmc-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sentinel
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sentinel
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+      JWT_SECRET: test-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @sentinel/shared build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run database migrations
+        working-directory: apps/api
+        run: pnpm migrate:ci
+
+      # DATABASE_URL is exported above, so *.integration.test.ts (including the
+      # rolled-back RBMC sync test) run against the service container.
+      - name: Run tests
+        working-directory: apps/api
+        run: pnpm test
+
+  docker:
+    name: Build & push sentinel-rbmc
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            paschendale/sentinel-rbmc:latest
+            paschendale/sentinel-rbmc:sha-${{ steps.sha.outputs.short }}
+          cache-from: type=gha,scope=rbmc
+          cache-to: type=gha,mode=max,scope=rbmc
