@@ -52,8 +52,20 @@ afterAll(async () => {
   await client.end()
 })
 
+/** Whatever stations already exist in this database are passed through unchanged in every run. */
+async function existingStations(): Promise<RbmcStationInput[]> {
+  const { rows } = await client.query<RbmcStationInput>(
+    `SELECT code, station_id, uf, geocodigo, lat, lon, alt_geom FROM rbmc_stations
+     WHERE in_shapefile = TRUE AND lat IS NOT NULL AND lon IS NOT NULL`
+  )
+  return rows
+}
+
+const mine = (id: string) => id.startsWith(RUN)
+
 describe.skipIf(!dbReady)('rbmc sync integration (rolled back)', () => {
   it('adopts, creates, links and disables in one transaction, then is idempotent', async () => {
+    const base = await existingStations()
     // Seed hand-made tests for station A only (0 + 1 siblings), nothing for B.
     await client.query(
       `INSERT INTO tests (id, name, code, schedule_ms, timeout_ms, retries, uses_browser, enabled, tags)
@@ -62,10 +74,11 @@ describe.skipIf(!dbReady)('rbmc sync integration (rolled back)', () => {
       [`${RUN}-a0`, `RBMC - ${CODE_A}0 - Alpha City`, `${RUN}-a1`, `RBMC - ${CODE_A}1 - Alpha City`]
     )
 
-    const first = await applyStations(client, [st(CODE_A), st(CODE_B, -10, -50)], (c) => (c === CODE_B ? 'Beta City' : null))
-    expect(first.plan.adoptions.map((a) => a.id)).toEqual([`${RUN}-a0`])
-    expect(first.disabled.map((t) => t.id)).toEqual([`${RUN}-a1`])
-    expect(first.created).toHaveLength(1)
+    const first = await applyStations(client, [...base, st(CODE_A), st(CODE_B, -10, -50)], (c) => (c === CODE_B ? 'Beta City' : null))
+    expect(first.plan.adoptions.map((a) => a.id).filter(mine)).toEqual([`${RUN}-a0`])
+    expect(first.disabled.map((t) => t.id).filter(mine)).toEqual([`${RUN}-a1`])
+    expect(first.created.filter((t) => t.name.includes(CODE_B))).toHaveLength(1)
+    first.created = first.created.filter((t) => t.name.includes(CODE_B))
     expect(first.created[0]!.name).toBe(`RBMC - ${CODE_B} - Beta City`)
     expect(first.created[0]!.tags).toEqual(['rbmc'])
     expect(first.created[0]!.failure_threshold).toBe(3)
@@ -84,14 +97,14 @@ describe.skipIf(!dbReady)('rbmc sync integration (rolled back)', () => {
     expect(adopted[0]).toEqual({ name: `RBMC - ${CODE_A} - Alpha City`, code: buildStationTestCode(CODE_A), enabled: true })
 
     // Second run with the same shapefile: nothing changes.
-    const second = await applyStations(client, [st(CODE_A), st(CODE_B, -10, -50)], () => null)
-    expect(second.plan.unchanged).toBe(2)
+    const second = await applyStations(client, [...base, st(CODE_A), st(CODE_B, -10, -50)], () => null)
+    expect(second.plan.unchanged).toBe(base.length + 2)
     expect(second.created).toEqual([])
     expect(second.updated).toEqual([])
     expect(second.disabled).toEqual([])
 
     // Station A removed from the shapefile, station C added: A's test is disabled (not deleted), C created.
-    const third = await applyStations(client, [st(CODE_B, -10, -50), st(CODE_C, -5, -60)], () => null)
+    const third = await applyStations(client, [...base, st(CODE_B, -10, -50), st(CODE_C, -5, -60)], () => null)
     expect(third.disabled.map((t) => t.id)).toEqual([`${RUN}-a0`])
     expect(third.created.map((t) => t.name)).toEqual([`RBMC - ${CODE_C} - ${CODE_C}`])
     const { rows: after } = await client.query<{ code: string; in_shapefile: boolean }>(
@@ -101,5 +114,15 @@ describe.skipIf(!dbReady)('rbmc sync integration (rolled back)', () => {
     expect(after.find((r) => r.code === CODE_C)!.in_shapefile).toBe(true)
     const { rows: aTest } = await client.query<{ enabled: boolean }>(`SELECT enabled FROM tests WHERE id = $1`, [`${RUN}-a0`])
     expect(aTest[0]!.enabled).toBe(false)
-  })
+
+    // Station A comes back: its test is re-enabled, nothing is created.
+    const fourth = await applyStations(client, [...base, st(CODE_A), st(CODE_B, -10, -50), st(CODE_C, -5, -60)], () => null)
+    expect(fourth.enabled.map((t) => t.id)).toEqual([`${RUN}-a0`])
+    expect(fourth.created).toEqual([])
+    expect(fourth.plan.unchanged).toBe(base.length + 3)
+    const { rows: aBack } = await client.query<{ enabled: boolean; in_shapefile: boolean }>(
+      `SELECT t.enabled, s.in_shapefile FROM rbmc_stations s JOIN tests t ON t.id = s.test_id WHERE s.code = $1`, [CODE_A]
+    )
+    expect(aBack[0]).toEqual({ enabled: true, in_shapefile: true })
+  }, 60_000) // four full syncs against a possibly remote, populated database
 })

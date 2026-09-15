@@ -240,6 +240,8 @@ export interface RbmcSyncSummary {
   adopted: number
   updated: number
   disabled: number
+  /** Tests re-enabled because their station came back into the shapefile. */
+  reenabled: number
   /** Shapefile rows skipped (bad code, bad coordinates, duplicate). */
   skipped: number
   error?: string

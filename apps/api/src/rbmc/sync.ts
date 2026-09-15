@@ -5,7 +5,9 @@ import { RBMC_NTRIP_URL, RBMC_SYNC_POLL_MS } from '../config.js'
 import { pool } from '../db/pool.js'
 import {
   disableTests,
+  enableTests,
   findRbmcCandidateTests,
+  findReturningStations,
   insertTests,
   linkStations,
   listStationsWithTests,
@@ -42,6 +44,8 @@ export interface SyncPlan {
   updates: Array<{ code: string; id: string; name: string; testCode: string }>
   /** Test ids to disable (leftover mountpoint siblings, removed stations). */
   disables: string[]
+  /** Test ids to re-enable (station came back into the shapefile after the sync disabled it). */
+  enables: string[]
   /** Station rows to (re)link — always carries the template version. */
   links: Array<{ code: string; test_id: string; name: string | null; template_version: number }>
   unchanged: number
@@ -52,6 +56,8 @@ export interface PlanInput {
   stationRows: RbmcStationWithTest[]
   /** Stations that just flipped to `in_shapefile = false` in this run. */
   removed: Array<{ code: string; test_id: string | null }>
+  /** Stations that were `in_shapefile = false` and are present again in this run. */
+  returned: Array<{ code: string; test_id: string | null }>
   candidates: CandidateTest[]
   /** City label for a code, e.g. from the sourcetable identifier. */
   cityLookup: (code: string) => string | null
@@ -88,7 +94,7 @@ function candidatesFor(code: string, candidates: CandidateTest[], taken: Set<str
 
 export function planSync(input: PlanInput): SyncPlan {
   const newId = input.newId ?? nanoid
-  const plan: SyncPlan = { creates: [], adoptions: [], updates: [], disables: [], links: [], unchanged: 0 }
+  const plan: SyncPlan = { creates: [], adoptions: [], updates: [], disables: [], enables: [], links: [], unchanged: 0 }
   const disableSet = new Set<string>()
   const taken = new Set<string>()
   for (const s of input.stationRows) if (s.test_id && s.test_exists) taken.add(s.test_id)
@@ -152,6 +158,14 @@ export function planSync(input: PlanInput): SyncPlan {
     if (r.test_id) disableSet.add(r.test_id)
   }
   plan.disables = [...disableSet]
+  // A returning station's linked test was disabled by the sync when it left — undo that.
+  const linkedNow = new Set(plan.links.map((l) => l.test_id))
+  for (const r of input.returned) {
+    if (r.test_id && !disableSet.has(r.test_id) && (linkedNow.has(r.test_id) || taken.has(r.test_id))) {
+      const station = input.stationRows.find((s) => s.code === r.code)
+      if (station?.test_exists && station.test_enabled === false) plan.enables.push(r.test_id)
+    }
+  }
   return plan
 }
 
@@ -165,6 +179,7 @@ export interface ApplyResult {
   created: Test[]
   updated: Test[]
   disabled: Test[]
+  enabled: Test[]
 }
 
 export async function applyStations(
@@ -173,11 +188,13 @@ export async function applyStations(
   cityLookup: (code: string) => string | null,
   newId?: () => string
 ): Promise<ApplyResult> {
+  const codes = stations.map((s) => s.code)
+  const returned = await findReturningStations(client, codes)
   await upsertStations(client, stations)
-  const removed = await markMissingStations(client, stations.map((s) => s.code))
+  const removed = await markMissingStations(client, codes)
   const stationRows = await listStationsWithTests(client)
   const candidates = await findRbmcCandidateTests(client)
-  const plan = planSync({ stationRows, removed, candidates, cityLookup, ...(newId ? { newId } : {}) })
+  const plan = planSync({ stationRows, removed, returned, candidates, cityLookup, ...(newId ? { newId } : {}) })
 
   // Order matters for the scheduler: disables first, so leftover sibling timers stop
   // before adopted/created tests start.
@@ -187,8 +204,9 @@ export async function applyStations(
     [...plan.adoptions, ...plan.updates].map((u) => ({ id: u.id, name: u.name, code: u.testCode }))
   )
   const created = await insertTests(client, plan.creates.map((c) => c.test))
+  const enabled = await enableTests(client, plan.enables)
   await linkStations(client, plan.links)
-  return { plan, created, updated, disabled }
+  return { plan, created, updated, disabled, enabled }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +235,7 @@ async function warmCityLookup(): Promise<(code: string) => string | null> {
 }
 
 async function runSync(reason: RbmcSyncReason): Promise<RbmcSyncSummary> {
-  const summary: RbmcSyncSummary = { ok: false, reason, stations: 0, created: 0, adopted: 0, updated: 0, disabled: 0, skipped: 0 }
+  const summary: RbmcSyncSummary = { ok: false, reason, stations: 0, created: 0, adopted: 0, updated: 0, disabled: 0, reenabled: 0, skipped: 0 }
   const mtimeBefore = await shapefileMtimeMs()
 
   let stations: RbmcStationInput[]
@@ -266,6 +284,7 @@ async function runSync(reason: RbmcSyncReason): Promise<RbmcSyncSummary> {
     invalidateCache(t.id)
     testEvents.emit('test:updated', t)
   }
+  for (const t of result.enabled) testEvents.emit('test:updated', t)
   for (const t of result.created) testEvents.emit('test:created', t)
 
   summary.ok = true
@@ -273,10 +292,11 @@ async function runSync(reason: RbmcSyncReason): Promise<RbmcSyncSummary> {
   summary.adopted = result.plan.adoptions.length
   summary.updated = result.plan.updates.length
   summary.disabled = result.disabled.length
+  summary.reenabled = result.enabled.length
   lastSyncedMtime = mtimeBefore
   syncLog.info(
     { event: 'rbmc.sync.complete', ...summary },
-    `rbmc sync complete (${reason}): stations=${summary.stations} created=${summary.created} adopted=${summary.adopted} updated=${summary.updated} disabled=${summary.disabled} skipped=${summary.skipped}`
+    `rbmc sync complete (${reason}): stations=${summary.stations} created=${summary.created} adopted=${summary.adopted} updated=${summary.updated} disabled=${summary.disabled} reenabled=${summary.reenabled} skipped=${summary.skipped}`
   )
   return summary
 }

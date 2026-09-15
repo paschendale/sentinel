@@ -76,6 +76,19 @@ export async function upsertStations(client: ClientBase, rows: RbmcStationInput[
   )
 }
 
+/** Stations previously flagged as missing that are back in this shapefile — their tests get re-enabled. */
+export async function findReturningStations(
+  client: ClientBase,
+  presentCodes: string[]
+): Promise<Array<{ code: string; test_id: string | null }>> {
+  const { rows } = await client.query<{ code: string; test_id: string | null }>(
+    `SELECT code, test_id FROM rbmc_stations
+     WHERE in_shapefile = FALSE AND code = ANY($1::text[])`,
+    [presentCodes]
+  )
+  return rows
+}
+
 /** Flags stations that are no longer in the shapefile. Returns the rows that just flipped. */
 export async function markMissingStations(
   client: ClientBase,
@@ -157,6 +170,17 @@ export async function disableTests(client: ClientBase, ids: string[]): Promise<T
   const { rows } = await client.query<Test>(
     `UPDATE tests SET enabled = FALSE, updated_at = NOW()
      WHERE id = ANY($1::text[]) AND enabled = TRUE
+     RETURNING *`,
+    [ids]
+  )
+  return rows
+}
+
+export async function enableTests(client: ClientBase, ids: string[]): Promise<Test[]> {
+  if (ids.length === 0) return []
+  const { rows } = await client.query<Test>(
+    `UPDATE tests SET enabled = TRUE, updated_at = NOW()
+     WHERE id = ANY($1::text[]) AND enabled = FALSE
      RETURNING *`,
     [ids]
   )

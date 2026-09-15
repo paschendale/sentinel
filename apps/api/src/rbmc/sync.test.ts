@@ -38,6 +38,7 @@ describe('planSync', () => {
     const plan = planSync({
       stationRows: [station('VICO')],
       removed: [],
+      returned: [],
       candidates: [candidate('t0', 'RBMC - VICO0 - Vicosa'), candidate('t1', 'RBMC - VICO1 - Vicosa')],
       cityLookup: noCity,
       newId,
@@ -54,6 +55,7 @@ describe('planSync', () => {
     const plan = planSync({
       stationRows: [station('VICO')],
       removed: [],
+      returned: [],
       candidates: [candidate('t1', 'RBMC - VICO1 - Vicosa')],
       cityLookup: noCity,
       newId,
@@ -66,6 +68,7 @@ describe('planSync', () => {
     const plan = planSync({
       stationRows: [station('VICO')],
       removed: [],
+      returned: [],
       candidates: [
         candidate('newer', 'RBMC - VICO0 - Vicosa', { created_at: new Date('2026-06-01T00:00:00Z') }),
         candidate('older', 'RBMC - VICO0 - Vicosa', { created_at: new Date('2026-05-01T00:00:00Z') }),
@@ -81,6 +84,7 @@ describe('planSync', () => {
     const plan = planSync({
       stationRows: [station('VICO')],
       removed: [],
+      returned: [],
       candidates: [candidate('renamed', 'Vicosa GNSS', { code: "return parts[1] === 'VICO0'" })],
       cityLookup: () => 'Vicosa',
       newId,
@@ -93,6 +97,7 @@ describe('planSync', () => {
     const plan = planSync({
       stationRows: [station('AMCO')],
       removed: [],
+      returned: [],
       candidates: [candidate('t0', 'RBMC - VICO0 - Vicosa')],
       cityLookup: (c) => (c === 'AMCO' ? 'Coari' : null),
       newId,
@@ -122,6 +127,7 @@ describe('planSync', () => {
         station('VIC2'),
       ],
       removed: [],
+      returned: [],
       candidates: [candidate('t0', 'RBMC - VICO - Vicosa', { code: "'VIC2'" })],
       cityLookup: noCity,
       newId,
@@ -134,6 +140,7 @@ describe('planSync', () => {
     const plan = planSync({
       stationRows: [station('VICO', { test_id: 'gone', test_exists: false })],
       removed: [],
+      returned: [],
       candidates: [],
       cityLookup: noCity,
       newId,
@@ -155,11 +162,12 @@ describe('planSync', () => {
         }),
       ],
       removed: [],
+      returned: [],
       candidates: [candidate('t0', 'RBMC - VICO - Vicosa')],
       cityLookup: noCity,
       newId,
     })
-    expect(plan).toEqual({ creates: [], adoptions: [], updates: [], disables: [], links: [], unchanged: 1 })
+    expect(plan).toEqual({ creates: [], adoptions: [], updates: [], disables: [], enables: [], links: [], unchanged: 1 })
   })
 
   it('rewrites code and name when the linked test drifted (manual edit or template bump)', () => {
@@ -174,6 +182,7 @@ describe('planSync', () => {
         }),
       ],
       removed: [],
+      returned: [],
       candidates: [],
       cityLookup: noCity,
       newId,
@@ -196,6 +205,7 @@ describe('planSync', () => {
         }),
       ],
       removed: [],
+      returned: [],
       candidates: [],
       cityLookup: () => 'Vicosa',
       newId,
@@ -211,6 +221,7 @@ describe('planSync', () => {
         station('VICO', { test_id: 't0', test_exists: true, test_name: 'RBMC - VICO - Vicosa', test_code: buildStationTestCode('VICO'), template_version: RBMC_TEMPLATE_VERSION, name: 'Vicosa' }),
       ],
       removed: [{ code: 'GONE', test_id: 'tg' }],
+      returned: [],
       candidates: [],
       cityLookup: noCity,
       newId,
@@ -218,6 +229,54 @@ describe('planSync', () => {
     expect(plan.disables).toEqual(['tg'])
     expect(plan.creates).toEqual([])
     expect(plan.unchanged).toBe(1)
+  })
+})
+
+describe('planSync — returning stations', () => {
+  it('re-enables the linked test of a station that comes back into the shapefile', () => {
+    const plan = planSync({
+      stationRows: [
+        station('BACK', {
+          test_id: 'tb',
+          test_exists: true,
+          test_enabled: false,
+          test_name: 'RBMC - BACK - Backtown',
+          test_code: buildStationTestCode('BACK'),
+          template_version: RBMC_TEMPLATE_VERSION,
+          name: 'Backtown',
+        }),
+      ],
+      removed: [],
+      returned: [{ code: 'BACK', test_id: 'tb' }],
+      candidates: [],
+      cityLookup: noCity,
+      newId,
+    })
+    expect(plan.enables).toEqual(['tb'])
+    expect(plan.disables).toEqual([])
+    expect(plan.unchanged).toBe(1)
+  })
+
+  it('does not touch a returning station whose test is already enabled', () => {
+    const plan = planSync({
+      stationRows: [
+        station('BACK', {
+          test_id: 'tb',
+          test_exists: true,
+          test_enabled: true,
+          test_name: 'RBMC - BACK - Backtown',
+          test_code: buildStationTestCode('BACK'),
+          template_version: RBMC_TEMPLATE_VERSION,
+          name: 'Backtown',
+        }),
+      ],
+      removed: [],
+      returned: [{ code: 'BACK', test_id: 'tb' }],
+      candidates: [],
+      cityLookup: noCity,
+      newId,
+    })
+    expect(plan.enables).toEqual([])
   })
 })
 
