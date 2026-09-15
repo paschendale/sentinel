@@ -56,6 +56,8 @@ const EXPECTED_TOOLS = [
   'create_secret',
   'rotate_secret',
   'delete_secret',
+  'list_rbmc_stations',
+  'sync_rbmc_stations',
 ]
 
 describe('mcp route', () => {
@@ -90,7 +92,7 @@ describe('mcp route', () => {
     expect(body.result.serverInfo.name).toBe('sentinel')
   })
 
-  it('lists all 21 tools', async () => {
+  it('lists all 23 tools', async () => {
     const app = await buildServer()
     const res = await app.inject({
       method: 'POST',

@@ -24,7 +24,17 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
           'fail/warning/recovery event types, and only fires on state transitions past a failure ' +
           'threshold and cooldown. Secrets are write-only (never readable back) and reach test code as ' +
           'ctx.secrets.NAME. Before creating a test, call list_tags to see existing tag conventions and ' +
-          'list_channels to see what notification targets already exist.',
+          'list_channels to see what notification targets already exist. ' +
+          'THIS INSTANCE IS THE RBMC BRANCH: it monitors the real-time stations of IBGE\'s RBMC (Rede ' +
+          'Brasileira de Monitoramento Contínuo dos Sistemas GNSS) by checking the RBMC-IP NTRIP caster ' +
+          'sourcetable (gps-ntrip.ibge.gov.br:2101). The station list comes from the IBGE RBMCPoint ' +
+          'shapefile (SG_RBMC column) — the shapefile is the source of truth and operators update it by ' +
+          'replacing the file. A sync job creates exactly one test per station (tag "rbmc", name ' +
+          '"RBMC - CODE - City", generated code calling ctx.ntrip.sourcetable()), adopts pre-existing ' +
+          'hand-made tests, and disables tests of removed stations. Use list_rbmc_stations to see ' +
+          'stations with coordinates and status, sync_rbmc_stations after replacing the shapefile, and ' +
+          'never hand-create, rename, or delete station tests (the sync overwrites name/code; only ' +
+          '`enabled` is yours). The public status page shows these stations on a map.',
       }
     )
     registerMcpTools(server, app, req.headers['authorization'] ?? '')

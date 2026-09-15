@@ -216,6 +216,38 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
       forward('DELETE', `${assignmentUrl(scope_type, scope_value)}/${encodeURIComponent(channel_id)}`)
   )
 
+  // --- RBMC stations (RBMC branch) ---
+
+  server.registerTool(
+    'list_rbmc_stations',
+    {
+      description:
+        'List every IBGE RBMC GNSS station known to this instance, with its linked monitoring test, ' +
+        'coordinates, live state (last_status, last_run_at) and whether it is still present in the ' +
+        'shapefile. Stations come from the RBMCPoint shapefile (SG_RBMC column) — it is the source of ' +
+        'truth; one generated test per station (tag "rbmc", name "RBMC - CODE - City") checks that a ' +
+        'mountpoint starting with CODE is listed in the RBMC-IP NTRIP sourcetable.',
+      inputSchema: {},
+    },
+    async () => forward('GET', '/rbmc')
+  )
+
+  server.registerTool(
+    'sync_rbmc_stations',
+    {
+      description:
+        'Re-read the RBMC shapefile now and reconcile station tests: creates tests for new stations, ' +
+        'adopts/renames existing "RBMC - CODE0 - City" tests, rewrites generated code when the template ' +
+        'changed, and disables (never deletes) tests of stations removed from the shapefile. Runs ' +
+        'automatically at startup and whenever the shapefile mtime changes; call this after replacing ' +
+        'the shapefile to apply it immediately. Do not hand-create or delete station tests — the sync ' +
+        'owns them and will overwrite manual edits to their name/code; use update_test only to toggle ' +
+        'enabled.',
+      inputSchema: {},
+    },
+    async () => forward('POST', '/rbmc/sync')
+  )
+
   // --- secrets (write-only: values can never be read back) ---
 
   server.registerTool(

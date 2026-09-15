@@ -11,6 +11,7 @@ import { tagsRoutes } from './routes/tags.js'
 import { secretsRoutes } from './routes/secrets.js'
 import { healthRoutes } from './routes/health.js'
 import { mcpRoutes } from './routes/mcp.js'
+import { rbmcRoutes } from './routes/rbmc.js'
 import { verifyJwt } from './auth/jwt.js'
 
 const PUBLIC_ROUTES: Array<{ method: string; prefix: string }> = [
@@ -81,5 +82,6 @@ export async function buildServer() {
   await app.register(secretsRoutes, { prefix: '/secrets' })
   await app.register(healthRoutes, { prefix: '/health' })
   await app.register(mcpRoutes, { prefix: '/mcp' })
+  await app.register(rbmcRoutes, { prefix: '/rbmc' })
   return app
 }

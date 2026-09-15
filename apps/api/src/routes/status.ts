@@ -11,6 +11,10 @@ import type {
 } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import { getDistinctTags } from '../db/queries/assignments.js'
+import { listStationsForMap } from '../db/queries/rbmc.js'
+import { ntripSourcetableCache } from '../executor/ctx.js'
+import { buildRbmcMapCollection, mountpointsByCode } from '../rbmc/map.js'
+import { RBMC_NTRIP_URL } from '../config.js'
 
 type TestRow = { id: string; name: string; enabled: boolean; tags: string[] }
 
@@ -109,6 +113,16 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       [testIds],
     )
     return reply.send(buildPublicStatus(tests, udRows, stateRows))
+  })
+
+  // GET /status/rbmc/map — public GeoJSON of RBMC stations (RBMC branch). Built from
+  // rbmc_stations + test_state.public_status + uptime_daily only (RULES #10); live
+  // mountpoints are added from the in-process sourcetable cache when it is warm.
+  app.get('/rbmc/map', async (_req, reply) => {
+    const rows = await listStationsForMap()
+    const live = mountpointsByCode(ntripSourcetableCache.peek(RBMC_NTRIP_URL))
+    reply.header('Cache-Control', 'public, max-age=60')
+    return reply.send(buildRbmcMapCollection(rows, live))
   })
 
   // GET /status/tags — public tag directory so status pages can be browsed
