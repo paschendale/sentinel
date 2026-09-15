@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 function requireEnv(name: string): string {
   const val = process.env[name]
@@ -76,3 +77,28 @@ export const SECRETS_ENCRYPTION_KEY = optionalEnv('SECRETS_ENCRYPTION_KEY', '')
 if (SECRETS_ENCRYPTION_KEY && Buffer.from(SECRETS_ENCRYPTION_KEY, 'base64').length !== 32) {
   throw new Error('SECRETS_ENCRYPTION_KEY must decode to exactly 32 bytes (base64-encoded)')
 }
+
+// ---------------------------------------------------------------------------
+// RBMC branch — IBGE GNSS station monitoring (all optional, RULES #28)
+// ---------------------------------------------------------------------------
+
+/** Directory holding the IBGE `RBMCPoint.{shp,dbf}` shapefile — the source of truth for stations.
+ *  Defaults to `apps/api/data/rbmc` resolved relative to this module, so it works both under `tsx`
+ *  (`src/`) and compiled (`dist/`) regardless of the process cwd. Bind-mount a directory over it
+ *  (or point this at one) to replace the station list; the sync picks up mtime changes. */
+export const RBMC_SHAPEFILE_DIR = optionalEnv(
+  'RBMC_SHAPEFILE_DIR',
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'rbmc')
+)
+export const RBMC_SHAPEFILE_BASENAME = 'RBMCPoint'
+
+/** NTRIP caster sourcetable URL (`GET /`). The public RBMC-IP caster by default. */
+export const RBMC_NTRIP_URL = optionalEnv('RBMC_NTRIP_URL', 'http://gps-ntrip.ibge.gov.br:2101/')
+try {
+  new URL(RBMC_NTRIP_URL)
+} catch {
+  throw new Error('RBMC_NTRIP_URL must be a valid URL')
+}
+
+/** How often the shapefile mtime is polled for changes (async `fs.stat`, cheap). */
+export const RBMC_SYNC_POLL_MS = parseIntEnvInRange('RBMC_SYNC_POLL_MS', 60 * 1000, 5 * 1000, 60 * 60 * 1000)
