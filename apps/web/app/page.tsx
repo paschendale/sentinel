@@ -1,44 +1,54 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import type { TestSummary } from '@sentinel/shared'
+import type { RbmcMapCollection } from '@sentinel/shared'
 import { serverAuthHeaders } from '../lib/auth-server'
-import { DashboardTable } from './_components/dashboard-table'
 import { SentinelLogo } from './_components/sentinel-logo'
+import { RbmcMapLoader } from './status/_components/rbmc-map-loader'
 
 export const dynamic = 'force-dynamic'
 
-async function getTests(tag?: string): Promise<TestSummary[] | null> {
-  const apiUrl = process.env.API_URL ?? 'http://localhost:3001'
+const API_URL = process.env.API_URL ?? 'http://localhost:3001'
+const PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+
+/** The map itself is public data; this call only proves the cookie is a valid session. */
+async function isAuthenticated(): Promise<boolean> {
   try {
-    const url = tag ? `${apiUrl}/dashboard?tag=${encodeURIComponent(tag)}` : `${apiUrl}/dashboard`
-    const res = await fetch(url, { cache: 'no-store', headers: serverAuthHeaders(await cookies()) })
-    if (res.status === 401) return null
-    if (!res.ok) return []
-    return res.json() as Promise<TestSummary[]>
+    const res = await fetch(`${API_URL}/health`, { cache: 'no-store' })
+    if (!res.ok) return true // API down: let the page render and fail visibly instead of bouncing to /login
+    const probe = await fetch(`${API_URL}/dashboard`, { cache: 'no-store', headers: serverAuthHeaders(await cookies()) })
+    return probe.status !== 401
   } catch {
-    return []
+    return true
   }
 }
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tag?: string }>
-}) {
-  const { tag } = await searchParams
-  const tests = await getTests(tag)
-  if (tests === null) redirect('/login')
-  const allTags = Array.from(new Set(tests.flatMap(t => t.tags ?? []))).sort()
+async function getRbmcMap(): Promise<RbmcMapCollection> {
+  const empty: RbmcMapCollection = { type: 'FeatureCollection', features: [] }
+  try {
+    const res = await fetch(`${API_URL}/status/rbmc/map`, { cache: 'no-store' })
+    if (!res.ok) return empty
+    const fc = (await res.json()) as RbmcMapCollection
+    return fc.type === 'FeatureCollection' ? fc : empty
+  } catch {
+    return empty
+  }
+}
+
+export default async function HomePage() {
+  if (!(await isAuthenticated())) redirect('/login')
+  const map = await getRbmcMap()
 
   return (
     <main className="min-h-screen bg-zinc-950 px-8 py-12">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-2.5">
-            <SentinelLogo className="h-7 text-zinc-100" />
-            <span className="text-zinc-100 text-lg">sentinel</span>
-          </div>
+          <SentinelLogo className="h-7 text-zinc-100" />
+          <span className="text-zinc-100 text-lg">sentinel</span>
+          <span className="text-zinc-600 text-sm ml-2">RBMC</span>
+        </div>
         <div className="flex items-center gap-6">
+          <Link href="/tests" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">tests</Link>
           <Link href="/status" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">status page</Link>
           <Link href="/notifications" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">notifications</Link>
           <Link href="/secrets" className="text-zinc-500 text-sm hover:text-zinc-300 transition-colors">secrets</Link>
@@ -47,30 +57,18 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {allTags.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-6">
-          <Link
-            href="/"
-            className={`text-xs px-3 py-1 rounded-sm transition-colors ${!tag ? 'bg-zinc-100 text-zinc-950' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'}`}
-          >
-            all
-          </Link>
-          {allTags.map(t => (
-            <Link
-              key={t}
-              href={`/?tag=${encodeURIComponent(t)}`}
-              className={`text-xs px-3 py-1 rounded-sm transition-colors ${tag === t ? 'bg-emerald-900 text-emerald-300' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'}`}
-            >
-              {t}
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {tests.length === 0 ? (
-        <p className="text-zinc-500 text-center mt-24">{tag ? `No tests tagged "${tag}".` : 'No tests yet.'}</p>
+      {map.features.length === 0 ? (
+        <p className="text-zinc-500 text-center mt-24">
+          No RBMC stations yet — the shapefile sync has not run or found nothing.{' '}
+          <Link href="/tests" className="text-zinc-300 hover:text-white transition-colors">View tests →</Link>
+        </p>
       ) : (
-        <DashboardTable tests={tests} tag={tag} />
+        <RbmcMapLoader
+          initial={map}
+          refreshUrl={`${PUBLIC_API_URL}/status/rbmc/map`}
+          linkBase="/tests"
+          className="h-[calc(100vh-11rem)] min-h-[480px]"
+        />
       )}
     </main>
   )

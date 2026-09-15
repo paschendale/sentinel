@@ -188,7 +188,7 @@ export function DashboardTable({ tests, tag }: Props) {
                       renderTag={t => (
                         <Link
                           key={t}
-                          href={`/?tag=${encodeURIComponent(t)}`}
+                          href={`/tests?tag=${encodeURIComponent(t)}`}
                           className="text-xs px-1.5 py-0.5 bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-sm transition-colors"
                         >
                           {t}

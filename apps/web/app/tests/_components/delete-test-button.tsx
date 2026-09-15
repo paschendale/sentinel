@@ -34,7 +34,7 @@ export function DeleteTestButton({ testId, testName }: { testId: string; testNam
         return
       }
       setOpen(false)
-      router.push('/')
+      router.push('/tests')
       router.refresh()
     } catch {
       setError('Network error.')

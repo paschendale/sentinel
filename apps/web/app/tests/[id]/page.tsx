@@ -91,7 +91,7 @@ export default async function TestDetailPage({ params }: { params: Promise<{ id:
   return (
     <main className="min-h-screen w-full bg-zinc-950 px-8 py-10">
       <BackLink
-        href="/"
+        href="/tests"
         className="text-zinc-500 text-xs hover:text-zinc-300 transition-opacity duration-150 block mb-8"
       >
         ← back

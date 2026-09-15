@@ -224,7 +224,7 @@ export default function TestEditor({ test }: Props) {
       }
 
       if (isNew) {
-        router.push('/')
+        router.push('/tests')
       } else if (test) {
         router.push(`/tests/${test.id}`)
       }
@@ -260,7 +260,7 @@ export default function TestEditor({ test }: Props) {
       {/* Left: form fields */}
       <aside className="flex flex-col gap-6 px-6 py-8 border-r border-zinc-800 overflow-y-auto">
         {isNew ? (
-          <BackLink href="/" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
+          <BackLink href="/tests" className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors">
             ← back
           </BackLink>
         ) : (
