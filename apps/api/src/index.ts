@@ -5,6 +5,7 @@ import { ensurePartitions, startAggregator, stopAggregator } from './db/aggregat
 import { startFtpTempSweep, stopFtpTempSweep } from './executor/ftp-temp-sweep.js'
 import { warmSecretsCache } from './executor/secrets-cache.js'
 import { migrate } from './db/migrate.js'
+import { startRbmcSync, stopRbmcSync } from './rbmc/sync.js'
 
 await migrate()
 await ensurePartitions()
@@ -16,12 +17,16 @@ startAggregator()
 startFtpTempSweep()
 const port = Number(process.env['PORT'] ?? 3001)
 await app.listen({ port, host: '0.0.0.0' })
+// After listen and after the scheduler attached its testEvents listeners; never awaited
+// so a bad shapefile can only log, not block startup (RULES #16).
+startRbmcSync()
 
 async function shutdown(): Promise<void> {
   stopScheduler()
   stopFlusher()
   stopAggregator()
   stopFtpTempSweep()
+  stopRbmcSync()
   await flush()
   await app.close()
   process.exit(0)

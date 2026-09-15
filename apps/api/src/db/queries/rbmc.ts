@@ -1,4 +1,4 @@
-import type { PoolClient } from 'pg'
+import type { ClientBase } from 'pg'
 import type { RbmcStation, RbmcStationSummary, Test } from '@sentinel/shared'
 import { pool } from '../pool.js'
 
@@ -54,7 +54,7 @@ function valuesClause(rowCount: number, colCount: number): string {
 }
 
 /** Single multi-row upsert (RULES #8 — never insert in a loop). Marks every row as present in the shapefile. */
-export async function upsertStations(client: PoolClient, rows: RbmcStationInput[]): Promise<void> {
+export async function upsertStations(client: ClientBase, rows: RbmcStationInput[]): Promise<void> {
   if (rows.length === 0) return
   const params: unknown[] = []
   for (const r of rows) {
@@ -78,7 +78,7 @@ export async function upsertStations(client: PoolClient, rows: RbmcStationInput[
 
 /** Flags stations that are no longer in the shapefile. Returns the rows that just flipped. */
 export async function markMissingStations(
-  client: PoolClient,
+  client: ClientBase,
   presentCodes: string[]
 ): Promise<Array<{ code: string; test_id: string | null }>> {
   const { rows } = await client.query<{ code: string; test_id: string | null }>(
@@ -91,7 +91,7 @@ export async function markMissingStations(
   return rows
 }
 
-export async function listStationsWithTests(client: PoolClient): Promise<RbmcStationWithTest[]> {
+export async function listStationsWithTests(client: ClientBase): Promise<RbmcStationWithTest[]> {
   const { rows } = await client.query<RbmcStationWithTest>(
     `SELECT s.*,
             (t.id IS NOT NULL) AS test_exists,
@@ -106,7 +106,7 @@ export async function listStationsWithTests(client: PoolClient): Promise<RbmcSta
 }
 
 /** Adoption pool: every test that looks like a hand-made or generated RBMC station test. */
-export async function findRbmcCandidateTests(client: PoolClient): Promise<CandidateTest[]> {
+export async function findRbmcCandidateTests(client: ClientBase): Promise<CandidateTest[]> {
   const { rows } = await client.query<CandidateTest>(
     `SELECT id, name, code, enabled, created_at
      FROM tests
@@ -116,7 +116,7 @@ export async function findRbmcCandidateTests(client: PoolClient): Promise<Candid
   return rows
 }
 
-export async function insertTests(client: PoolClient, rows: NewTestRow[]): Promise<Test[]> {
+export async function insertTests(client: ClientBase, rows: NewTestRow[]): Promise<Test[]> {
   if (rows.length === 0) return []
   const params: unknown[] = []
   for (const r of rows) {
@@ -135,7 +135,7 @@ export async function insertTests(client: PoolClient, rows: NewTestRow[]): Promi
 }
 
 export async function updateTestsNameAndCode(
-  client: PoolClient,
+  client: ClientBase,
   rows: Array<{ id: string; name: string; code: string }>
 ): Promise<Test[]> {
   if (rows.length === 0) return []
@@ -152,7 +152,7 @@ export async function updateTestsNameAndCode(
   return updated
 }
 
-export async function disableTests(client: PoolClient, ids: string[]): Promise<Test[]> {
+export async function disableTests(client: ClientBase, ids: string[]): Promise<Test[]> {
   if (ids.length === 0) return []
   const { rows } = await client.query<Test>(
     `UPDATE tests SET enabled = FALSE, updated_at = NOW()
@@ -164,7 +164,7 @@ export async function disableTests(client: PoolClient, ids: string[]): Promise<T
 }
 
 export async function linkStations(
-  client: PoolClient,
+  client: ClientBase,
   rows: Array<{ code: string; test_id: string; name: string | null; template_version: number }>
 ): Promise<void> {
   if (rows.length === 0) return

@@ -8,7 +8,9 @@ export default defineConfig({
       // Satisfy requireEnv() guards in config.ts so unit tests can import
       // any module without a .env file. Tests that touch the DB or auth
       // use their own mocks and never connect with these values.
-      DATABASE_URL: 'postgresql://sentinel:sentinel@localhost:5432/sentinel_test',
+      // An externally set DATABASE_URL wins so *.integration.test.ts can be
+      // pointed at a real database (CI does this; locally it is opt-in).
+      DATABASE_URL: process.env['DATABASE_URL'] ?? 'postgresql://sentinel:sentinel@localhost:5432/sentinel_test',
       ADMIN_USERNAME: 'admin',
       ADMIN_PASSWORD: 'admin',
       JWT_SECRET: 'vitest-test-secret',
