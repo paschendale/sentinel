@@ -110,9 +110,15 @@ export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, linkBase, cl
     })
     mapRef.current = map
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
+    if (process.env.NODE_ENV !== 'production') {
+      // Debug handle for dev tools / headless checks; never shipped in the production bundle.
+      ;(window as unknown as { __rbmcMap?: MapLibreMap }).__rbmcMap = map
+    }
 
     let usingFallback = false
     map.on('style.load', () => addStationLayers(map, dataRef.current))
+    // The container gets its final size from CSS that may land after construction; make sure the canvas follows.
+    map.once('load', () => map.resize())
     map.on('error', (e: ErrorEvent) => {
       // Any error before the first style finished loading means the remote style is unreachable.
       if (usingFallback || map.isStyleLoaded()) return
@@ -172,7 +178,8 @@ export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, linkBase, cl
 
   return (
     <div className={`relative w-full overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950 ${className ?? 'h-[72vh] min-h-[420px]'}`}>
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* Inline position: maplibre-gl.css sets `.maplibregl-map { position: relative }`, which would beat a Tailwind `absolute` class and collapse the map to 0 height. */}
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
 
       {/* Legend + counts */}
       <div className="absolute left-3 top-3 z-10 rounded-md border border-zinc-800/80 bg-zinc-950/85 px-3 py-2 text-xs backdrop-blur-sm">

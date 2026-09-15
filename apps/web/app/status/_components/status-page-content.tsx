@@ -80,7 +80,8 @@ export function StatusPageContent({ tests, tag, map }: Props) {
   const searchParams = useSearchParams()
 
   const period = isPeriod(searchParams.get('period')) ? (searchParams.get('period') as StatusPeriod) : '24h'
-  const [view, setView] = useState<View>('grid')
+  // Map first when stations exist, so the server-rendered frame already shows the map placeholder.
+  const [view, setView] = useState<View>(hasMap ? 'map' : 'grid')
   const [bucketData, setBucketData] = useState<Map<string, StatusBucket[]>>(new Map())
   const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
