@@ -93,9 +93,15 @@ export interface ChannelAssignment {
 export interface TestState {
   test_id: string
   last_status: TestStatus | null
+  /** Legacy streak counter — kept for display/audit; no longer gates public_status or
+   *  notifications (see failing_since/succeeding_since and PUBLIC_STATUS_WINDOW_MS). */
   consecutive_failures: number
   last_notification_at: Date | null
   last_run_at: Date | null
+  /** Start of the current unbroken failure streak; null while not failing. */
+  failing_since: Date | null
+  /** Start of the current unbroken recovery streak; null while not recovering. */
+  succeeding_since: Date | null
 }
 
 export interface TestSummary {

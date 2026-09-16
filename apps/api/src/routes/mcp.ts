@@ -21,8 +21,11 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
           'ctx.log, ctx.now, and ctx.secrets. Tests are organized by free-form tags, which drive both the dashboard summary ' +
           '(get_dashboard_summary) and notification routing: a channel (Discord, Slack, webhook, or ' +
           'email) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
-          'fail/warning/recovery event types, and only fires on state transitions past a failure ' +
-          'threshold and cooldown. Secrets are write-only (never readable back) and reach test code as ' +
+          'fail/warning/recovery event types, and only fires on real state transitions: fail when a ' +
+          'test has been failing continuously for over an hour (PUBLIC_STATUS_WINDOW_MS), recovery ' +
+          'when it has been passing continuously for over an hour after trouble — a single blip or a ' +
+          'short streak just shows as "degraded", a point of attention, not an alert — each still ' +
+          'subject to a cooldown between repeats. Secrets are write-only (never readable back) and reach test code as ' +
           'ctx.secrets.NAME. Before creating a test, call list_tags to see existing tag conventions and ' +
           'list_channels to see what notification targets already exist. ' +
           'THIS INSTANCE IS THE RBMC BRANCH: it monitors the real-time stations of IBGE\'s RBMC (Rede ' +

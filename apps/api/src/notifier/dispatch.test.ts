@@ -47,7 +47,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'degraded',
+      new_public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -84,7 +85,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'warn',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      new_public_status: 'degraded',
       error_message: 'slow response',
       duration_ms: 500,
     }])
@@ -103,7 +105,7 @@ describe('triggerNotifications', () => {
       .mockResolvedValueOnce({
         rows: [{
           test_id: 'test-1',
-          consecutive_failures: 3,
+          consecutive_failures: 5,
           last_notification_at: null,
           failure_threshold: 3,
           cooldown_ms: 300000,
@@ -128,19 +130,23 @@ describe('triggerNotifications', () => {
         rows: [{ id: 'ch-1', type: 'webhook', webhook_url: 'https://example.com/webhook', test_name: 'API Prod Check' }],
       } as never)
 
+    // down for over an hour -> fail
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'degraded',
+      new_public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 321,
     }])
     await new Promise(resolve => setTimeout(resolve, 0))
 
+    // crossing back into "up" -> recovery
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'success',
-      prev_status: 'fail',
+      prev_public_status: 'degraded',
+      new_public_status: 'up',
       error_message: null,
       duration_ms: 101,
     }])
@@ -151,29 +157,31 @@ describe('triggerNotifications', () => {
     expect(mockRequest.mock.calls[1]?.[0]).toBe('https://example.com/webhook')
   })
 
-  it('logs skipped event when below threshold', async () => {
-    mockQuery.mockResolvedValueOnce({
-      rows: [{
+  it('does not notify while merely "degraded" (failing, but under the window) or "recovering" (succeeding, but under the window)', async () => {
+    triggerNotifications([
+      {
         test_id: 'test-1',
-        consecutive_failures: 1,
-        last_notification_at: null,
-        failure_threshold: 3,
-        cooldown_ms: 300000,
-      }],
-    } as never)
-
-    triggerNotifications([{
-      test_id: 'test-1',
-      new_status: 'fail',
-      prev_status: 'success',
-      error_message: 'network timeout',
-      duration_ms: 123,
-    }])
+        new_status: 'fail',
+        prev_public_status: 'up',
+        new_public_status: 'degraded',
+        error_message: 'network timeout',
+        duration_ms: 123,
+      },
+      {
+        test_id: 'test-2',
+        new_status: 'success',
+        prev_public_status: 'degraded',
+        new_public_status: 'degraded',
+        error_message: null,
+        duration_ms: 101,
+      },
+    ])
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const skipped = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'skipped')
-    expect(skipped?.[0].reason).toBe('below_threshold')
+    // Neither candidate is actionable — public_status never crossed into "down" or "up" — so no
+    // state/channel queries are even issued.
+    expect(mockQuery).not.toHaveBeenCalled()
     expect(mockRequest).not.toHaveBeenCalled()
   })
 
@@ -182,7 +190,7 @@ describe('triggerNotifications', () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{
         test_id: 'test-1',
-        consecutive_failures: 3,
+        consecutive_failures: 5,
         last_notification_at: new Date(now - 1000),
         failure_threshold: 3,
         cooldown_ms: 300000,
@@ -192,7 +200,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'down',
+      new_public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -209,7 +218,7 @@ describe('triggerNotifications', () => {
       .mockResolvedValueOnce({
         rows: [{
           test_id: 'test-1',
-          consecutive_failures: 3,
+          consecutive_failures: 5,
           last_notification_at: null,
           failure_threshold: 3,
           cooldown_ms: 300000,
@@ -221,7 +230,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'degraded',
+      new_public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -239,7 +249,7 @@ describe('triggerNotifications', () => {
       .mockResolvedValueOnce({
         rows: [{
           test_id: 'test-1',
-          consecutive_failures: 3,
+          consecutive_failures: 5,
           last_notification_at: null,
           failure_threshold: 3,
           cooldown_ms: 300000,
@@ -253,7 +263,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'degraded',
+      new_public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -272,7 +283,7 @@ describe('triggerNotifications', () => {
       .mockResolvedValueOnce({
         rows: [{
           test_id: 'test-1',
-          consecutive_failures: 3,
+          consecutive_failures: 5,
           last_notification_at: null,
           failure_threshold: 3,
           cooldown_ms: 300000,
@@ -286,7 +297,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'degraded',
+      new_public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -297,12 +309,12 @@ describe('triggerNotifications', () => {
     expect(failed?.[0].error_message).toContain('socket hang up')
   })
 
-  it('notifies on ongoing fail streak when threshold is now met', async () => {
+  it('notifies again on an ongoing down streak once cooldown has elapsed', async () => {
     mockQuery
       .mockResolvedValueOnce({
         rows: [{
           test_id: 'test-1',
-          consecutive_failures: 3,
+          consecutive_failures: 10,
           last_notification_at: null,
           failure_threshold: 3,
           cooldown_ms: 300000,
@@ -316,7 +328,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'fail',
+      prev_public_status: 'down',
+      new_public_status: 'down',
       error_message: 'still down',
       duration_ms: 123,
     }])
@@ -326,5 +339,21 @@ describe('triggerNotifications', () => {
     expect(mockRequest).toHaveBeenCalledTimes(1)
     const sent = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'sent')
     expect(sent).toBeDefined()
+  })
+
+  it('does not fire recovery when public_status was already "up" (no real transition)', async () => {
+    triggerNotifications([{
+      test_id: 'test-1',
+      new_status: 'success',
+      prev_public_status: 'up',
+      new_public_status: 'up',
+      error_message: null,
+      duration_ms: 100,
+    }])
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(mockQuery).not.toHaveBeenCalled()
+    expect(mockRequest).not.toHaveBeenCalled()
   })
 })

@@ -146,16 +146,21 @@ Runtime state for each test. Tracks alert logic. Persisted to DB but treated as 
 |-------|------|-------------|
 | `test_id` | `string` | FK → Test (PK) |
 | `last_status` | `'success' \| 'warn' \| 'fail' \| 'timeout' \| null` | Status of the most recent run |
-| `consecutive_failures` | `number` | Unbroken streak of non-success, non-warn results |
+| `consecutive_failures` | `number` | Unbroken streak of non-success, non-warn results. Legacy — still tracked for display/audit, but no longer drives `public_status` or notifications |
+| `public_status` | `'up' \| 'degraded' \| 'down'` | Derived display/alert status — see below |
+| `failing_since` | `timestamp \| null` | Start of the current unbroken failure streak; `null` while not failing |
+| `succeeding_since` | `timestamp \| null` | Start of the current unbroken recovery streak (after trouble); `null` while not recovering |
 | `last_notification_at` | `timestamp \| null` | When the last fail/recovery alert was fired |
 | `last_warning_at` | `timestamp \| null` | When the last warning alert was fired |
 | `last_run_at` | `timestamp \| null` | When the test last executed |
 
-**Invariants:**
-- `consecutive_failures` resets to 0 on `success` or `warn` (neither is a failure streak)
-- A **fail** notification fires when `consecutive_failures >= threshold` AND `now - last_notification_at > cooldown`
-- A **warning** notification fires on the first `warn` result (no threshold), then after `cooldown` elapses — tracked independently via `last_warning_at` so it never blocks a subsequent fail alert
-- A **recovery** notification fires on `success` if either `last_notification_at` or `last_warning_at` is set; both are cleared on recovery
+**Invariants** (see `apps/api/src/db/public-status.ts` for the reference implementation):
+- `public_status` is a rolling time window, not a consecutive-count threshold. A test only reads `down` once `failing_since` is older than `PUBLIC_STATUS_WINDOW_MS` (default 1h, env-configurable, applies to every test); it only reads `up` again after trouble once `succeeding_since` is older than that same window. In between it's `degraded` — including a test that's flapping (failing and recovering faster than the window), which never settles on `up` or `down`
+- A brand new test (no prior `test_state` row) or one that was already stably `up` goes straight to `up` on a success — the one-window "prove yourself" period only applies when recovering from `degraded`/`down`, not continuously re-verified
+- A `warn` result always reads `degraded` for that run, independent of the failure/recovery streaks, and doesn't start or extend either one
+- A **fail** notification fires the moment `public_status` becomes `down`, gated by `now - last_notification_at > cooldown`
+- A **warning** notification fires on the first `warn` result (no window), then after `cooldown` elapses — tracked independently via `last_warning_at` so it never blocks a subsequent fail alert
+- A **recovery** notification fires the moment `public_status` becomes `up` from a prior `degraded`/`down` (not a brand new test's first success) if either `last_notification_at` or `last_warning_at` is set; both are cleared on recovery
 
 ---
 

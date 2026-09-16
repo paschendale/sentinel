@@ -169,12 +169,16 @@ describe('flushTestState deduplication', () => {
     const testStateCall = mockQuery.mock.calls[2]
     expect(testStateCall).toBeDefined()
     const params = testStateCall![1] as unknown[]
-    // After dedup: 1 row × 3 params = 3 params
-    expect(params).toHaveLength(3)
+    // After dedup: 1 row × 6 params (test_id, status, finished_at, public_status, failing_since, succeeding_since) = 6
+    expect(params).toHaveLength(6)
     // The kept row should be 'late' with status 'success'
     expect(params[0]).toBe('test-1')
     expect(params[1]).toBe('success')
     expect(params[2]).toEqual(new Date('2026-01-01T00:00:02Z'))
+    // Brand new test_id (no prior test_state row) succeeding immediately -> 'up', no proving period
+    expect(params[3]).toBe('up')
+    expect(params[4]).toBeNull()
+    expect(params[5]).toBeNull()
   })
 
   it('builds correct SQL with ON CONFLICT upsert', async () => {

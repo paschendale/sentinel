@@ -44,7 +44,7 @@ These rules are non-negotiable. They exist because of hard constraints (1GB RAM,
 
 17. **Notifications are fire-and-forget** — wrap all notification dispatches in `try/catch`, never `await` them in the test execution path.
 18. **Alert on state transitions only** — do not fire a notification if the status hasn't changed.
-19. **Respect the failure threshold and cooldown** — check `consecutive_failures >= threshold` and `cooldown elapsed` before firing.
+19. **Respect the public_status window and cooldown** — a fail alert fires when `test_state.public_status` becomes `down` (failing continuously for longer than `PUBLIC_STATUS_WINDOW_MS`, default 1h), a recovery alert when it becomes `up` again from prior trouble (succeeding continuously for longer than that same window); both still gated by `cooldown elapsed`. See `apps/api/src/db/public-status.ts`. `tests.failure_threshold` is legacy — it's no longer what gates this.
 
 ---
 

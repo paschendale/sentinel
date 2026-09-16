@@ -49,6 +49,18 @@ export const JWT_SECRET = requireEnv('JWT_SECRET')
 export const RESEND_API_KEY = optionalEnv('RESEND_API_KEY', '')
 export const RESEND_FROM = optionalEnv('RESEND_FROM', '')
 
+/** How long a test must fail continuously before `test_state.public_status` (and the fail/recovery
+ *  notification transitions) call it "down" instead of "degraded" — and, symmetrically, how long it
+ *  must succeed continuously after trouble before it's "up" again instead of still "degraded". A
+ *  single blip (or a run of blips shorter than this) reads as "degraded": a point of attention, not
+ *  an alert. Applies to every test, not just RBMC stations — see apps/api/src/db/public-status.ts. */
+export const PUBLIC_STATUS_WINDOW_MS = parseIntEnvInRange(
+  'PUBLIC_STATUS_WINDOW_MS',
+  60 * 60 * 1000,
+  60 * 1000,
+  24 * 60 * 60 * 1000
+)
+
 export const RAW_RETENTION_DAYS = parseIntEnvInRange('RAW_RETENTION_DAYS', 7, 1, 365)
 export const AGG_RETENTION_DAYS = parseIntEnvInRange('AGG_RETENTION_DAYS', 90, 30, 180)
 export const PRUNE_BATCH_SIZE = parseIntEnvInRange('PRUNE_BATCH_SIZE', 5000, 100, 50000)

@@ -83,11 +83,11 @@ pnpm workspaces manage the monorepo.
 ### Notification Pipeline
 - Event-driven: `testFailed → notifier → channels`
 - **Fire-and-forget**: notifications never block the test execution path
-- State tracked per test: `lastStatus`, `consecutiveFailures`, `lastNotificationAt`, `lastWarningAt`
-- Three event types: **warning** (`warn` result), **fail** (threshold crossed), **recovery** (back to success)
-- Fail alert only after **3 consecutive failures** (configurable `failure_threshold`)
-- Warning alert fires on first `warn` result — no threshold, just cooldown
-- `lastNotificationAt` and `lastWarningAt` are tracked independently so a warning never suppresses a subsequent fail alert
+- State tracked per test: `lastStatus`, `consecutiveFailures` (legacy, display/audit only), `failingSince`, `succeedingSince`, `lastNotificationAt`, `lastWarningAt`, `publicStatus`
+- Three event types: **warning** (`warn` result), **fail** (`public_status` becomes `down`), **recovery** (`public_status` becomes `up`)
+- `public_status` (and therefore fail/recovery) is a **rolling time window**, not a consecutive-count threshold: a test only reads `down` once it has failed continuously for longer than `PUBLIC_STATUS_WINDOW_MS` (default 1h), and only reads `up` again after trouble once it has succeeded continuously for longer than that same window; in between it's `degraded` — a point of attention, not an alert. See `apps/api/src/db/public-status.ts`. `tests.failure_threshold` no longer gates this — it's kept only as a legacy display field
+- Warning alert fires on first `warn` result — no window, just cooldown
+- `lastNotificationAt` and `lastWarningAt` are tracked independently so a warning never suppresses a subsequent fail alert; `cooldown_ms` still gates repeat fail/recovery/warning notifications exactly as before
 - Channel routing is filterable per event type: each `channel_assignments` row carries an `event_types` array, and the channel-selection query filters on the event type already resolved above — so a single test can route `warning` to one channel and `fail` to another without needing separate tests per event type
 
 ### Observability

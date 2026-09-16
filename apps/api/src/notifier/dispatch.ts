@@ -1,5 +1,5 @@
 import { request } from 'undici'
-import type { TestStatus } from '@sentinel/shared'
+import type { PublicStatusOutcome, TestStatus } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import {
   insertNotificationEvent,
@@ -10,8 +10,11 @@ import { RESEND_API_KEY, RESEND_FROM } from '../config.js'
 
 export interface NotificationCandidate {
   test_id: string
+  /** Raw run status — only used to detect `warn`, which fires independently of public_status. */
   new_status: TestStatus
-  prev_status: TestStatus | null
+  /** public_status before/after this run (see public-status.ts) — drives fail/recovery. */
+  prev_public_status: PublicStatusOutcome | null
+  new_public_status: PublicStatusOutcome
   error_message: string | null
   duration_ms: number
 }
@@ -24,12 +27,12 @@ export function triggerNotifications(candidates: NotificationCandidate[]): void 
 
 async function runNotifications(candidates: NotificationCandidate[]): Promise<void> {
   const actionable = candidates.filter(c => {
-    const prevNonSuccess = c.prev_status !== null && c.prev_status !== 'success'
     if (c.new_status === 'warn') return true
-    // Always evaluate failing tests so missed threshold crossings can still notify.
-    if (c.new_status !== 'success') return true
-    // Recovery only matters on actual non-success -> success transition.
-    return prevNonSuccess && c.new_status === 'success'
+    // fail: re-evaluate every run while actually down, so cooldown re-notifies are still checked.
+    if (c.new_public_status === 'down') return true
+    // recovery: only a genuine transition into "up" from prior trouble — not a brand new test's
+    // first-ever success, which has no incident to recover from (prev_public_status === null).
+    return c.prev_public_status !== null && c.prev_public_status !== 'up' && c.new_public_status === 'up'
   })
   if (actionable.length === 0) return
 
@@ -59,9 +62,9 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
     const threshold = state?.failure_threshold ?? 3
     const cooldown = state?.cooldown_ms ?? 86_400_000
 
-    const eventType = candidate.new_status === 'success' ? 'recovery'
-      : candidate.new_status === 'warn' ? 'warning'
-      : 'fail'
+    const eventType = candidate.new_status === 'warn' ? 'warning'
+      : candidate.new_public_status === 'down' ? 'fail'
+      : 'recovery'
 
     await logNotificationEventSafe({
       test_id: candidate.test_id,
@@ -72,7 +75,7 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
       cooldown_ms: cooldown,
     })
 
-    if (candidate.new_status === 'warn') {
+    if (eventType === 'warning') {
       // warning: no threshold check; uses last_warning_at for cooldown (independent of fail cooldown)
       if (lastWarningAt !== null) {
         const elapsed = Date.now() - lastWarningAt.getTime()
@@ -82,12 +85,9 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
         }
       }
       await dispatchForTest(candidate.test_id, 'warning', consecutive, threshold, cooldown, candidate.error_message, candidate.duration_ms, null)
-    } else if (candidate.new_status !== 'success') {
-      // fail/timeout: check per-test threshold and cooldown (last_notification_at only — not affected by warnings)
-      if (consecutive < threshold) {
-        await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'below_threshold')
-        continue
-      }
+    } else if (eventType === 'fail') {
+      // Already confirmed "down" (failing continuously past PUBLIC_STATUS_WINDOW_MS) by the
+      // actionable filter above — only the cooldown can still gate a repeat notification.
       if (lastNotifiedAt !== null) {
         const elapsed = Date.now() - lastNotifiedAt.getTime()
         if (elapsed < cooldown) {

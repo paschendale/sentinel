@@ -1,8 +1,10 @@
-import type { TestStatus } from '@sentinel/shared'
+import type { PublicStatusOutcome, TestStatus } from '@sentinel/shared'
 import type { RunResult } from '../executor/run.js'
 import { pool } from './pool.js'
 import { triggerNotifications } from '../notifier/dispatch.js'
 import { recordTestResult } from '../metrics/index.js'
+import { computePublicStatus } from './public-status.js'
+import { PUBLIC_STATUS_WINDOW_MS } from '../config.js'
 
 let buffer: RunResult[] = []
 let flusherTimer: ReturnType<typeof setInterval> | null = null
@@ -96,25 +98,51 @@ async function flushTestState(rows: RunResult[]): Promise<void> {
   }
   const deduped = Array.from(latest.values())
 
-  // Fetch previous statuses for transition detection (F-07)
+  // Fetch previous state for transition detection (F-07) and for public_status's window logic,
+  // which needs to know whether a failure/recovery streak is already in progress.
   const testIds = deduped.map(r => r.test_id)
-  const prevResult = await pool.query<{ test_id: string; last_status: TestStatus | null }>(
-    `SELECT test_id, last_status FROM test_state WHERE test_id = ANY($1)`,
+  const prevResult = await pool.query<{
+    test_id: string
+    last_status: TestStatus | null
+    public_status: PublicStatusOutcome | null
+    failing_since: Date | null
+    succeeding_since: Date | null
+  }>(
+    `SELECT test_id, last_status, public_status, failing_since, succeeding_since FROM test_state WHERE test_id = ANY($1)`,
     [testIds],
   )
-  const prevStates = new Map(prevResult.rows.map(r => [r.test_id, r.last_status]))
+  const prevStates = new Map(prevResult.rows.map(r => [r.test_id, r]))
 
-  const values: unknown[] = []
-  const placeholders = deduped.map((r, i) => {
-    const b = i * 3
-    values.push(r.test_id, r.status, r.finished_at)
-    return `($${b + 1},$${b + 2},$${b + 3}::timestamptz)`
+  // public_status (and its failing_since/succeeding_since streak markers) is computed here in JS
+  // — see public-status.ts — rather than in SQL, since notifications below need the exact same
+  // window decision and this way there is only one place that makes it.
+  const computed = deduped.map(r => {
+    const prev = prevStates.get(r.test_id) ?? null
+    const next = computePublicStatus(
+      {
+        public_status: prev?.public_status ?? null,
+        failing_since: prev?.failing_since ?? null,
+        succeeding_since: prev?.succeeding_since ?? null,
+      },
+      r.status,
+      r.finished_at,
+      PUBLIC_STATUS_WINDOW_MS,
+    )
+    return { result: r, prevPublicStatus: prev?.public_status ?? null, ...next }
   })
 
-  // LEFT JOIN reads existing consecutive_failures so it can be incremented correctly.
-  // JOIN tests to read failure_threshold and compute public_status atomically.
+  const values: unknown[] = []
+  const placeholders = computed.map((c, i) => {
+    const b = i * 6
+    values.push(c.result.test_id, c.result.status, c.result.finished_at, c.public_status, c.failing_since, c.succeeding_since)
+    return `($${b + 1},$${b + 2},$${b + 3}::timestamptz,$${b + 4},$${b + 5}::timestamptz,$${b + 6}::timestamptz)`
+  })
+
+  // LEFT JOIN reads existing consecutive_failures so it can be incremented correctly. It's kept
+  // for display/audit only now — public_status no longer derives from it (or from
+  // tests.failure_threshold); see public-status.ts.
   await pool.query(
-    `INSERT INTO test_state (test_id, last_status, consecutive_failures, last_run_at, public_status)
+    `INSERT INTO test_state (test_id, last_status, consecutive_failures, last_run_at, public_status, failing_since, succeeding_since)
      SELECT
        v.test_id,
        v.last_status,
@@ -122,31 +150,31 @@ async function flushTestState(rows: RunResult[]): Promise<void> {
             ELSE COALESCE(ts.consecutive_failures, 0) + 1
        END,
        v.last_run_at,
-       CASE
-         WHEN v.last_status = 'success' THEN 'up'
-         WHEN v.last_status = 'warn' THEN 'degraded'
-         WHEN (COALESCE(ts.consecutive_failures, 0) + 1) >= t.failure_threshold THEN 'down'
-         ELSE 'degraded'
-       END
-     FROM (VALUES ${placeholders.join(',')}) AS v(test_id, last_status, last_run_at)
+       v.public_status,
+       v.failing_since,
+       v.succeeding_since
+     FROM (VALUES ${placeholders.join(',')}) AS v(test_id, last_status, last_run_at, public_status, failing_since, succeeding_since)
      LEFT JOIN test_state ts ON ts.test_id = v.test_id
-     JOIN tests t ON t.id = v.test_id
      ON CONFLICT (test_id) DO UPDATE SET
        last_status          = EXCLUDED.last_status,
        consecutive_failures = EXCLUDED.consecutive_failures,
        last_run_at          = EXCLUDED.last_run_at,
-       public_status        = EXCLUDED.public_status`,
+       public_status        = EXCLUDED.public_status,
+       failing_since        = EXCLUDED.failing_since,
+       succeeding_since     = EXCLUDED.succeeding_since`,
     values,
   )
 
-  // Fire-and-forget notification checks (F-07)
+  // Fire-and-forget notification checks (F-07) — fail/recovery now key off the same
+  // public_status transition shown on the map/list, not a raw run status change.
   triggerNotifications(
-    deduped.map(r => ({
-      test_id: r.test_id,
-      new_status: r.status,
-      prev_status: prevStates.get(r.test_id) ?? null,
-      error_message: r.error_message,
-      duration_ms: r.duration_ms,
+    computed.map(c => ({
+      test_id: c.result.test_id,
+      new_status: c.result.status,
+      prev_public_status: c.prevPublicStatus,
+      new_public_status: c.public_status,
+      error_message: c.result.error_message,
+      duration_ms: c.result.duration_ms,
     })),
   )
 }
