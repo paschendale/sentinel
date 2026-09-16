@@ -304,7 +304,10 @@ describe('template', () => {
     }
     await expect(fn(ctx)).resolves.toBe(true)
     expect(logs).toEqual(['VICO0: RTCM 3.2 GPS+GLO via TRIMBLE'])
-    expect(assertions).toEqual([['Station VICO is listed in the RBMC-IP sourcetable', true]])
+    expect(assertions).toEqual([
+      ['VICO0 is online (RTCM 3.2 GPS+GLO via TRIMBLE)', true],
+      ['Station VICO is listed in the RBMC-IP sourcetable', true],
+    ])
     expect(() => buildStationTestCode("x'; process.exit()")).toThrow()
   })
 })

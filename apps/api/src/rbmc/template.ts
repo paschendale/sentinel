@@ -4,7 +4,7 @@
  * (or actual code) differs, so the change rolls out without manual edits.
  */
 
-export const RBMC_TEMPLATE_VERSION = 1
+export const RBMC_TEMPLATE_VERSION = 2
 
 export const RBMC_TAG = 'rbmc'
 
@@ -33,7 +33,10 @@ export function buildStationTestCode(code: string): string {
     `const CODE = '${code}'`,
     `const rows = await ctx.ntrip.sourcetable()`,
     `const found = rows.filter((r) => r.network === 'RBMC-IP' && r.mountpoint.slice(0, 4) === CODE)`,
-    'for (const r of found) ctx.log(`${r.mountpoint}: ${r.format} ${r.navSystem} via ${r.generator}`)',
+    'for (const r of found) {',
+    '  ctx.log(`${r.mountpoint}: ${r.format} ${r.navSystem} via ${r.generator}`)',
+    '  ctx.assert(`${r.mountpoint} is online (${r.format} ${r.navSystem} via ${r.generator})`, true)',
+    '}',
     'ctx.assert(`Station ${CODE} is listed in the RBMC-IP sourcetable`, found.length > 0,',
     '  `No mountpoint starting with ${CODE} in the RBMC-IP sourcetable`)',
     `return true`,
