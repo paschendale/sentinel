@@ -253,7 +253,14 @@ export function StatusPageContent({ tests, tag, map, tags = [], heading = 'senti
     return (
       <div className="space-y-4">
         {header}
-        <RbmcMapLoader initial={map} refreshUrl={mapRefreshUrl} linkBase="/status/tests" />
+        <RbmcMapLoader
+          initial={map}
+          refreshUrl={mapRefreshUrl}
+          tests={tests}
+          bucketData={bucketData}
+          loading={loading}
+          period={period}
+        />
       </div>
     )
   }

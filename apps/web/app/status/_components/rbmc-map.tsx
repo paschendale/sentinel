@@ -6,7 +6,8 @@ import type { ErrorEvent, GeoJSONSource, MapLayerMouseEvent, MapMouseEvent, Styl
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { Protocol as PmtilesProtocol } from 'pmtiles'
 import { layers as protomapsLayers, namedFlavor } from '@protomaps/basemaps'
-import type { PublicStatusOutcome, RbmcMapCollection, RbmcMapFeatureProperties } from '@sentinel/shared'
+import type { PublicStatusOutcome, PublicStatusTest, RbmcMapCollection, RbmcMapFeatureProperties, StatusBucket, StatusPeriod } from '@sentinel/shared'
+import { TestDetailPopover } from './test-detail-popover'
 
 // `pmtiles://` is a custom MapLibre protocol; register it once per page load, module-scope so
 // remounting this component (e.g. client navigation) never calls addProtocol twice.
@@ -84,14 +85,21 @@ const STATUS_LABEL: Record<PublicStatusOutcome, string> = {
 
 const STATUS_ORDER: PublicStatusOutcome[] = ['up', 'degraded', 'down', 'unknown']
 
+/** Matches the app's existing "active" accent (e.g. the selected view/period pill). */
+const HIGHLIGHT_COLOR = '#f4f4f5' // zinc-100
+
 interface Props {
   initial: RbmcMapCollection
   /** Public GeoJSON endpoint polled every `refreshMs`. */
   refreshUrl: string
   refreshMs?: number
-  /** Where a station's test detail lives for this audience. */
-  linkBase: '/status/tests' | '/tests'
   className?: string
+  /** Same data StatusPageContent already loads for the grid/list views — the map's info panel
+   *  is literally TestDetailPopover, not a bespoke station panel, driven by these. */
+  tests: PublicStatusTest[]
+  bucketData: Map<string, StatusBucket[]>
+  loading: boolean
+  period: StatusPeriod
 }
 
 function countByStatus(fc: RbmcMapCollection): Record<PublicStatusOutcome, number> {
@@ -102,7 +110,9 @@ function countByStatus(fc: RbmcMapCollection): Record<PublicStatusOutcome, numbe
 
 function addStationLayers(map: MapLibreMap, data: RbmcMapCollection): void {
   if (map.getSource(SOURCE_ID)) return
-  map.addSource(SOURCE_ID, { type: 'geojson', data })
+  // `promoteId` lets us key feature-state (hover/lock highlight) off the station code instead of
+  // a synthetic numeric id, without changing the public GeoJSON shape.
+  map.addSource(SOURCE_ID, { type: 'geojson', data, promoteId: 'code' })
   map.addLayer({
     id: HALO_ID,
     type: 'circle',
@@ -118,26 +128,63 @@ function addStationLayers(map: MapLibreMap, data: RbmcMapCollection): void {
     type: 'circle',
     source: SOURCE_ID,
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 4.5, 8, 8],
-      'circle-color': ['match', ['get', 'status'], 'up', STATUS_COLOR.up, 'degraded', STATUS_COLOR.degraded, 'down', STATUS_COLOR.down, STATUS_COLOR.unknown],
+      // Hovered/locked station gets a bigger, distinctly-coloured dot — the highlight is the
+      // same regardless of status, so it reads as "selected" rather than another status colour.
+      // A style can only have one zoom-based interpolate per property, so `case` has to be the
+      // per-stop *value* inside a single interpolate, not the other way around.
+      'circle-radius': ['interpolate', ['linear'], ['zoom'],
+        3, ['case', ['boolean', ['feature-state', 'active'], false], 6.5, 4.5],
+        8, ['case', ['boolean', ['feature-state', 'active'], false], 11, 8],
+      ],
+      'circle-color': ['case',
+        ['boolean', ['feature-state', 'active'], false],
+        HIGHLIGHT_COLOR,
+        ['match', ['get', 'status'], 'up', STATUS_COLOR.up, 'degraded', STATUS_COLOR.degraded, 'down', STATUS_COLOR.down, STATUS_COLOR.unknown],
+      ],
       // Shape + colour: disabled/unknown stations get a dashed-looking dim ring instead of a solid dot.
-      'circle-stroke-width': ['case', ['get', 'enabled'], 1, 2],
-      'circle-stroke-color': ['case', ['get', 'enabled'], '#09090b', '#3f3f46'],
+      'circle-stroke-width': ['case', ['boolean', ['feature-state', 'active'], false], 2, ['case', ['get', 'enabled'], 1, 2]],
+      'circle-stroke-color': ['case', ['boolean', ['feature-state', 'active'], false], '#09090b', ['case', ['get', 'enabled'], '#09090b', '#3f3f46']],
       'circle-opacity': ['case', ['get', 'enabled'], 1, 0.55],
     },
   })
 }
 
-export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, linkBase, className }: Props) {
+export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, className, tests, bucketData, loading, period }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
   const dataRef = useRef<RbmcMapCollection>(initial)
   const [data, setData] = useState<RbmcMapCollection>(initial)
-  const [selected, setSelected] = useState<RbmcMapFeatureProperties | null>(null)
+  // Hover opens the panel; a click locks it to that station until clicked again or the map's
+  // empty space is clicked. While locked, hover on other stations is ignored entirely so neither
+  // the panel nor the highlight moves — only the release (re-click / empty click) changes it.
+  const [hoveredCode, setHoveredCode] = useState<string | null>(null)
+  const [lockedCode, setLockedCode] = useState<string | null>(null)
+  const lockedCodeRef = useRef<string | null>(null)
   const [fallback, setFallback] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
 
+  useEffect(() => {
+    lockedCodeRef.current = lockedCode
+  }, [lockedCode])
+
+  const activeCode = lockedCode ?? hoveredCode
   const counts = useMemo(() => countByStatus(data), [data])
+  const testsById = useMemo(() => new Map(tests.map((t) => [t.id, t])), [tests])
+
+  const activeFeature: RbmcMapFeatureProperties | null = useMemo(() => {
+    if (!activeCode) return null
+    return data.features.find((f) => f.properties.code === activeCode)?.properties ?? null
+  }, [data, activeCode])
+
+  const activeTest: PublicStatusTest | null =
+    activeFeature?.test_id !== undefined && activeFeature?.test_id !== null
+      ? testsById.get(activeFeature.test_id) ?? null
+      : null
+
+  function closePanel() {
+    setLockedCode(null)
+    setHoveredCode(null)
+  }
 
   // Map lifecycle — created once; data updates go through setData on the source.
   useEffect(() => {
@@ -172,17 +219,32 @@ export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, linkBase, cl
       map.setStyle(FALLBACK_STYLE)
     })
 
-    const onClick = (e: MapLayerMouseEvent) => {
+    const onMouseMove = (e: MapLayerMouseEvent) => {
+      if (lockedCodeRef.current) return
+      const code = e.features?.[0]?.properties?.['code']
+      if (typeof code === 'string') setHoveredCode(code)
+    }
+    const onMouseLeaveLayer = () => {
+      if (lockedCodeRef.current) return
+      setHoveredCode(null)
+    }
+    const onLayerClick = (e: MapLayerMouseEvent) => {
       const code = e.features?.[0]?.properties?.['code']
       if (typeof code !== 'string') return
-      const feature = dataRef.current.features.find((f) => f.properties.code === code)
-      setSelected(feature ? feature.properties : null)
+      setLockedCode((prev) => (prev === code ? null : code))
+      setHoveredCode(code)
     }
-    map.on('click', LAYER_ID, onClick)
-    map.on('click', (e: MapMouseEvent) => {
+    const onMapClick = (e: MapMouseEvent) => {
       const hits = map.getLayer(LAYER_ID) ? map.queryRenderedFeatures(e.point, { layers: [LAYER_ID] }) : []
-      if (hits.length === 0) setSelected(null)
-    })
+      if (hits.length === 0) {
+        setLockedCode(null)
+        setHoveredCode(null)
+      }
+    }
+    map.on('mousemove', LAYER_ID, onMouseMove)
+    map.on('mouseleave', LAYER_ID, onMouseLeaveLayer)
+    map.on('click', LAYER_ID, onLayerClick)
+    map.on('click', onMapClick)
     map.on('mouseenter', LAYER_ID, () => { map.getCanvas().style.cursor = 'pointer' })
     map.on('mouseleave', LAYER_ID, () => { map.getCanvas().style.cursor = '' })
 
@@ -198,8 +260,22 @@ export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, linkBase, cl
     const map = mapRef.current
     const source = map?.getSource(SOURCE_ID) as GeoJSONSource | undefined
     source?.setData(data)
-    setSelected((prev) => (prev ? data.features.find((f) => f.properties.code === prev.code)?.properties ?? null : null))
   }, [data])
+
+  // Drive the feature-state highlight from whichever station is hovered or locked.
+  const prevActiveCodeRef = useRef<string | null>(null)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !map.getSource(SOURCE_ID)) return
+    const prev = prevActiveCodeRef.current
+    if (prev && prev !== activeCode) {
+      map.setFeatureState({ source: SOURCE_ID, id: prev }, { active: false })
+    }
+    if (activeCode) {
+      map.setFeatureState({ source: SOURCE_ID, id: activeCode }, { active: true })
+    }
+    prevActiveCodeRef.current = activeCode
+  }, [activeCode, data])
 
   // Periodic refresh from the public aggregated endpoint.
   useEffect(() => {
@@ -248,58 +324,32 @@ export function RbmcMap({ initial, refreshUrl, refreshMs = 300_000, linkBase, cl
         )}
       </div>
 
-      {/* Selected station panel — rendered by React, never innerHTML (caster text is untrusted). */}
-      {selected && (
-        <div className="absolute bottom-3 left-3 z-10 w-72 max-w-[calc(100%-1.5rem)] rounded-md border border-zinc-800/80 bg-zinc-950/90 px-4 py-3 text-sm backdrop-blur-sm">
-          <div className="mb-2 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLOR[selected.status] }} aria-hidden />
-                <span className="font-medium text-zinc-100">{selected.code}</span>
-                <span className="text-xs uppercase tracking-wide text-zinc-500">{STATUS_LABEL[selected.status]}</span>
+      {/* Info panel — the exact same TestDetailPopover the grid/list test cards use, rendered by
+          React (never innerHTML; caster-derived text is untrusted). Hover opens it; a click locks
+          it open on that station until clicked again or the map background is clicked. */}
+      {activeFeature && (
+        <div className="absolute bottom-3 left-3 z-10 w-72 max-w-[calc(100%-1.5rem)]">
+          {activeTest ? (
+            <TestDetailPopover test={activeTest} buckets={bucketData.get(activeTest.id) ?? []} loading={loading} period={period} onClose={closePanel} />
+          ) : (
+            <div className="rounded-md border border-zinc-800/80 bg-zinc-950/90 px-4 py-3 text-sm backdrop-blur-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLOR[activeFeature.status] }} aria-hidden />
+                    <span className="font-medium text-zinc-100">{activeFeature.code}</span>
+                    <span className="text-xs uppercase tracking-wide text-zinc-500">{STATUS_LABEL[activeFeature.status]}</span>
+                  </div>
+                  <div className="mt-0.5 truncate text-zinc-400">
+                    {activeFeature.name ?? '—'}{activeFeature.uf ? ` · ${activeFeature.uf}` : ''}
+                  </div>
+                  <p className="text-zinc-600 text-xs mt-2">no test linked to this station yet</p>
+                </div>
+                <button type="button" onClick={closePanel} className="text-zinc-600 hover:text-zinc-300 transition-colors" aria-label="Close">
+                  ×
+                </button>
               </div>
-              <div className="mt-0.5 truncate text-zinc-400">
-                {selected.name ?? '—'}{selected.uf ? ` · ${selected.uf}` : ''}
-              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setSelected(null)}
-              className="text-zinc-600 hover:text-zinc-300 transition-colors"
-              aria-label="Close"
-            >
-              ×
-            </button>
-          </div>
-          <dl className="space-y-1 text-xs">
-            <div className="flex justify-between gap-4">
-              <dt className="text-zinc-500">30-day uptime</dt>
-              <dd className="tabular-nums text-zinc-200">{selected.uptime_pct_30d === null ? '—' : `${selected.uptime_pct_30d}%`}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-zinc-500">monitoring</dt>
-              <dd className="text-zinc-200">{selected.enabled ? 'enabled' : 'disabled'}</dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-zinc-500">mountpoints</dt>
-              <dd className="text-right text-zinc-200">
-                {selected.mountpoints === undefined
-                  ? <span className="text-zinc-600">not cached yet</span>
-                  : selected.mountpoints.length === 0
-                    ? <span className="text-red-400/90">none listed</span>
-                    : selected.mountpoints.map((m) => (
-                        <div key={m.mountpoint} className="tabular-nums">{m.mountpoint} <span className="text-zinc-500">{m.format}</span></div>
-                      ))}
-              </dd>
-            </div>
-          </dl>
-          {selected.test_id && (
-            <a
-              href={`${linkBase}/${encodeURIComponent(selected.test_id)}`}
-              className="mt-3 inline-block text-xs text-zinc-400 hover:text-zinc-100 transition-colors"
-            >
-              history →
-            </a>
           )}
         </div>
       )}
