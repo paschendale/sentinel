@@ -19,13 +19,22 @@ RTCM 3.0).
 
 Each station has **exactly one test**. It passes when at least one `RBMC-IP`
 mountpoint whose first four characters equal the station code (`SG_RBMC`) is
-listed; the run log records every mountpoint found with its format and
-receiver, e.g. `VICO0: RTCM 3.2 GPS+GLO+GAL+BDS+SBAS via TRIMBLE NETR9`.
-Stations absent from the caster fail with
-`No mountpoint starting with CODE in the RBMC-IP sourcetable`.
+listed. Every mountpoint found gets its own passing assertion naming it and its
+format/receiver, e.g. `VICO0 is online (RTCM 3.2 GPS+GLO+GAL+BDS+SBAS via
+TRIMBLE NETR9)` — this is what the admin and public UIs show per-mountpoint in
+a run's assertion list, not just the run log. A final assertion covers the
+overall station outcome. Stations absent from the caster fail that assertion
+with `No mountpoint starting with CODE in the RBMC-IP sourcetable`.
 
 Test defaults mirror the hand-made tests the instance started with:
 15-minute schedule, 10 s timeout, failure threshold 3, 24 h cooldown, tag `rbmc`.
+`failure_threshold` is legacy now (kept only for display): a station only
+shows "down" on the map, or fires a fail notification, after failing
+continuously for over an hour (`PUBLIC_STATUS_WINDOW_MS`); `cooldown_ms` still
+gates how often a repeat notification can fire while it stays down. This is a
+mainline change (`apps/api/src/db/public-status.ts`, RULES.md #19), not
+RBMC-specific — it just matters most here since RBMC stations are most of
+what's monitored on this instance.
 
 ---
 
@@ -154,9 +163,19 @@ constructed with `bounds` set to Brazil (with slack for offshore/Uruguayan
 stations) so the initial view fits every station regardless of basemap.
 Stations are circles coloured emerald/yellow/red/zinc for
 up/degraded/down/unknown, disabled ones dimmed with a grey ring; a legend shows
-the counts; clicking a station opens a React-rendered panel (code, city, UF,
-30-day uptime, live mountpoints, link to the test history). The map refreshes
-itself from `GET /status/rbmc/map` every 5 minutes; the page itself stays ISR.
+the counts. Hovering a station opens its info panel; clicking locks the panel
+to that station (hovering elsewhere no longer changes it) until it is clicked
+again or the map's empty space is clicked. The hovered/locked station is
+highlighted by recolouring its dot (MapLibre `feature-state`, keyed by station
+code via `promoteId`), not a new visual language. The panel itself is
+`TestDetailPopover` (`apps/web/app/status/_components/test-detail-popover.tsx`)
+— the exact same component the grid/list test cards use for their hover
+popover, looked up by the station's `test_id` in the page's already-fetched
+test list and bucket data. A station's live mountpoints are not a separate
+panel field; they show up the same way any test's assertions do, in the
+panel's histogram "last check" tooltip (see §1 — one assertion per mountpoint).
+The map refreshes itself from `GET /status/rbmc/map` every 5 minutes; the page
+itself stays ISR.
 
 **Worker URL gotcha:** maplibre-gl v6 locates its tile-processing worker via
 `import.meta.url` relative to its own module. That resolves fine when the
