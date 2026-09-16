@@ -177,6 +177,12 @@ panel's histogram "last check" tooltip (see §1 — one assertion per mountpoint
 The map refreshes itself from `GET /status/rbmc/map` every 5 minutes; the page
 itself stays ISR.
 
+`/status` and `/status/[tag]` (`status-page-content.tsx`) also render a small,
+centered footer link — "O que é este mapa?", in Portuguese — to a blog post
+explaining the map, for the audience most likely to land here cold with no
+context: surveyors and IBGE staff, not internal ops. Shown under all three
+views (map/grid/list), not just the map.
+
 **Worker URL gotcha:** maplibre-gl v6 locates its tile-processing worker via
 `import.meta.url` relative to its own module. That resolves fine when the
 library is loaded directly from a real static URL, but once webpack bundles it
