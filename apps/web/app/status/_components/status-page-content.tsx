@@ -13,6 +13,13 @@ import { BackLink } from '../../_components/back-link'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
+/**
+ * This page's audience beyond internal ops is surveyors and IBGE staff who land here cold, often
+ * from a shared link, with no context on what the map/uptime figures mean. In Portuguese, matching
+ * the post itself and this map's Brazilian audience.
+ */
+const ABOUT_URL = 'https://marotta.dev/pt/blog/rbmc-status-map-for-surveyors'
+
 const PERIODS: StatusPeriod[] = ['1h', '24h', '7d', '30d']
 
 function isPeriod(v: string | null): v is StatusPeriod {
@@ -219,11 +226,25 @@ export function StatusPageContent({ tests, tag, map, tags = [], heading = 'senti
     </div>
   )
 
+  const footer = (
+    <div className="text-center">
+      <a
+        href={ABOUT_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-zinc-500 text-xs hover:text-zinc-300 transition-colors"
+      >
+        O que é este mapa? →
+      </a>
+    </div>
+  )
+
   if (tests.length === 0 && !hasMap) {
     return (
       <div className="space-y-8">
         {header}
         <p className="text-zinc-500 text-center text-sm">No tests configured.</p>
+        {footer}
       </div>
     )
   }
@@ -261,6 +282,7 @@ export function StatusPageContent({ tests, tag, map, tags = [], heading = 'senti
           loading={loading}
           period={period}
         />
+        {footer}
       </div>
     )
   }
@@ -281,6 +303,7 @@ export function StatusPageContent({ tests, tag, map, tags = [], heading = 'senti
             />
           ))}
         </div>
+        {footer}
       </div>
     )
   }
@@ -356,6 +379,7 @@ export function StatusPageContent({ tests, tag, map, tags = [], heading = 'senti
           )
         })}
       </div>
+      {footer}
     </div>
   )
 }
