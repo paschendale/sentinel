@@ -17,6 +17,7 @@ export interface HttpResponse {
 
 export interface HttpOptions {
   headers?: Record<string, string>
+  /** Per-request limit in ms, covering response headers and the full body. Defaults to what is left of the test's timeout budget. */
   timeout?: number
   redirect?: 'follow' | 'manual' | 'error'
 }
@@ -50,6 +51,8 @@ export interface S3Options {
   sessionToken?: string
   /** Extra headers (e.g. Range) — included in the SigV4 signature. */
   headers?: Record<string, string>
+  /** Per-request limit in ms, covering response headers and the full body. Defaults to what is left of the test's timeout budget. */
+  timeout?: number
 }
 
 export interface TestContext {
@@ -79,6 +82,8 @@ interface CtxBundle {
   getLogs: () => string[]
   getAssertions: () => AssertionCapture[]
   getWarnings: () => string[]
+  /** ctx I/O calls still pending, described with elapsed time and progress — used in the run's timeout message. */
+  getInFlight: () => string[]
 }
 
 export interface HttpCompleteInfo {
@@ -104,13 +109,26 @@ export interface S3CompleteInfo {
   region: string
 }
 
+export interface IoErrorInfo {
+  protocol: 'http' | 's3' | 'ftp'
+  op: string
+  url: string
+  code: string
+  duration_ms: number
+  message: string
+}
+
 export interface BuildCtxOptions {
   onLog?: (message: string) => void
   onHttpComplete?: (info: HttpCompleteInfo) => void
   onFtpComplete?: (info: FtpCompleteInfo) => void
   onS3Complete?: (info: S3CompleteInfo) => void
-  /** The test's overall timeout budget — used as the default FTP socket timeout. */
+  /** Called when a ctx.http / ctx.s3 / ctx.ftp call fails or times out. */
+  onIoError?: (info: IoErrorInfo) => void
+  /** The test's overall timeout budget — default per-request limit for ctx.http/ctx.s3, and default FTP socket timeout. */
   testTimeoutMs?: number
+  /** Aborted by the executor when the run times out; cancels every in-flight ctx I/O call. */
+  signal?: AbortSignal
   /** Decrypted secrets snapshot (see executor/secrets-cache.ts), exposed as ctx.secrets.NAME. */
   secrets?: Readonly<Record<string, string>>
 }
@@ -119,13 +137,74 @@ function truncateUrl(url: string, max = 200): string {
   return url.length > max ? `${url.slice(0, max)}…` : url
 }
 
+/** One pending ctx I/O call, reported in the run's error_message if the run times out while it is in flight. */
+interface InFlightCall {
+  label: string
+  startMs: number
+  headersReceived: boolean
+  bytes: number
+}
+
+/** Per-run I/O state shared by every ctx call of one run. */
+interface IoScope {
+  runSignal?: AbortSignal | undefined
+  /** Ms left of the test's timeout budget; undefined when the ctx was built without one. */
+  remainingMs: () => number | undefined
+  track: (label: string) => InFlightCall
+  untrack: (call: InFlightCall) => void
+  onIoError?: ((info: IoErrorInfo) => void) | undefined
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function describeProgress(call: InFlightCall | undefined): string {
+  if (call == null) return 'progress unknown'
+  if (!call.headersReceived) return 'no response headers received'
+  return `headers received, ${formatBytes(call.bytes)} of body read`
+}
+
+function describeInFlight(call: InFlightCall, nowMs: number): string {
+  return `${call.label} (${((nowMs - call.startMs) / 1000).toFixed(1)}s, ${describeProgress(call)})`
+}
+
+function resolveTimeoutMs(explicit: number | undefined, scope: IoScope | undefined): number | undefined {
+  if (explicit !== undefined) {
+    if (typeof explicit !== 'number' || !Number.isFinite(explicit) || explicit <= 0) {
+      throw new TypeError(`timeout must be a positive number of milliseconds, got ${String(explicit)}`)
+    }
+    return explicit
+  }
+  const remaining = scope?.remainingMs()
+  return remaining === undefined ? undefined : Math.max(1, remaining)
+}
+
+/** Combines the run's abort signal, a per-request timeout signal and any caller-supplied signal. */
+function combineSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const present = signals.filter((s): s is AbortSignal => s !== undefined)
+  if (present.length === 0) return undefined
+  if (present.length === 1) return present[0]
+  return AbortSignal.any(present)
+}
+
+function runAbortedMessage(scope: IoScope | undefined): string | null {
+  if (scope?.runSignal?.aborted !== true) return null
+  const reason: unknown = scope.runSignal.reason
+  return reason instanceof Error ? reason.message : 'test run aborted'
+}
+
+type HttpRequestErrorCode = 'HTTP_FETCH_ERROR' | 'HTTP_REDIRECT_ERROR' | 'HTTP_TIMEOUT_ERROR'
+
 export class HttpRequestError extends Error {
-  readonly code: 'HTTP_FETCH_ERROR' | 'HTTP_REDIRECT_ERROR'
+  readonly code: HttpRequestErrorCode
   readonly url: string
   readonly method: string
 
   constructor(
-    code: 'HTTP_FETCH_ERROR' | 'HTTP_REDIRECT_ERROR',
+    code: HttpRequestErrorCode,
     message: string,
     url: string,
     method: string,
@@ -160,7 +239,7 @@ export class FtpRequestError extends Error {
 }
 
 export class S3RequestError extends Error {
-  readonly code: 'S3_SIGNING_ERROR' | 'S3_FETCH_ERROR' | 'S3_SIZE_LIMIT_ERROR'
+  readonly code: 'S3_SIGNING_ERROR' | 'S3_FETCH_ERROR' | 'S3_SIZE_LIMIT_ERROR' | 'S3_TIMEOUT_ERROR'
   readonly url: string
   readonly method: string
 
@@ -188,16 +267,32 @@ function isRedirectLimitError(err: unknown): boolean {
   return err.message.toLowerCase().includes('redirect count exceeded')
 }
 
-async function doFetch(
-  url: string,
-  init: RequestInit,
-  onHttpComplete?: BuildCtxOptions['onHttpComplete']
-): Promise<HttpResponse> {
+interface FetchOptions {
+  scope?: IoScope | undefined
+  /** Per-request limit (headers + full body), already resolved by the caller. */
+  timeoutMs?: number | undefined
+  onHttpComplete?: BuildCtxOptions['onHttpComplete'] | undefined
+}
+
+async function doFetch(url: string, init: RequestInit, options: FetchOptions = {}): Promise<HttpResponse> {
+  const { scope, timeoutMs, onHttpComplete } = options
   const method = init.method ?? 'GET'
   const startMs = Date.now()
+  const call = scope?.track(`${method} ${truncateUrl(url)}`)
+  const timeoutSignal = timeoutMs === undefined ? undefined : AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)))
+  const signal = combineSignals([scope?.runSignal, timeoutSignal, init.signal ?? undefined])
   try {
-    const res = await fetch(url, init)
-    const body = await res.text()
+    const res = await fetch(url, { ...init, signal: signal ?? null })
+    if (call) call.headersReceived = true
+    // Read the body as a stream (not res.text()) so a timeout can report how far the download got.
+    const chunks: Uint8Array[] = []
+    if (res.body) {
+      for await (const chunk of res.body) {
+        chunks.push(chunk)
+        if (call) call.bytes += chunk.byteLength
+      }
+    }
+    const body = new TextDecoder().decode(Buffer.concat(chunks))
     const headers: Record<string, string> = {}
     res.headers.forEach((value, key) => {
       headers[key] = value
@@ -211,24 +306,63 @@ async function doFetch(
     })
     return { status: res.status, body, headers, json: () => JSON.parse(body) }
   } catch (err) {
-    if (isRedirectLimitError(err)) {
-      throw new HttpRequestError(
-        'HTTP_REDIRECT_ERROR',
-        `Redirect limit exceeded for ${method} ${url}. This endpoint may redirect in a loop; use { redirect: "manual" } to handle 3xx responses explicitly.`,
-        url,
-        method,
-        { cause: err }
-      )
-    }
-    const message = err instanceof Error ? err.message : String(err)
-    throw new HttpRequestError(
+    const httpErr = toHttpRequestError(err, url, method, timeoutMs, timeoutSignal, scope, call)
+    scope?.onIoError?.({
+      protocol: 'http',
+      op: method,
+      url: truncateUrl(url),
+      code: httpErr.code,
+      duration_ms: Date.now() - startMs,
+      message: httpErr.message,
+    })
+    throw httpErr
+  } finally {
+    if (call) scope?.untrack(call)
+  }
+}
+
+function toHttpRequestError(
+  err: unknown,
+  url: string,
+  method: string,
+  timeoutMs: number | undefined,
+  timeoutSignal: AbortSignal | undefined,
+  scope: IoScope | undefined,
+  call: InFlightCall | undefined
+): HttpRequestError {
+  const cause = err instanceof Error ? err : undefined
+  const runAborted = runAbortedMessage(scope)
+  if (runAborted != null) {
+    return new HttpRequestError(
       'HTTP_FETCH_ERROR',
-      `HTTP request failed for ${method} ${url}: ${message}`,
+      `HTTP request aborted for ${method} ${url}: ${runAborted} (${describeProgress(call)})`,
       url,
       method,
-      { cause: err instanceof Error ? err : undefined }
+      { cause }
     )
   }
+  if (timeoutSignal?.aborted === true) {
+    return new HttpRequestError(
+      'HTTP_TIMEOUT_ERROR',
+      `HTTP request timed out for ${method} ${url} after ${timeoutMs}ms (${describeProgress(call)})`,
+      url,
+      method,
+      { cause }
+    )
+  }
+  if (isRedirectLimitError(err)) {
+    return new HttpRequestError(
+      'HTTP_REDIRECT_ERROR',
+      `Redirect limit exceeded for ${method} ${url}. This endpoint may redirect in a loop; use { redirect: "manual" } to handle 3xx responses explicitly.`,
+      url,
+      method,
+      { cause }
+    )
+  }
+  const message = err instanceof Error ? err.message : String(err)
+  return new HttpRequestError('HTTP_FETCH_ERROR', `HTTP request failed for ${method} ${url}: ${message}`, url, method, {
+    cause,
+  })
 }
 
 function sha256Hex(data: string): string {
@@ -340,15 +474,68 @@ function signS3OrThrow(method: 'GET' | 'HEAD', url: string, s3Options: S3Options
   }
 }
 
+function toS3RequestError(
+  err: unknown,
+  url: string,
+  method: 'GET' | 'HEAD',
+  timeoutMs: number | undefined,
+  timeoutSignal: AbortSignal | undefined,
+  scope: IoScope | undefined,
+  call: InFlightCall | undefined
+): S3RequestError {
+  if (err instanceof S3RequestError) return err
+  const cause = err instanceof Error ? err : undefined
+  const runAborted = runAbortedMessage(scope)
+  if (runAborted != null) {
+    return new S3RequestError(
+      'S3_FETCH_ERROR',
+      `S3 request aborted for ${method} ${url}: ${runAborted} (${describeProgress(call)})`,
+      url,
+      method,
+      { cause }
+    )
+  }
+  const timedOut =
+    timeoutSignal?.aborted === true || (err instanceof HttpRequestError && err.code === 'HTTP_TIMEOUT_ERROR')
+  if (timedOut) {
+    return new S3RequestError(
+      'S3_TIMEOUT_ERROR',
+      `S3 request timed out for ${method} ${url} after ${timeoutMs}ms (${describeProgress(call)})`,
+      url,
+      method,
+      { cause }
+    )
+  }
+  const message = err instanceof Error ? err.message : String(err)
+  return new S3RequestError('S3_FETCH_ERROR', `S3 request failed for ${method} ${url}: ${message}`, url, method, {
+    cause,
+  })
+}
+
+function reportS3Error(scope: IoScope | undefined, err: S3RequestError, startMs: number): void {
+  scope?.onIoError?.({
+    protocol: 's3',
+    op: err.method,
+    url: truncateUrl(err.url),
+    code: err.code,
+    duration_ms: Date.now() - startMs,
+    message: err.message,
+  })
+}
+
 async function doS3Head(
   url: string,
   s3Options: S3Options,
+  scope: IoScope | undefined,
   onS3Complete?: BuildCtxOptions['onS3Complete']
 ): Promise<HttpResponse> {
   const signedHeaders = signS3OrThrow('HEAD', url, s3Options)
+  const timeoutMs = resolveTimeoutMs(s3Options.timeout, scope)
   const startMs = Date.now()
   try {
-    const response = await doFetch(url, { method: 'HEAD', headers: signedHeaders })
+    // doFetch tracks the call and enforces the timeout; S3 reports its own error event below.
+    const fetchScope = scope && { ...scope, onIoError: undefined }
+    const response = await doFetch(url, { method: 'HEAD', headers: signedHeaders }, { scope: fetchScope, timeoutMs })
     onS3Complete?.({
       method: 'HEAD',
       url: truncateUrl(url),
@@ -358,14 +545,9 @@ async function doS3Head(
     })
     return response
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw new S3RequestError(
-      'S3_FETCH_ERROR',
-      `S3 request failed for HEAD ${url}: ${message}`,
-      url,
-      'HEAD',
-      { cause: err instanceof Error ? err : undefined }
-    )
+    const s3Err = toS3RequestError(err, url, 'HEAD', timeoutMs, undefined, scope, undefined)
+    reportS3Error(scope, s3Err, startMs)
+    throw s3Err
   }
 }
 
@@ -375,18 +557,24 @@ async function doS3Head(
 async function doS3Get(
   url: string,
   s3Options: S3Options,
+  scope: IoScope | undefined,
   onS3Complete?: BuildCtxOptions['onS3Complete']
 ): Promise<HttpResponse> {
   const signedHeaders = signS3OrThrow('GET', url, s3Options)
+  const timeoutMs = resolveTimeoutMs(s3Options.timeout, scope)
 
   const startMs = Date.now()
   const tempPath = join(FTP_TEMP_DIR, `${nanoid()}.tmp`)
   const controller = new AbortController()
+  const timeoutSignal = timeoutMs === undefined ? undefined : AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)))
+  const signal = combineSignals([controller.signal, scope?.runSignal, timeoutSignal])
+  const call = scope?.track(`S3 GET ${truncateUrl(url)}`)
   let sizeLimitExceeded = false
 
   try {
     await mkdir(FTP_TEMP_DIR, { recursive: true })
-    const res = await fetch(url, { method: 'GET', headers: signedHeaders, signal: controller.signal })
+    const res = await fetch(url, { method: 'GET', headers: signedHeaders, signal: signal ?? null })
+    if (call) call.headersReceived = true
     const headers: Record<string, string> = {}
     res.headers.forEach((value, key) => {
       headers[key] = value
@@ -398,6 +586,7 @@ async function doS3Get(
       if (res.body) {
         for await (const chunk of res.body) {
           bytesWritten += chunk.length
+          if (call) call.bytes = bytesWritten
           if (bytesWritten > FTP_MAX_DOWNLOAD_BYTES) {
             sizeLimitExceeded = true
             controller.abort()
@@ -430,16 +619,11 @@ async function doS3Get(
     })
     return { status: res.status, body, headers, json: () => JSON.parse(body) }
   } catch (err) {
-    if (err instanceof S3RequestError) throw err
-    const message = err instanceof Error ? err.message : String(err)
-    throw new S3RequestError(
-      'S3_FETCH_ERROR',
-      `S3 request failed for GET ${url}: ${message}`,
-      url,
-      'GET',
-      { cause: err instanceof Error ? err : undefined }
-    )
+    const s3Err = toS3RequestError(err, url, 'GET', timeoutMs, timeoutSignal, scope, call)
+    reportS3Error(scope, s3Err, startMs)
+    throw s3Err
   } finally {
+    if (call) scope?.untrack(call)
     await unlink(tempPath).catch(() => {})
   }
 }
@@ -465,58 +649,100 @@ function parseFtpUrl(url: string, ftpOptions?: FtpOptions): ParsedFtpUrl {
   }
 }
 
+interface FtpConnection {
+  client: FtpClient
+  path: string
+  host: string
+  /** Detaches the run-abort listener; call once the operation is over. */
+  release: () => void
+}
+
 async function connectFtp(
   url: string,
   ftpOptions: FtpOptions | undefined,
-  testTimeoutMs: number | undefined
-): Promise<{ client: FtpClient; path: string; host: string }> {
+  testTimeoutMs: number | undefined,
+  scope: IoScope | undefined
+): Promise<FtpConnection> {
+  const startMs = Date.now()
   const { host, port, user, password, secure, path } = parseFtpUrl(url, ftpOptions)
+  const runAbortedBefore = runAbortedMessage(scope)
+  if (runAbortedBefore != null) {
+    throw new FtpRequestError('FTP_CONNECT_ERROR', `FTP connection aborted for ${host}:${port}: ${runAbortedBefore}`, url, path)
+  }
   const client = new FtpClient(ftpOptions?.timeout ?? testTimeoutMs ?? 10_000)
+  // basic-ftp takes no AbortSignal; closing the client rejects whatever operation is pending.
+  const onRunAbort = (): void => client.close()
+  scope?.runSignal?.addEventListener('abort', onRunAbort, { once: true })
+  const release = (): void => scope?.runSignal?.removeEventListener('abort', onRunAbort)
   try {
     await client.access({ host, port, user, password, secure })
   } catch (err) {
+    release()
     client.close()
-    const message = err instanceof Error ? err.message : String(err)
-    throw new FtpRequestError(
+    const message = runAbortedMessage(scope) ?? (err instanceof Error ? err.message : String(err))
+    const ftpErr = new FtpRequestError(
       'FTP_CONNECT_ERROR',
       `FTP connection failed for ${host}:${port}: ${message}`,
       url,
       path,
       { cause: err instanceof Error ? err : undefined }
     )
+    reportFtpError(scope, 'connect', ftpErr, startMs)
+    throw ftpErr
   }
-  return { client, path, host }
+  return { client, path, host, release }
+}
+
+function reportFtpError(scope: IoScope | undefined, op: string, err: FtpRequestError, startMs: number): void {
+  scope?.onIoError?.({
+    protocol: 'ftp',
+    op,
+    url: truncateUrl(err.url),
+    code: err.code,
+    duration_ms: Date.now() - startMs,
+    message: err.message,
+  })
 }
 
 async function doFtpList(
   url: string,
   ftpOptions: FtpOptions | undefined,
   testTimeoutMs: number | undefined,
+  scope: IoScope | undefined,
   onFtpComplete?: BuildCtxOptions['onFtpComplete']
 ): Promise<FtpEntry[]> {
   const startMs = Date.now()
-  const { client, path, host } = await connectFtp(url, ftpOptions, testTimeoutMs)
+  const call = scope?.track(`FTP LIST ${truncateUrl(url)}`)
   try {
-    const list = await client.list(path)
-    const entries: FtpEntry[] = list.map((f) => ({
-      name: f.name,
-      type: f.isDirectory ? 'directory' : f.isFile ? 'file' : 'unknown',
-      size: f.size,
-      modifiedAt: f.modifiedAt ?? null,
-    }))
-    onFtpComplete?.({ op: 'ls', host, path, duration_ms: Date.now() - startMs })
-    return entries
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw new FtpRequestError(
-      'FTP_LIST_ERROR',
-      `FTP list failed for ${path} on ${host}: ${message}`,
-      url,
-      path,
-      { cause: err instanceof Error ? err : undefined }
-    )
+    const { client, path, host, release } = await connectFtp(url, ftpOptions, testTimeoutMs, scope)
+    if (call) call.headersReceived = true
+    try {
+      const list = await client.list(path)
+      const entries: FtpEntry[] = list.map((f) => ({
+        name: f.name,
+        type: f.isDirectory ? 'directory' : f.isFile ? 'file' : 'unknown',
+        size: f.size,
+        modifiedAt: f.modifiedAt ?? null,
+      }))
+      onFtpComplete?.({ op: 'ls', host, path, duration_ms: Date.now() - startMs })
+      return entries
+    } catch (err) {
+      const message = runAbortedMessage(scope) ?? (err instanceof Error ? err.message : String(err))
+      const ftpErr = new FtpRequestError(
+        'FTP_LIST_ERROR',
+        `FTP list failed for ${path} on ${host}: ${message}`,
+        url,
+        path,
+        { cause: err instanceof Error ? err : undefined }
+      )
+      reportFtpError(scope, 'ls', ftpErr, startMs)
+      throw ftpErr
+    } finally {
+      release()
+      client.close()
+    }
   } finally {
-    client.close()
+    if (call) scope?.untrack(call)
   }
 }
 
@@ -524,46 +750,55 @@ async function doFtpGet(
   url: string,
   ftpOptions: FtpOptions | undefined,
   testTimeoutMs: number | undefined,
+  scope: IoScope | undefined,
   onFtpComplete?: BuildCtxOptions['onFtpComplete']
 ): Promise<FtpDownloadResult> {
   const startMs = Date.now()
-  const { client, path, host } = await connectFtp(url, ftpOptions, testTimeoutMs)
-  const tempPath = join(FTP_TEMP_DIR, `${nanoid()}.tmp`)
-  let sizeLimitExceeded = false
+  const call = scope?.track(`FTP GET ${truncateUrl(url)}`)
   try {
-    await mkdir(FTP_TEMP_DIR, { recursive: true })
-    client.trackProgress((info) => {
-      if (info.bytes > FTP_MAX_DOWNLOAD_BYTES) {
-        sizeLimitExceeded = true
-        client.close()
-      }
-    })
-    await client.downloadTo(tempPath, path)
-    const buf = await readFile(tempPath)
-    const body = buf.toString('utf-8')
-    onFtpComplete?.({ op: 'get', host, path, duration_ms: Date.now() - startMs, size: buf.length })
-    return { body, size: buf.length }
-  } catch (err) {
-    if (sizeLimitExceeded) {
-      throw new FtpRequestError(
-        'FTP_SIZE_LIMIT_ERROR',
-        `FTP download exceeded max size of ${FTP_MAX_DOWNLOAD_BYTES} bytes for ${path} on ${host}`,
-        url,
-        path
-      )
+    const { client, path, host, release } = await connectFtp(url, ftpOptions, testTimeoutMs, scope)
+    if (call) call.headersReceived = true
+    const tempPath = join(FTP_TEMP_DIR, `${nanoid()}.tmp`)
+    let sizeLimitExceeded = false
+    try {
+      await mkdir(FTP_TEMP_DIR, { recursive: true })
+      client.trackProgress((info) => {
+        if (call) call.bytes = info.bytes
+        if (info.bytes > FTP_MAX_DOWNLOAD_BYTES) {
+          sizeLimitExceeded = true
+          client.close()
+        }
+      })
+      await client.downloadTo(tempPath, path)
+      const buf = await readFile(tempPath)
+      const body = buf.toString('utf-8')
+      onFtpComplete?.({ op: 'get', host, path, duration_ms: Date.now() - startMs, size: buf.length })
+      return { body, size: buf.length }
+    } catch (err) {
+      const ftpErr = sizeLimitExceeded
+        ? new FtpRequestError(
+            'FTP_SIZE_LIMIT_ERROR',
+            `FTP download exceeded max size of ${FTP_MAX_DOWNLOAD_BYTES} bytes for ${path} on ${host}`,
+            url,
+            path
+          )
+        : new FtpRequestError(
+            'FTP_DOWNLOAD_ERROR',
+            `FTP download failed for ${path} on ${host}: ${runAbortedMessage(scope) ?? (err instanceof Error ? err.message : String(err))}`,
+            url,
+            path,
+            { cause: err instanceof Error ? err : undefined }
+          )
+      reportFtpError(scope, 'get', ftpErr, startMs)
+      throw ftpErr
+    } finally {
+      release()
+      client.trackProgress(undefined)
+      client.close()
+      await unlink(tempPath).catch(() => {})
     }
-    const message = err instanceof Error ? err.message : String(err)
-    throw new FtpRequestError(
-      'FTP_DOWNLOAD_ERROR',
-      `FTP download failed for ${path} on ${host}: ${message}`,
-      url,
-      path,
-      { cause: err instanceof Error ? err : undefined }
-    )
   } finally {
-    client.trackProgress(undefined)
-    client.close()
-    await unlink(tempPath).catch(() => {})
+    if (call) scope?.untrack(call)
   }
 }
 
@@ -575,6 +810,22 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
   const onFtpComplete = options?.onFtpComplete
   const onS3Complete = options?.onS3Complete
   const testTimeoutMs = options?.testTimeoutMs
+  const ctxStartMs = Date.now()
+  const inFlight = new Set<InFlightCall>()
+
+  const scope: IoScope = {
+    runSignal: options?.signal,
+    remainingMs: () => (testTimeoutMs === undefined ? undefined : testTimeoutMs - (Date.now() - ctxStartMs)),
+    track(label) {
+      const call: InFlightCall = { label, startMs: Date.now(), headersReceived: false, bytes: 0 }
+      inFlight.add(call)
+      return call
+    },
+    untrack(call) {
+      inFlight.delete(call)
+    },
+    onIoError: options?.onIoError,
+  }
 
   const ctx: TestContext = {
     http: {
@@ -582,7 +833,8 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
         const init: RequestInit = { method: 'GET' }
         if (httpOptions?.headers) init.headers = httpOptions.headers
         if (httpOptions?.redirect) init.redirect = httpOptions.redirect
-        return doFetch(url, init, onHttpComplete)
+        const timeoutMs = resolveTimeoutMs(httpOptions?.timeout, scope)
+        return doFetch(url, init, { scope, timeoutMs, onHttpComplete })
       },
       async post(url, body, httpOptions) {
         const init: RequestInit = {
@@ -591,23 +843,24 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
           body: JSON.stringify(body),
         }
         if (httpOptions?.redirect) init.redirect = httpOptions.redirect
-        return doFetch(url, init, onHttpComplete)
+        const timeoutMs = resolveTimeoutMs(httpOptions?.timeout, scope)
+        return doFetch(url, init, { scope, timeoutMs, onHttpComplete })
       },
     },
     ftp: {
       async ls(url, ftpOptions) {
-        return doFtpList(url, ftpOptions, testTimeoutMs, onFtpComplete)
+        return doFtpList(url, ftpOptions, testTimeoutMs, scope, onFtpComplete)
       },
       async get(url, ftpOptions) {
-        return doFtpGet(url, ftpOptions, testTimeoutMs, onFtpComplete)
+        return doFtpGet(url, ftpOptions, testTimeoutMs, scope, onFtpComplete)
       },
     },
     s3: {
       async get(url, s3Options) {
-        return doS3Get(url, s3Options, onS3Complete)
+        return doS3Get(url, s3Options, scope, onS3Complete)
       },
       async head(url, s3Options) {
-        return doS3Head(url, s3Options, onS3Complete)
+        return doS3Head(url, s3Options, scope, onS3Complete)
       },
     },
     assert(name, value, message) {
@@ -636,5 +889,9 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
     getLogs: () => logs,
     getAssertions: () => assertions,
     getWarnings: () => warnings,
+    getInFlight: () => {
+      const nowMs = Date.now()
+      return [...inFlight].map((call) => describeInFlight(call, nowMs))
+    },
   }
 }

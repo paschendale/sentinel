@@ -49,8 +49,11 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   let errorMessage: string | null = null
 
   const fn = getCompiledFn(test.id, test.code)
-  const { ctx, getAssertions, getWarnings } = buildCtx({
+  // Aborted when the run times out, so pending ctx I/O is cancelled instead of outliving the run.
+  const runAbort = new AbortController()
+  const { ctx, getAssertions, getWarnings, getInFlight } = buildCtx({
     testTimeoutMs: test.timeout_ms,
+    signal: runAbort.signal,
     secrets: getSecretsSnapshot(),
     onLog: (message) => {
       runLog.info({ event: 'test.user_log' }, `[ctx.log] ${message}`)
@@ -68,6 +71,12 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
         `FTP ${info.op} ${info.host}${info.path} (${info.duration_ms}ms${info.size !== undefined ? `, ${info.size} bytes` : ''})`
       )
     },
+    onIoError: (info) => {
+      runLog.warn(
+        { event: 'test.io_error', ...info },
+        `${info.protocol.toUpperCase()} ${info.op} ${info.url} failed: ${info.code} (${info.duration_ms}ms)`
+      )
+    },
     onS3Complete: (info) => {
       runLog.info(
         { event: 'test.s3', ...info },
@@ -76,9 +85,19 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
     },
   })
 
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`Timed out after ${test.timeout_ms}ms`)), test.timeout_ms)
-  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // Describe pending calls before aborting them — the abort settles them.
+      const inFlight = getInFlight()
+      runAbort.abort(new Error(`test run timed out after ${test.timeout_ms}ms`))
+      reject(
+        new Error(
+          `Timed out after ${test.timeout_ms}ms` + (inFlight.length > 0 ? `; in flight: ${inFlight.join('; ')}` : '')
+        )
+      )
+    }, test.timeout_ms)
+  })
 
   try {
     await Promise.race([
@@ -93,6 +112,8 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
       status = 'fail'
     }
     errorMessage = msg
+  } finally {
+    clearTimeout(timer)
   }
 
   if (status === 'success' && getWarnings().length > 0) {
