@@ -197,7 +197,7 @@ Supported methods: `get`, `post`, `put`, `delete`. All return `{ status, headers
 `ctx.http` options:
 
 - `headers` — request headers
-- `timeout` — request timeout in milliseconds
+- `timeout` — request limit in milliseconds, covering the response headers and the full body. Exceeding it throws `HttpRequestError` with code `HTTP_TIMEOUT_ERROR`, saying whether headers arrived and how much of the body was read. Without it, the request is bounded by the test's `timeout_ms`, and a run that hits that deadline is recorded as `timeout` with the pending call named in its error message
 - `redirect` — redirect policy: `'follow'` (default), `'manual'`, or `'error'`
 
 **Redirect handling:**
@@ -263,8 +263,9 @@ ctx.assert('object metadata reachable', head.status === 200)
 - `region` — required, must match the bucket's actual region (used in the SigV4 credential scope)
 - `sessionToken` — optional, for temporary/STS credentials
 - `headers` — optional extra headers (e.g. `Range: bytes=0-9`); these are included in the signature
+- `timeout` — optional request limit in milliseconds, same rule as `ctx.http` (exceeding it throws `S3_TIMEOUT_ERROR`)
 
-Like any other credential, store `accessKey`/`secretKey` as [secrets](#secrets) and read them via `ctx.secrets.NAME` rather than hardcoding them in test code, exactly as shown above. `url` can be virtual-hosted-style, path-style, or any S3-compatible endpoint (MinIO, Cloudflare R2, etc.) — signing only depends on the request's host, path, and query string, so nothing AWS-specific is required beyond the four SigV4 inputs. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL), `code: 'S3_FETCH_ERROR'` (the request itself failed), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (see below).
+Like any other credential, store `accessKey`/`secretKey` as [secrets](#secrets) and read them via `ctx.secrets.NAME` rather than hardcoding them in test code, exactly as shown above. `url` can be virtual-hosted-style, path-style, or any S3-compatible endpoint (MinIO, Cloudflare R2, etc.) — signing only depends on the request's host, path, and query string, so nothing AWS-specific is required beyond the four SigV4 inputs. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL), `code: 'S3_FETCH_ERROR'` (the request itself failed), `code: 'S3_TIMEOUT_ERROR'` (over its time limit), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (see below).
 
 **Downloads are never persisted.** Like `ctx.ftp.get`, `ctx.s3.get` streams the object into the same server-managed temp directory (`FTP_TEMP_DIR`), reads it into memory, and deletes it before the call returns — your test only ever sees the string `body`, never a path, and nothing is left behind on disk. Downloads larger than `FTP_MAX_DOWNLOAD_BYTES` (default 5MB, shared with `ctx.ftp.get`) abort the request mid-transfer with an `S3_SIZE_LIMIT_ERROR`. The same periodic background sweep that backstops `ctx.ftp.get` also covers `ctx.s3.get`, since both write into the same directory — orphaned temp files from a crash or timed-out run are removed after 15 minutes either way. `ctx.s3.head` never downloads a body, so it has nothing to clean up.
 
@@ -456,7 +457,7 @@ When creating a test, configure:
 |---|---|---|
 | `schedule_ms` | How often the test runs, in milliseconds | 60000 (1 min) |
 | `timeout_ms` | Max execution time before the run is marked as `timeout`. No flat cap — but must be at most 80% of `schedule_ms`, so a slow run can never overlap with the next scheduled run of the same test | 5000 (5 s) |
-| `retries` | Number of retry attempts on failure before recording a fail | 0 |
+| `retries` | Extra attempts for a scheduled run that fails or times out, before recording a fail. A retry only starts if a full `timeout_ms` attempt still fits within 80% of `schedule_ms`. Manual runs make one attempt | 0 |
 | `failure_threshold` | Consecutive failures before a notification is sent | 3 |
 | `cooldown_ms` | Minimum time between repeat failure notifications | 300000 (5 min) |
 

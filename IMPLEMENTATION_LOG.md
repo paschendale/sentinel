@@ -991,3 +991,19 @@ AI agents must append an entry here after completing any feature from PROJECT.md
 **Decisions:** Used `ServerOptions.instructions` (confirmed present in `@modelcontextprotocol/sdk@1.30.0`'s `server/index.d.ts`) rather than an MCP resource, since most clients surface `instructions` once at session init with no extra round-trip — a resource would only help agents that already know to look for one, which is the same discovery gap being fixed. Kept tool-level descriptions as the second layer for capability details too long for the top-level primer.
 
 **Deferred:** No MCP resource (e.g. `sentinel://capabilities`) added yet for a deeper ctx API reference (protocol error codes, signatures) — `instructions` + tightened tool descriptions were judged sufficient for now; revisit if agents still miss capabilities in practice.
+
+## 2026-09-25 · Executor · Per-request timeouts, run abort, retries
+
+**What was built:** `ctx.http` and `ctx.s3` enforce a per-request limit (`options.timeout`) over headers and the full body; without it the run deadline bounds the request, and throw `HTTP_TIMEOUT_ERROR` / `S3_TIMEOUT_ERROR` saying whether headers arrived and how much body was read. A run timeout now aborts every pending `ctx.http`/`ctx.s3`/`ctx.ftp` call and names them in `error_message` (`; in flight: GET <url> (41.2s, headers received, 180.0 KB of body read)`). `tests.retries` is applied to scheduled runs.
+
+**Files changed:**
+- `apps/api/src/executor/ctx.ts` — per-run `IoScope` (run signal, remaining budget, in-flight set, `onIoError`); `doFetch` streams the body and combines run/timeout signals with `AbortSignal.any`; S3 and FTP honour the run signal; new `getInFlight()` on the ctx bundle
+- `apps/api/src/executor/run.ts` — per-run `AbortController`, timer cleared on settle, in-flight calls in the timeout message, `test.io_error` log event, new `runTestWithRetries`
+- `apps/api/src/scheduler/index.ts` — scheduled runs go through `runTestWithRetries`
+- `packages/shared/src/schemas.ts` — exported `TIMEOUT_TO_SCHEDULE_MAX_RATIO`
+- `apps/api/src/executor/ctx.timeout.test.ts`, `apps/api/src/executor/run.test.ts` (new) — real undici against a local server
+- `docs/DOMAINS.md`, `docs/ARCHITECTURE.md`, `README.md`, `apps/api/src/routes/mcp.ts`, `apps/api/src/mcp/tools.ts`
+
+**Decisions:** `HttpOptions.timeout` was documented but never read, so a stalled body waited on undici's 300 s `bodyTimeout` and kept its socket after the run had already been marked `timeout`. The fix is generic, not tied to one instance: every request gets a bounded lifetime, and nothing outlives its run. Bodies are read as streams instead of `res.text()` only to report progress on timeout; decoding uses `TextDecoder` so BOM handling matches `res.text()`. FTP has no AbortSignal API, so a run abort closes the client. Inside a run, a request without `timeout` gets no timer of its own: a default equal to the remaining budget fires at the same instant as the run timer, and whichever won decided between `fail` and `timeout`. The remaining-budget default is kept only for a ctx built without a run signal. Retries: each attempt gets the full `timeout_ms`, but a retry starts only if it still fits within `TIMEOUT_TO_SCHEDULE_MAX_RATIO` of `schedule_ms` from the first attempt, which keeps the no-overlap invariant without a schema change or a new `CHECK`. A pass on retry records as `success` (matching the README's "before recording a fail"); the recovery is logged as `test.retry.recovered`. Manual runs (run-now, SSE, MCP) make one attempt so they report a single execution.
+
+**Deferred:** No per-attempt rows or attempt count column on `test_runs`; attempt history is only in logs and the `[all <n> attempts failed]` suffix. No retry backoff. User JS itself still cannot be killed after a timeout — only its I/O is cancelled.

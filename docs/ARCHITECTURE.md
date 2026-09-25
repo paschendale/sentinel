@@ -57,7 +57,9 @@ pnpm workspaces manage the monorepo.
 
 ### Test Execution Engine
 - User test code compiled **once on save** via `new Function('ctx', code)` and cached in memory
-- Execution: `Promise.race([compiledFn(ctx), timeout(ms)])` — hard kill after timeout
+- Execution: `Promise.race([compiledFn(ctx), timeout(ms)])`. On timeout the run's `AbortController` is aborted, cancelling every pending `ctx.http`/`ctx.s3`/`ctx.ftp` call, and the pending calls are named in `error_message`. The timer is cleared when the run settles
+- Per-request limits: `ctx.http`/`ctx.s3` combine the run signal with `AbortSignal.timeout(options.timeout)` via `AbortSignal.any`; without `options.timeout` only the run signal applies, so a request never races the run's own deadline, and read bodies as streams so a timeout reports its progress
+- Retries: the scheduler calls `runTestWithRetries`, which re-runs a failed or timed-out attempt up to `retries` times while a full attempt still fits within 80% of `schedule_ms`; one result is recorded
 - `ctx` object exposes only: `ctx.http`, `ctx.ftp`, `ctx.s3`, `ctx.secrets`, `ctx.assert`, `ctx.warn`, `ctx.log`, `ctx.now()`
 - `ctx.s3.get`/`ctx.s3.head` sign requests with AWS Signature Version 4, hand-rolled via `node:crypto` — no AWS SDK dependency, works against any S3-compatible endpoint since signing only depends on the request URL
 - No filesystem access from user code — `ctx.ftp.get` and `ctx.s3.get` both download to the same server-managed temp file mechanism internally (same directory, same size cap, same periodic sweep), but user code only ever sees the returned string body, never a path

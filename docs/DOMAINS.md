@@ -12,7 +12,7 @@ The central entity. Represents a user-defined monitoring check.
 | `code` | `string` | JavaScript function body — must return boolean |
 | `schedule_ms` | `number` | Run interval in milliseconds (minimum: 30,000) |
 | `timeout_ms` | `number` | Max execution time per run (minimum: 1,000; must be ≤ 80% of `schedule_ms`) |
-| `retries` | `number` | Reserved retry budget per check (currently not applied by executor; each scheduled run records a single final outcome) |
+| `retries` | `number` | Extra attempts (0–5) for a scheduled run that fails or times out. One run is recorded — the last attempt's. A retry only starts if a full `timeout_ms` attempt still fits within 80% of `schedule_ms`, measured from the first attempt. Manual runs (run-now, SSE, MCP `run_test_now`) make a single attempt |
 | `uses_browser` | `boolean` | Whether this test uses Playwright (opt-in, default false) |
 | `enabled` | `boolean` | Whether the scheduler should run this test |
 | `created_at` | `timestamp` | Creation time |
@@ -42,7 +42,8 @@ A single execution result for a test.
 **Invariants:**
 - `finished_at >= started_at`
 - `status = 'warn'` when the test called `ctx.warn()` without throwing — `error_message` holds the joined warning messages
-- `status = 'timeout'` when execution exceeded `test.timeout_ms`
+- `status = 'timeout'` when execution exceeded `test.timeout_ms`; `error_message` is `Timed out after <ms>ms`, followed by `; in flight: <call> (<elapsed>s, <progress>)` for every ctx I/O call still pending at that moment. Those calls are aborted when the run times out
+- When every attempt of a retried run fails, `error_message` ends with `[all <n> attempts failed]`; a run that passes on a retry records as `success`
 - Raw runs are retained for 7 days by default (`RAW_RETENTION_DAYS`) and pruned daily by timestamp cutoff in batches
 
 ---
@@ -214,7 +215,7 @@ interface HttpResponse {
 
 interface RequestOptions {
   headers?: Record<string, string>
-  timeout?: number
+  timeout?: number   // per-request limit, ms, covering headers and full body; without it the run's timeout_ms bounds the request
   redirect?: 'follow' | 'manual' | 'error'
 }
 
@@ -243,6 +244,7 @@ interface S3Options {
   region: string
   sessionToken?: string           // for temporary/STS credentials
   headers?: Record<string, string> // extra headers (e.g. Range) — included in the SigV4 signature
+  timeout?: number                 // per-request limit, ms, covering headers and full body; without it the run's timeout_ms bounds the request
 }
 ```
 
@@ -250,8 +252,9 @@ interface S3Options {
 - `ctx.assert(name, value, message?)` — records a named assertion; throws immediately on failure, failing the run
 - `ctx.warn(message)` — records a warning message and emits it to the run log; does **not** throw; if any warns were recorded when the test returns, status becomes `'warn'` and `error_message` holds all messages joined by `'; '`
 - `ctx.log(message)` — emits a message to the run log; has no effect on status
-- `ctx.http` routes through undici with the test's timeout enforced
+- `ctx.http` routes through undici. Each request is limited by `options.timeout`, covering the response headers and the full body. A request over its limit throws `HttpRequestError` with `code: 'HTTP_TIMEOUT_ERROR'`, and the message says whether headers had arrived and how much of the body was read. Other failures throw `code: 'HTTP_FETCH_ERROR'` or `'HTTP_REDIRECT_ERROR'`. Without `timeout`, the request is bounded by the run's `timeout_ms`: at the deadline it is aborted and the run records `timeout` with the call named in `error_message`. A non-positive `timeout` throws `TypeError`
+- When a run times out, every pending `ctx.http`, `ctx.s3` and `ctx.ftp` call is aborted (FTP by closing the connection), and later calls from the same run fail immediately
 - `ctx.ftp.ls`/`ctx.ftp.get` route through `basic-ftp`; `url` is a full `ftp://[user:pass@]host[:port]/path`. `get` downloads to a server-managed temp file (`FTP_TEMP_DIR`), reads it into `body`, and deletes it before returning — the file never outlives the call. Downloads are capped by `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) and aborted if exceeded. A periodic sweep job deletes any orphaned temp file older than `FTP_TEMP_MAX_AGE_MS` as a backstop for crash/timeout edge cases. User code never sees a file path — only the returned string body.
-- `ctx.s3.get`/`ctx.s3.head` sign the request with AWS Signature Version 4, hand-rolled with `node:crypto` (no AWS SDK — see Approved Dependencies) using the supplied `accessKey`/`secretKey`/`region` (and `sessionToken` if given). `url` is the full object URL — virtual-hosted-style (`https://bucket.s3.region.amazonaws.com/key`), path-style, or any S3-compatible endpoint (MinIO, R2, etc.) all work the same way since signing is derived entirely from the URL's host/path/query. `options.headers` (e.g. `Range`) are included in the signature. `ctx.s3.head` has no response body and routes through the same in-memory undici client as `ctx.http`. `ctx.s3.get` downloads through the *same* server-managed temp file mechanism as `ctx.ftp.get` — same directory (`FTP_TEMP_DIR`), same size cap (`FTP_MAX_DOWNLOAD_BYTES`), same periodic sweep backstop (`FTP_TEMP_MAX_AGE_MS`) — rather than buffering the object in memory; the file is deleted before returning, and user code never sees a path, only the returned string `body`. Both methods return the same `HttpResponse` shape as `ctx.http`. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL, thrown before any network call), `code: 'S3_FETCH_ERROR'` (the underlying request failed), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (download exceeded `FTP_MAX_DOWNLOAD_BYTES`, aborted mid-transfer).
+- `ctx.s3.get`/`ctx.s3.head` sign the request with AWS Signature Version 4, hand-rolled with `node:crypto` (no AWS SDK — see Approved Dependencies) using the supplied `accessKey`/`secretKey`/`region` (and `sessionToken` if given). `url` is the full object URL — virtual-hosted-style (`https://bucket.s3.region.amazonaws.com/key`), path-style, or any S3-compatible endpoint (MinIO, R2, etc.) all work the same way since signing is derived entirely from the URL's host/path/query. `options.headers` (e.g. `Range`) are included in the signature. `ctx.s3.head` has no response body and routes through the same in-memory undici client as `ctx.http`. `ctx.s3.get` downloads through the *same* server-managed temp file mechanism as `ctx.ftp.get` — same directory (`FTP_TEMP_DIR`), same size cap (`FTP_MAX_DOWNLOAD_BYTES`), same periodic sweep backstop (`FTP_TEMP_MAX_AGE_MS`) — rather than buffering the object in memory; the file is deleted before returning, and user code never sees a path, only the returned string `body`. Both methods return the same `HttpResponse` shape as `ctx.http`. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL, thrown before any network call), `code: 'S3_FETCH_ERROR'` (the underlying request failed), `code: 'S3_TIMEOUT_ERROR'` (over `options.timeout`, same rule as `ctx.http`), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (download exceeded `FTP_MAX_DOWNLOAD_BYTES`, aborted mid-transfer).
 - `ctx.secrets` is a plain, frozen object (not a getter/method) mapping every `Secret.name` to its decrypted value — accessing a name that doesn't exist yields `undefined`, same as any missing object property; it never throws. It's backed by an in-memory cache (`apps/api/src/executor/secrets-cache.ts`) decrypted once at process startup and refreshed synchronously on every secret create/rotate/delete, so building `ctx` never queries the database or does crypto on the test-execution hot path.
 - No `ctx.fs`, no `ctx.exec`, no `require()`, no `import`

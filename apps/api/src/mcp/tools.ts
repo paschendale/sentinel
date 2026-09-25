@@ -75,7 +75,12 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
         'ctx.s3.get/head (S3-compatible object storage, SigV4-signed) — not just HTTP checks. Also ' +
         'available: ctx.assert(name, value, message?) for named assertions, ctx.warn(message) for a ' +
         'non-fatal warning status, ctx.log(message), ctx.now(), and ctx.secrets.NAME for values created ' +
-        'via create_secret. timeout_ms must be at most 80% of schedule_ms. Use tags to group related ' +
+        'via create_secret. timeout_ms must be at most 80% of schedule_ms. ctx.http/ctx.s3 accept a ' +
+        'per-request `timeout` (ms, headers + full body; without it timeout_ms bounds the request) and ' +
+        'throw HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR when it is exceeded — set one below timeout_ms on ' +
+        'each request so a stalled call fails with its own error instead of timing out the whole run. ' +
+        'retries (0–5) re-runs a failed or timed-out scheduled run and records only the last attempt. ' +
+        'Use tags to group related ' +
         'tests — tags drive both the dashboard summary and notification-channel routing.',
       inputSchema: TestFieldsSchema.shape,
     },
@@ -85,7 +90,10 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
   server.registerTool(
     'update_test',
     {
-      description: 'Update fields of a monitoring test (partial update; set enabled to pause/resume scheduling).',
+      description:
+        'Update fields of a monitoring test (partial update; set enabled to pause/resume scheduling). ' +
+        'Same ctx and timeout semantics as create_test: per-request `timeout` on ctx.http/ctx.s3, ' +
+        'retries re-run failed or timed-out scheduled runs.',
       inputSchema: { id: z.string(), ...UpdateTestSchema.shape },
     },
     async ({ id, ...fields }) => forward('PATCH', `/tests/${encodeURIComponent(id)}`, fields)
