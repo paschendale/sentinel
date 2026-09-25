@@ -1,3 +1,16 @@
+# [1.24.0](https://github.com/paschendale/sentinel/compare/v1.23.0...v1.24.0) (2026-09-25)
+
+
+### Bug Fixes
+
+* **executor:** enforce ctx request timeouts and abort in-flight I/O on run timeout ([3088524](https://github.com/paschendale/sentinel/commit/30885243f54a1ec51829dcbc255bd37b001485c2))
+* **executor:** leave requests without a timeout to the run deadline ([fd69280](https://github.com/paschendale/sentinel/commit/fd69280e9fdd277a2cf31bfd990d664a970e6660))
+
+
+### Features
+
+* **scheduler:** apply test retries to scheduled runs ([b446b03](https://github.com/paschendale/sentinel/commit/b446b038af3a4e2edef9a9cc5aca3d08f7572036))
+
 # [1.23.0](https://github.com/paschendale/sentinel/compare/v1.22.0...v1.23.0) (2026-08-31)
 
 
