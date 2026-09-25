@@ -18,7 +18,7 @@ export const TestFieldsSchema = z.object({
 // timeout_ms must leave room below schedule_ms (jitter + scheduling overhead) so the
 // scheduler never has two overlapping runs of the same test in flight — see the
 // per-test overlap guard in apps/api/src/scheduler/index.ts.
-const TIMEOUT_TO_SCHEDULE_MAX_RATIO = 0.8
+export const TIMEOUT_TO_SCHEDULE_MAX_RATIO = 0.8
 
 export const CreateTestSchema = TestFieldsSchema.refine(
   (d) => d.timeout_ms <= d.schedule_ms * TIMEOUT_TO_SCHEDULE_MAX_RATIO,

@@ -1,7 +1,7 @@
 import pLimit from 'p-limit'
 import type { Test } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
-import { runTest } from '../executor/run.js'
+import { runTestWithRetries } from '../executor/run.js'
 import { enqueue } from '../db/result-buffer.js'
 import { testEvents } from '../events.js'
 import { logger } from '../logger.js'
@@ -23,7 +23,7 @@ function runScheduled(test: Test, context: string): void {
     return
   }
   runningTestIds.add(test.id)
-  limit(() => runTest(test, { trigger: 'scheduler' }).then(enqueue))
+  limit(() => runTestWithRetries(test, { trigger: 'scheduler' }).then(enqueue))
     .catch((err: unknown) => {
       schedLog.error({ test_id: test.id, err }, `scheduler: ${context} run failed for test_id=${test.id}`)
     })

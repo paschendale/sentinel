@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { TIMEOUT_TO_SCHEDULE_MAX_RATIO } from '@sentinel/shared'
 import type { TestStatus } from '@sentinel/shared'
 import { logger } from '../logger.js'
 import { getCompiledFn } from './compile.js'
@@ -165,4 +166,57 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
     error_message: errorMessage,
     assertions: assertions.map((a) => ({ id: nanoid(), name: a.name, passed: a.passed, message: a.message ?? null })),
   }
+}
+
+interface RetryableTestInput extends TestInput {
+  retries: number
+  schedule_ms: number
+}
+
+function isFailure(status: TestStatus): boolean {
+  return status === 'fail' || status === 'timeout'
+}
+
+/**
+ * Runs a test and, while the attempt fails or times out, re-runs it up to `test.retries` more
+ * times. One result is recorded: the last attempt's. A retry only starts if a full attempt
+ * (timeout_ms) still fits inside TIMEOUT_TO_SCHEDULE_MAX_RATIO of schedule_ms, measured from
+ * the first attempt, so retries never make a run overlap the test's next scheduled run.
+ */
+export async function runTestWithRetries(test: RetryableTestInput, options: RunTestOptions): Promise<RunResult> {
+  const startMs = Date.now()
+  const maxTotalMs = test.schedule_ms * TIMEOUT_TO_SCHEDULE_MAX_RATIO
+  const maxAttempts = 1 + Math.max(0, Math.floor(test.retries))
+  const earlierErrors: string[] = []
+
+  let attempt = 1
+  let result = await runTest(test, options)
+  while (isFailure(result.status) && attempt < maxAttempts) {
+    const elapsedMs = Date.now() - startMs
+    if (elapsedMs + test.timeout_ms > maxTotalMs) {
+      logger.warn(
+        { event: 'test.retry.skipped', test_id: test.id, attempt, elapsed_ms: elapsedMs },
+        `retry skipped: test_id=${test.id} another ${test.timeout_ms}ms attempt would exceed ${maxTotalMs}ms of the schedule`
+      )
+      break
+    }
+    earlierErrors.push(result.error_message ?? result.status)
+    attempt += 1
+    logger.info(
+      { event: 'test.retry', test_id: test.id, attempt, max_attempts: maxAttempts },
+      `retrying test_id=${test.id} attempt ${attempt}/${maxAttempts} after: ${(result.error_message ?? result.status).slice(0, 300)}`
+    )
+    result = await runTest(test, options)
+  }
+
+  if (attempt > 1 && isFailure(result.status) && result.error_message != null) {
+    return { ...result, error_message: `${result.error_message} [all ${attempt} attempts failed]` }
+  }
+  if (attempt > 1 && !isFailure(result.status)) {
+    logger.info(
+      { event: 'test.retry.recovered', test_id: test.id, attempt },
+      `test_id=${test.id} passed on attempt ${attempt} after: ${earlierErrors.join(' | ').slice(0, 300)}`
+    )
+  }
+  return result
 }

@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { runTest } from './run.js'
+import { runTest, runTestWithRetries } from './run.js'
 
 let server: Server
 let base = ''
@@ -80,5 +80,59 @@ describe('runTest timeout', () => {
     )
     expect(result.status).toBe('timeout')
     expect(result.error_message).toBe('Timed out after 200ms')
+  })
+})
+
+describe('runTestWithRetries', () => {
+  const timing = { timeout_ms: 1_000, schedule_ms: 30_000 }
+
+  it('records a pass when a retry succeeds', async () => {
+    failFirst = 1
+    const result = await runTestWithRetries(
+      { ...timing, id: 'retry-recovers', code: statusCheck('/flaky'), retries: 1 },
+      { trigger: 'scheduler' }
+    )
+    expect(result.status).toBe('success')
+    expect(result.error_message).toBeNull()
+    expect(hits).toBe(2)
+  })
+
+  it('records the last failure, marked with the attempt count, when every attempt fails', async () => {
+    const result = await runTestWithRetries(
+      { ...timing, id: 'retry-exhausted', code: statusCheck('/down'), retries: 2 },
+      { trigger: 'scheduler' }
+    )
+    expect(result.status).toBe('fail')
+    expect(result.error_message).toBe('Assertion "status 200" failed [all 3 attempts failed]')
+    expect(hits).toBe(3)
+  })
+
+  it('makes a single attempt when retries is 0', async () => {
+    const result = await runTestWithRetries(
+      { ...timing, id: 'retry-none', code: statusCheck('/down'), retries: 0 },
+      { trigger: 'scheduler' }
+    )
+    expect(result.status).toBe('fail')
+    expect(result.error_message).toBe('Assertion "status 200" failed')
+    expect(hits).toBe(1)
+  })
+
+  it('skips a retry that would not finish within 80% of schedule_ms', async () => {
+    // 1000ms attempt, 80% of 1250ms = 1000ms: a second attempt can never fit.
+    const result = await runTestWithRetries(
+      { id: 'retry-no-room', code: statusCheck('/down'), timeout_ms: 1_000, schedule_ms: 1_250, retries: 3 },
+      { trigger: 'scheduler' }
+    )
+    expect(result.status).toBe('fail')
+    expect(hits).toBe(1)
+  })
+
+  it('does not retry a passing test', async () => {
+    const result = await runTestWithRetries(
+      { ...timing, id: 'retry-pass', code: statusCheck('/ok'), retries: 3 },
+      { trigger: 'scheduler' }
+    )
+    expect(result.status).toBe('success')
+    expect(hits).toBe(1)
   })
 })
