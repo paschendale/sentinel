@@ -67,7 +67,7 @@ describe('ctx.http timeouts', () => {
     expect((err as Error).message).toContain('headers received, 11 B of body read')
   })
 
-  it('defaults the per-request limit to what is left of the test budget', async () => {
+  it('without a run signal, defaults the per-request limit to what is left of the test budget', async () => {
     const { ctx } = buildCtx({ testTimeoutMs: 400 })
     const startMs = Date.now()
     const err = await ctx.http.get(`${base}/stall-body`).catch((e: unknown) => e)

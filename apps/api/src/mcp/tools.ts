@@ -76,7 +76,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
         'available: ctx.assert(name, value, message?) for named assertions, ctx.warn(message) for a ' +
         'non-fatal warning status, ctx.log(message), ctx.now(), and ctx.secrets.NAME for values created ' +
         'via create_secret. timeout_ms must be at most 80% of schedule_ms. ctx.http/ctx.s3 accept a ' +
-        'per-request `timeout` (ms, headers + full body; defaults to what is left of timeout_ms) and ' +
+        'per-request `timeout` (ms, headers + full body; without it timeout_ms bounds the request) and ' +
         'throw HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR when it is exceeded — set one below timeout_ms on ' +
         'each request so a stalled call fails with its own error instead of timing out the whole run. ' +
         'retries (0–5) re-runs a failed or timed-out scheduled run and records only the last attempt. ' +

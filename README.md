@@ -197,7 +197,7 @@ Supported methods: `get`, `post`, `put`, `delete`. All return `{ status, headers
 `ctx.http` options:
 
 - `headers` — request headers
-- `timeout` — request limit in milliseconds, covering the response headers and the full body. Defaults to what is left of the test's `timeout_ms`. Exceeding it throws `HttpRequestError` with code `HTTP_TIMEOUT_ERROR`, saying whether headers arrived and how much of the body was read
+- `timeout` — request limit in milliseconds, covering the response headers and the full body. Exceeding it throws `HttpRequestError` with code `HTTP_TIMEOUT_ERROR`, saying whether headers arrived and how much of the body was read. Without it, the request is bounded by the test's `timeout_ms`, and a run that hits that deadline is recorded as `timeout` with the pending call named in its error message
 - `redirect` — redirect policy: `'follow'` (default), `'manual'`, or `'error'`
 
 **Redirect handling:**
@@ -263,7 +263,7 @@ ctx.assert('object metadata reachable', head.status === 200)
 - `region` — required, must match the bucket's actual region (used in the SigV4 credential scope)
 - `sessionToken` — optional, for temporary/STS credentials
 - `headers` — optional extra headers (e.g. `Range: bytes=0-9`); these are included in the signature
-- `timeout` — optional request limit in milliseconds, same rule as `ctx.http` (defaults to what is left of `timeout_ms`; exceeding it throws `S3_TIMEOUT_ERROR`)
+- `timeout` — optional request limit in milliseconds, same rule as `ctx.http` (exceeding it throws `S3_TIMEOUT_ERROR`)
 
 Like any other credential, store `accessKey`/`secretKey` as [secrets](#secrets) and read them via `ctx.secrets.NAME` rather than hardcoding them in test code, exactly as shown above. `url` can be virtual-hosted-style, path-style, or any S3-compatible endpoint (MinIO, Cloudflare R2, etc.) — signing only depends on the request's host, path, and query string, so nothing AWS-specific is required beyond the four SigV4 inputs. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL), `code: 'S3_FETCH_ERROR'` (the request itself failed), `code: 'S3_TIMEOUT_ERROR'` (over its time limit), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (see below).
 

@@ -73,6 +73,29 @@ describe('runTest timeout', () => {
     expect(closedStalls).toBeGreaterThan(closedBefore)
   })
 
+  it('records timeout, not fail, when a request without its own timeout hits the run deadline', async () => {
+    for (let i = 0; i < 10; i++) {
+      const result = await runTest(
+        { id: `run-deadline-${i}`, code: `await ctx.http.get('${base}/stall-body'); return true`, timeout_ms: 150 },
+        { trigger: 'api-post' }
+      )
+      expect(result.status).toBe('timeout')
+    }
+  })
+
+  it('records fail with HTTP_TIMEOUT_ERROR when the request timeout is below the run deadline', async () => {
+    const result = await runTest(
+      {
+        id: 'run-request-timeout',
+        code: `await ctx.http.get('${base}/stall-body', { timeout: 100 }); return true`,
+        timeout_ms: 2_000,
+      },
+      { trigger: 'api-post' }
+    )
+    expect(result.status).toBe('fail')
+    expect(result.error_message).toMatch(/^HTTP request timed out for GET .*\/stall-body after 100ms \(headers received, 1 B of body read\)$/)
+  })
+
   it('keeps the plain message when nothing is in flight', async () => {
     const result = await runTest(
       { id: 'run-timeout-cpu', code: 'await new Promise((r) => setTimeout(r, 2000)); return true', timeout_ms: 200 },
@@ -118,9 +141,9 @@ describe('runTestWithRetries', () => {
   })
 
   it('skips a retry that would not finish within 80% of schedule_ms', async () => {
-    // 1000ms attempt, 80% of 1250ms = 1000ms: a second attempt can never fit.
+    // 1000ms attempt, 80% of 1200ms = 960ms: even a second attempt alone would not fit.
     const result = await runTestWithRetries(
-      { id: 'retry-no-room', code: statusCheck('/down'), timeout_ms: 1_000, schedule_ms: 1_250, retries: 3 },
+      { id: 'retry-no-room', code: statusCheck('/down'), timeout_ms: 1_000, schedule_ms: 1_200, retries: 3 },
       { trigger: 'scheduler' }
     )
     expect(result.status).toBe('fail')

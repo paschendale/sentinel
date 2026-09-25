@@ -23,8 +23,8 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
           'fail/warning/recovery event types, and only fires on state transitions past a failure ' +
           'threshold and cooldown. Secrets are write-only (never readable back) and reach test code as ' +
           'ctx.secrets.NAME. Timeouts: every ctx.http / ctx.s3 request is limited by its `timeout` option ' +
-          '(ms, covering headers and the full body), or by what is left of the test\'s timeout_ms when ' +
-          'omitted; a request over its limit throws code HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR. When a ' +
+          '(ms, covering headers and the full body); a request over its limit throws code ' +
+          'HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR. Without it, the test\'s timeout_ms bounds the request. When a ' +
           'run times out, its pending ctx calls are aborted and named in the run\'s error_message ' +
           '("in flight: GET <url> (<s>, headers received, <n> KB of body read)"). A test\'s `retries` ' +
           're-runs a failed or timed-out scheduled run up to that many times (while a full attempt still ' +

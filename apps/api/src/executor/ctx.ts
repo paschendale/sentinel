@@ -17,7 +17,7 @@ export interface HttpResponse {
 
 export interface HttpOptions {
   headers?: Record<string, string>
-  /** Per-request limit in ms, covering response headers and the full body. Defaults to what is left of the test's timeout budget. */
+  /** Per-request limit in ms, covering response headers and the full body. Without it, the request is bounded by the run's timeout_ms. */
   timeout?: number
   redirect?: 'follow' | 'manual' | 'error'
 }
@@ -51,7 +51,7 @@ export interface S3Options {
   sessionToken?: string
   /** Extra headers (e.g. Range) — included in the SigV4 signature. */
   headers?: Record<string, string>
-  /** Per-request limit in ms, covering response headers and the full body. Defaults to what is left of the test's timeout budget. */
+  /** Per-request limit in ms, covering response headers and the full body. Without it, the request is bounded by the run's timeout_ms. */
   timeout?: number
 }
 
@@ -178,6 +178,9 @@ function resolveTimeoutMs(explicit: number | undefined, scope: IoScope | undefin
     }
     return explicit
   }
+  // Inside a run, the run's own deadline aborts the request. A second timer set to the same
+  // deadline would race it and randomly turn the run's 'timeout' into a 'fail'.
+  if (scope?.runSignal !== undefined) return undefined
   const remaining = scope?.remainingMs()
   return remaining === undefined ? undefined : Math.max(1, remaining)
 }
