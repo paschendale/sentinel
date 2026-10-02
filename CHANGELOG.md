@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/paschendale/sentinel/compare/v1.24.0...v1.25.0) (2026-10-02)
+
+
+### Features
+
+* **executor:** identify Sentinel and its instance in outbound request headers ([44a7bdc](https://github.com/paschendale/sentinel/commit/44a7bdc8183eba734657a5ee39c02f508be7e892))
+
 # [1.24.0](https://github.com/paschendale/sentinel/compare/v1.23.0...v1.24.0) (2026-09-25)
 
 
