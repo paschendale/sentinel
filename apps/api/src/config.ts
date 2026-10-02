@@ -76,3 +76,12 @@ export const SECRETS_ENCRYPTION_KEY = optionalEnv('SECRETS_ENCRYPTION_KEY', '')
 if (SECRETS_ENCRYPTION_KEY && Buffer.from(SECRETS_ENCRYPTION_KEY, 'base64').length !== 32) {
   throw new Error('SECRETS_ENCRYPTION_KEY must decode to exactly 32 bytes (base64-encoded)')
 }
+
+/** Optional name for this Sentinel deployment (e.g. `sao-paulo-1`), sent on every outbound
+ *  HTTP/S3/webhook request in the User-Agent and an `X-Sentinel-Instance` header so the
+ *  receiving side can tell which location a probe came from. Unset → User-Agent only. */
+export const SENTINEL_INSTANCE = optionalEnv('SENTINEL_INSTANCE', '')
+
+if (SENTINEL_INSTANCE && !/^[A-Za-z0-9._-]{1,64}$/.test(SENTINEL_INSTANCE)) {
+  throw new Error('SENTINEL_INSTANCE must be 1–64 characters of letters, digits, ".", "_" or "-"')
+}

@@ -66,6 +66,21 @@ describe('executor ctx http', () => {
     )
   })
 
+  it('identifies Sentinel in the User-Agent unless the test sets its own', async () => {
+    fetchMock.mockResolvedValue({ status: 200, body: null, headers: { forEach: vi.fn() } })
+
+    const { ctx } = buildCtx()
+    await ctx.http.get('https://example.com')
+    await ctx.http.post('https://example.com', {}, { headers: { 'User-Agent': 'custom/1.0' } })
+
+    const getHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>
+    expect(getHeaders['user-agent']).toMatch(/^Sentinel \(/)
+    const postHeaders = fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>
+    expect(postHeaders['User-Agent']).toBe('custom/1.0')
+    expect(postHeaders['user-agent']).toBeUndefined()
+    expect(postHeaders['content-type']).toBe('application/json')
+  })
+
   it('throws explicit redirect error when redirect limit is exceeded', async () => {
     const redirectCause = new Error('redirect count exceeded')
     fetchMock.mockRejectedValue(new TypeError('fetch failed', { cause: redirectCause }))

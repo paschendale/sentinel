@@ -7,6 +7,7 @@ import {
 } from '../db/queries/notification-events.js'
 import { CHANNEL_SCOPE_MATCH_SQL } from '../db/queries/assignments.js'
 import { RESEND_API_KEY, RESEND_FROM } from '../config.js'
+import { withSentinelHeaders } from '../outbound-headers.js'
 
 export interface NotificationCandidate {
   test_id: string
@@ -198,10 +199,10 @@ async function dispatchForTest(
         )
         const response = await request('https://api.resend.com/emails', {
           method: 'POST',
-          headers: {
+          headers: withSentinelHeaders({
             'content-type': 'application/json',
             'authorization': `Bearer ${RESEND_API_KEY}`,
-          },
+          }),
           body: JSON.stringify(emailPayload),
         })
         statusCode = response.statusCode
@@ -218,7 +219,7 @@ async function dispatchForTest(
         )
         const response = await request(channel.webhook_url!, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: withSentinelHeaders({ 'content-type': 'application/json' }),
           body: JSON.stringify(body),
         })
         statusCode = response.statusCode

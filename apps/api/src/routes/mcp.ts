@@ -22,7 +22,11 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
           'email) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
           'fail/warning/recovery event types, and only fires on state transitions past a failure ' +
           'threshold and cooldown. Secrets are write-only (never readable back) and reach test code as ' +
-          'ctx.secrets.NAME. Timeouts: every ctx.http / ctx.s3 request is limited by its `timeout` option ' +
+          'ctx.secrets.NAME. Outbound identification: every ctx.http / ctx.s3 request and notification ' +
+          'webhook sends `User-Agent: Sentinel (+https://github.com/paschendale/sentinel)` — with ' +
+          '`; instance=<name>` and an `X-Sentinel-Instance: <name>` header when the deployment sets ' +
+          'SENTINEL_INSTANCE — so monitored servers can recognise Sentinel and which location probed them; a ' +
+          'User-Agent in the request\'s headers option overrides it. Timeouts: every ctx.http / ctx.s3 request is limited by its `timeout` option ' +
           '(ms, covering headers and the full body); a request over its limit throws code ' +
           'HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR. Without it, the test\'s timeout_ms bounds the request. When a ' +
           'run times out, its pending ctx calls are aborted and named in the run\'s error_message ' +

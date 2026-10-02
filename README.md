@@ -71,6 +71,7 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `NODE_ENV` | No | Set to `production` in deployment for JSON logs and `LOG_PRETTY` default off |
 | `FTP_TEMP_DIR` | No | Directory `ctx.ftp.get` and `ctx.s3.get` write temp downloads to (default: OS temp dir + `sentinel-ftp`) |
 | `FTP_MAX_DOWNLOAD_BYTES` | No | Max bytes `ctx.ftp.get` or `ctx.s3.get` will download before aborting (default: `5242880`, 5MB) |
+| `SENTINEL_INSTANCE` | No | Name for this deployment (letters, digits, `.`, `_`, `-`; max 64), e.g. `sao-paulo-1`. Every outbound request already carries `User-Agent: Sentinel (+https://github.com/paschendale/sentinel)`; when this is set, the User-Agent adds `; instance=<name>` and an `X-Sentinel-Instance: <name>` header is sent, so monitored servers can tell which location a probe came from |
 | `SECRETS_ENCRYPTION_KEY` | No | Base64-encoded 32-byte AES-256-GCM key for encrypting `ctx.secrets` values at rest (generate with `openssl rand -base64 32`). If unset, secrets are stored **unencrypted** — `ctx.secrets` still works, but the dashboard shows a warning banner |
 
 ### Single Container (no Compose)

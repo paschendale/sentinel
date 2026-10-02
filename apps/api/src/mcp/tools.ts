@@ -79,6 +79,8 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
         'per-request `timeout` (ms, headers + full body; without it timeout_ms bounds the request) and ' +
         'throw HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR when it is exceeded — set one below timeout_ms on ' +
         'each request so a stalled call fails with its own error instead of timing out the whole run. ' +
+        'Requests send a Sentinel User-Agent (plus X-Sentinel-Instance when the deployment names its ' +
+        'location); pass your own User-Agent header to override it. ' +
         'retries (0–5) re-runs a failed or timed-out scheduled run and records only the last attempt. ' +
         'Use tags to group related ' +
         'tests — tags drive both the dashboard summary and notification-channel routing.',

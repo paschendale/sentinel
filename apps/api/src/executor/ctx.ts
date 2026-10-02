@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { nanoid } from 'nanoid'
 import type { AssertionResult } from '@sentinel/shared'
 import { FTP_MAX_DOWNLOAD_BYTES, FTP_TEMP_DIR } from '../config.js'
+import { withSentinelHeaders } from '../outbound-headers.js'
 
 export interface HttpResponse {
   status: number
@@ -464,7 +465,8 @@ function signS3Request(
 
 function signS3OrThrow(method: 'GET' | 'HEAD', url: string, s3Options: S3Options): Record<string, string> {
   try {
-    return signS3Request(method, new URL(url), s3Options, new Date())
+    // Sentinel's identifying headers stay unsigned, so they never affect the SigV4 signature.
+    return withSentinelHeaders(signS3Request(method, new URL(url), s3Options, new Date()))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     throw new S3RequestError(
@@ -833,8 +835,7 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
   const ctx: TestContext = {
     http: {
       async get(url, httpOptions) {
-        const init: RequestInit = { method: 'GET' }
-        if (httpOptions?.headers) init.headers = httpOptions.headers
+        const init: RequestInit = { method: 'GET', headers: withSentinelHeaders(httpOptions?.headers) }
         if (httpOptions?.redirect) init.redirect = httpOptions.redirect
         const timeoutMs = resolveTimeoutMs(httpOptions?.timeout, scope)
         return doFetch(url, init, { scope, timeoutMs, onHttpComplete })
@@ -842,7 +843,7 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
       async post(url, body, httpOptions) {
         const init: RequestInit = {
           method: 'POST',
-          headers: { 'content-type': 'application/json', ...httpOptions?.headers },
+          headers: withSentinelHeaders({ 'content-type': 'application/json', ...httpOptions?.headers }),
           body: JSON.stringify(body),
         }
         if (httpOptions?.redirect) init.redirect = httpOptions.redirect
