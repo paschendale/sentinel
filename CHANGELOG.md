@@ -1,3 +1,10 @@
+# [1.26.0](https://github.com/paschendale/sentinel/compare/v1.25.1...v1.26.0) (2026-11-04)
+
+
+### Features
+
+* **aggregator:** retention for notification_events (NOTIFICATION_RETENTION_DAYS, default 90) ([82ebbda](https://github.com/paschendale/sentinel/commit/82ebbda5b6f28839b7e371fbb54def5112394485))
+
 ## [1.25.1](https://github.com/paschendale/sentinel/compare/v1.25.0...v1.25.1) (2026-11-04)
 
 
