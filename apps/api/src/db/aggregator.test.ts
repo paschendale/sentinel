@@ -6,6 +6,7 @@ vi.mock('../config.js', async (importOriginal) => {
     ...actual,
     RAW_RETENTION_DAYS: 7,
     AGG_RETENTION_DAYS: 90,
+    NOTIFICATION_RETENTION_DAYS: 90,
     PRUNE_BATCH_SIZE: 2,
   }
 })
@@ -107,10 +108,28 @@ describe('runAggregation', () => {
     expect(deleteCall![1]).toEqual([90])
   })
 
+  it('prunes notification_events past the retention in batches', async () => {
+    mockQuery.mockImplementation(((sql: string) => {
+      if (typeof sql === 'string' && sql.includes('DELETE FROM notification_events')) {
+        const calls = mockQuery.mock.calls.filter((c) => String(c[0]).includes('DELETE FROM notification_events')).length
+        return Promise.resolve({ rowCount: calls === 1 ? 2 : 1, rows: [] })
+      }
+      return Promise.resolve({ rows: [] })
+    }) as never)
+
+    await runAggregation()
+
+    const deletes = mockQuery.mock.calls.filter((c) => String(c[0]).includes('DELETE FROM notification_events'))
+    expect(deletes).toHaveLength(2) // a full batch, then a partial one
+    expect(String(deletes[0]![0])).toContain('make_interval(days => $1)')
+    expect(deletes[0]![1]).toEqual([90, 2])
+  })
+
   it('makes expected maintenance calls in order', async () => {
     await runAggregation()
     // upsert + pg_tables (no partitions returned) + create partition x3 + prune uptime_daily
-    expect(mockQuery).toHaveBeenCalledTimes(6)
+    // + prune notification_events (one batch, under the batch size)
+    expect(mockQuery).toHaveBeenCalledTimes(7)
   })
 })
 
