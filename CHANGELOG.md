@@ -1,3 +1,10 @@
+## [1.25.1](https://github.com/paschendale/sentinel/compare/v1.25.0...v1.25.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **aggregator:** drop expired test_runs partitions despite the assertion_results foreign key ([c33ff66](https://github.com/paschendale/sentinel/commit/c33ff66b2cd4aebd1665f87971f491d2cfe3d4a2))
+
 # [1.25.0](https://github.com/paschendale/sentinel/compare/v1.24.0...v1.25.0) (2026-10-02)
 
 

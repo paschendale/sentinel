@@ -1,7 +1,7 @@
 {
   "name": "sentinel",
   "private": true,
-  "version": "1.25.0",
+  "version": "1.25.1",
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
