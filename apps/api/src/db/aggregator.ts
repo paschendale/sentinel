@@ -1,4 +1,4 @@
-import { AGG_RETENTION_DAYS, PRUNE_BATCH_SIZE, RAW_RETENTION_DAYS } from '../config.js'
+import { AGG_RETENTION_DAYS, NOTIFICATION_RETENTION_DAYS, PRUNE_BATCH_SIZE, RAW_RETENTION_DAYS } from '../config.js'
 import { logger } from '../logger.js'
 import { pool } from './pool.js'
 
@@ -177,6 +177,32 @@ export async function runAggregation(): Promise<void> {
     )
   } catch (err) {
     logger.error({ event: 'aggregator.prune_uptime_daily_failed', err }, 'aggregator failed to prune uptime_daily')
+  }
+
+  // notification_events is written on every alert decision and never read back by the API, so without a
+  // cutoff it only grows (198 MB in seven months on one instance). Batched, like the raw runs.
+  try {
+    let deletedEvents = 0
+    while (true) {
+      const result = await pool.query(
+        `DELETE FROM notification_events
+         WHERE id IN (
+           SELECT id FROM notification_events
+           WHERE created_at < NOW() - make_interval(days => $1)
+           LIMIT $2
+         )`,
+        [NOTIFICATION_RETENTION_DAYS, PRUNE_BATCH_SIZE],
+      )
+      const batch = result.rowCount ?? 0
+      deletedEvents += batch
+      if (batch < PRUNE_BATCH_SIZE) break
+    }
+    logger.info(
+      { event: 'aggregator.prune_notification_events', retention_days: NOTIFICATION_RETENTION_DAYS, deleted_rows: deletedEvents },
+      'aggregator pruned notification_events rows',
+    )
+  } catch (err) {
+    logger.error({ event: 'aggregator.prune_notification_events_failed', err }, 'aggregator failed to prune notification_events')
   }
 
   logger.info({ event: 'aggregator.run_complete', duration_ms: Date.now() - runStartedAt }, 'aggregator maintenance run complete')
