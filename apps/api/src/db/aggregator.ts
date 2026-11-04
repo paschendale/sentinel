@@ -108,6 +108,22 @@ export async function runAggregation(): Promise<void> {
       const partitionEnd = new Date(Date.UTC(year, month + 1, 1))
 
       if (partitionEnd <= cutoff) {
+        // assertion_results references test_runs (migration 011), so an attached partition can't be
+        // dropped ("other objects depend on it"). Delete its assertions first, in batches, then
+        // detach it: Postgres refuses the detach while anything still references its rows.
+        while (true) {
+          const result = await pool.query(
+            `DELETE FROM assertion_results
+             WHERE id IN (
+               SELECT id FROM assertion_results
+               WHERE test_run_started_at >= $1 AND test_run_started_at < $2
+               LIMIT $3
+             )`,
+            [partitionStart.toISOString(), partitionEnd.toISOString(), PRUNE_BATCH_SIZE],
+          )
+          if ((result.rowCount ?? 0) < PRUNE_BATCH_SIZE) break
+        }
+        await pool.query(`ALTER TABLE test_runs DETACH PARTITION ${tablename}`)
         await pool.query(`DROP TABLE IF EXISTS ${tablename}`)
         dropped.push(tablename)
       } else if (partitionStart < cutoff) {

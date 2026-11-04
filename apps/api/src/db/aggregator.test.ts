@@ -60,6 +60,9 @@ describe('runAggregation', () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] } as never) // upsert
       .mockResolvedValueOnce({ rows: [{ tablename: 'test_runs_2026_04' }, { tablename: 'test_runs_2026_05' }] } as never) // pg_tables
+      .mockResolvedValueOnce({ rowCount: 2, rows: [] } as never) // delete its assertions, batch 1 (full → continue)
+      .mockResolvedValueOnce({ rowCount: 0, rows: [] } as never) // delete its assertions, batch 2 (empty → stop)
+      .mockResolvedValueOnce({ rows: [] } as never) // DETACH PARTITION test_runs_2026_04
       .mockResolvedValueOnce({ rows: [] } as never) // DROP TABLE test_runs_2026_04
       .mockResolvedValueOnce({ rowCount: 2, rows: [] } as never) // delete batch 1 (full → continue)
       .mockResolvedValueOnce({ rowCount: 1, rows: [] } as never) // delete batch 2 (partial → stop)
@@ -72,6 +75,18 @@ describe('runAggregation', () => {
     )
     expect(dropCall).toBeDefined()
     expect(dropCall![0]).toContain('test_runs_2026_04')
+
+    // The partition's assertions go first, then the detach, then the drop (assertion_results has a
+    // foreign key to test_runs, so dropping an attached partition fails).
+    const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+    const assertionDeletes = mockQuery.mock.calls.filter((c) => String(c[0]).includes('DELETE FROM assertion_results'))
+    expect(assertionDeletes).toHaveLength(2)
+    expect(assertionDeletes[0]![1]).toEqual(['2026-04-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', 2])
+    const detachAt = sqls.findIndex((q) => q.includes('DETACH PARTITION test_runs_2026_04'))
+    const dropAt = sqls.findIndex((q) => q.includes('DROP TABLE'))
+    const lastAssertionDeleteAt = sqls.map((q) => q.includes('DELETE FROM assertion_results')).lastIndexOf(true)
+    expect(lastAssertionDeleteAt).toBeLessThan(detachAt)
+    expect(detachAt).toBeLessThan(dropAt)
 
     const deleteCalls = mockQuery.mock.calls.filter(
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('DELETE FROM test_runs_2026_05'),
