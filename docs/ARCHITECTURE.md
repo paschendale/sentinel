@@ -39,7 +39,7 @@ pnpm workspaces manage the monorepo.
 - **Batch writes**: results buffered and flushed every 1–2 seconds in batches of 50–100
 - **Time-partitioned tables**: `test_runs_YYYY_MM` — daily maintenance also ensures current+future partitions exist
 - **UptimeDaily**: pre-aggregated stats written once per day per test — public dashboards never query raw `test_runs`
-- Retention: raw runs default 7 days (`RAW_RETENTION_DAYS`, exact cutoff, batched deletes), aggregated daily stats default 90 days (`AGG_RETENTION_DAYS`), prune batch size via `PRUNE_BATCH_SIZE`
+- Retention: raw runs default 7 days (`RAW_RETENTION_DAYS`, exact cutoff, batched deletes), aggregated daily stats default 90 days (`AGG_RETENTION_DAYS`), notification audit log (`notification_events`) default 90 days (`NOTIFICATION_RETENTION_DAYS`), prune batch size via `PRUNE_BATCH_SIZE`
 
 ### Outbound HTTP (test execution)
 - **Undici** — connection pooling per hostname, reuse across tests hitting the same origin
