@@ -63,6 +63,8 @@ export const PUBLIC_STATUS_WINDOW_MS = parseIntEnvInRange(
 
 export const RAW_RETENTION_DAYS = parseIntEnvInRange('RAW_RETENTION_DAYS', 7, 1, 365)
 export const AGG_RETENTION_DAYS = parseIntEnvInRange('AGG_RETENTION_DAYS', 90, 30, 180)
+/** Days of notification_events (the notifier's audit log of evaluated, skipped, sent and failed alerts) to keep. */
+export const NOTIFICATION_RETENTION_DAYS = parseIntEnvInRange('NOTIFICATION_RETENTION_DAYS', 90, 7, 365)
 export const PRUNE_BATCH_SIZE = parseIntEnvInRange('PRUNE_BATCH_SIZE', 5000, 100, 50000)
 
 /** Directory `ctx.ftp.get` and `ctx.s3.get` write temp downloads to. Files are deleted immediately after each call. */
