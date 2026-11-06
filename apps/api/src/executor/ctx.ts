@@ -1,5 +1,5 @@
-import { fetch } from 'undici'
-import type { RequestInit } from 'undici'
+import { Agent, fetch } from 'undici'
+import type { Dispatcher, RequestInit } from 'undici'
 import { Client as FtpClient } from 'basic-ftp'
 import { createHash, createHmac } from 'node:crypto'
 import { mkdir, open, readFile, unlink } from 'node:fs/promises'
@@ -85,6 +85,47 @@ export interface S3ListResult {
   truncated: boolean
 }
 
+export interface K8sOptions {
+  /** Bearer token, normally a ServiceAccount token read from ctx.secrets. */
+  token: string
+  /** PEM certificate bundle the API server's certificate must chain to. Without it the system trust store is used. */
+  ca?: string
+  /** Extra request headers. */
+  headers?: Record<string, string>
+  /** Per-request limit in ms, covering response headers and the full body. Without it, the request is bounded by the run's timeout_ms. */
+  timeout?: number
+}
+
+export interface K8sResourceOptions extends K8sOptions {
+  /** API group; omit (or '') for the core group (`/api/v1`). */
+  group?: string
+  /** API version, e.g. 'v1'. */
+  version: string
+  /** Plural resource name, e.g. 'cronjobs', 'deployments', 'workflows'. */
+  resource: string
+  /** Omit for cluster-scoped resources or a list across every namespace. */
+  namespace?: string
+}
+
+export interface K8sListOptions extends K8sResourceOptions {
+  labelSelector?: string
+  fieldSelector?: string
+  /** Max items; the server may return fewer. */
+  limit?: number
+}
+
+export interface K8sReadOptions extends K8sResourceOptions {
+  name: string
+}
+
+export type K8sObject = Record<string, unknown>
+
+export interface K8sListResult {
+  items: K8sObject[]
+  /** Set when `limit` cut the list short. */
+  continue: string | null
+}
+
 export interface TestContext {
   http: {
     get(url: string, options?: HttpOptions): Promise<HttpResponse>
@@ -98,6 +139,14 @@ export interface TestContext {
     get(url: string, options: S3Options): Promise<HttpResponse>
     head(url: string, options: S3Options): Promise<HttpResponse>
     list(url: string, options: S3ListOptions): Promise<S3ListResult>
+  }
+  k8s: {
+    /** Raw GET of any API server path; same response shape as ctx.http, no status check. */
+    get(url: string, options: K8sOptions): Promise<HttpResponse>
+    /** Lists a resource; throws K8S_API_ERROR on a non-2xx response. */
+    list(server: string, options: K8sListOptions): Promise<K8sListResult>
+    /** Reads one object; throws K8S_API_ERROR on a non-2xx response (404 included). */
+    read(server: string, options: K8sReadOptions): Promise<K8sObject>
   }
   assert: (name: string, value: unknown, message?: string) => void
   warn: (message: string) => void
@@ -143,8 +192,17 @@ export interface S3CompleteInfo {
   pages?: number
 }
 
+export interface K8sCompleteInfo {
+  op: 'get' | 'list' | 'read'
+  url: string
+  status: number
+  duration_ms: number
+  /** list only */
+  items?: number
+}
+
 export interface IoErrorInfo {
-  protocol: 'http' | 's3' | 'ftp'
+  protocol: 'http' | 's3' | 'ftp' | 'k8s'
   op: string
   url: string
   code: string
@@ -157,7 +215,8 @@ export interface BuildCtxOptions {
   onHttpComplete?: (info: HttpCompleteInfo) => void
   onFtpComplete?: (info: FtpCompleteInfo) => void
   onS3Complete?: (info: S3CompleteInfo) => void
-  /** Called when a ctx.http / ctx.s3 / ctx.ftp call fails or times out. */
+  onK8sComplete?: (info: K8sCompleteInfo) => void
+  /** Called when a ctx.http / ctx.s3 / ctx.ftp / ctx.k8s call fails or times out. */
   onIoError?: (info: IoErrorInfo) => void
   /** The test's overall timeout budget — default per-request limit for ctx.http/ctx.s3, and default FTP socket timeout. */
   testTimeoutMs?: number
@@ -292,6 +351,32 @@ export class S3RequestError extends Error {
     this.code = code
     this.url = url
     this.method = method
+  }
+}
+
+export class K8sRequestError extends Error {
+  readonly code: 'K8S_CONFIG_ERROR' | 'K8S_FETCH_ERROR' | 'K8S_TIMEOUT_ERROR' | 'K8S_API_ERROR'
+  readonly url: string
+  readonly op: string
+  /** HTTP status of the API server's response, for K8S_API_ERROR. */
+  readonly status: number | null
+  /** `reason` of the API server's Status object (e.g. 'NotFound', 'Forbidden'), when it sent one. */
+  readonly reason: string | null
+
+  constructor(
+    code: K8sRequestError['code'],
+    message: string,
+    url: string,
+    op: string,
+    extra: { status?: number; reason?: string | null; cause?: Error | undefined } = {}
+  ) {
+    super(message, { cause: extra.cause })
+    this.name = 'K8sRequestError'
+    this.code = code
+    this.url = url
+    this.op = op
+    this.status = extra.status ?? null
+    this.reason = extra.reason ?? null
   }
 }
 
@@ -823,6 +908,197 @@ async function doS3Get(
   }
 }
 
+// One undici Agent per distinct CA bundle, so TLS sessions are reused across runs. A test
+// deployment talks to a handful of clusters at most; the cap only guards against a test that
+// passes a different bundle on every call.
+const K8S_AGENT_CACHE_MAX = 16
+const k8sAgents = new Map<string, Dispatcher>()
+
+function k8sDispatcher(ca: string | undefined): Dispatcher | undefined {
+  if (ca === undefined) return undefined
+  const cached = k8sAgents.get(ca)
+  if (cached !== undefined) return cached
+  if (k8sAgents.size >= K8S_AGENT_CACHE_MAX) k8sAgents.clear()
+  const agent = new Agent({ connect: { ca } })
+  k8sAgents.set(ca, agent)
+  return agent
+}
+
+function k8sRequestInit(k8sOptions: K8sOptions): RequestInit {
+  if (typeof k8sOptions.token !== 'string' || k8sOptions.token === '') {
+    throw new K8sRequestError('K8S_CONFIG_ERROR', 'ctx.k8s needs a non-empty token', '', 'get')
+  }
+  const init: RequestInit = {
+    method: 'GET',
+    headers: withSentinelHeaders({
+      accept: 'application/json',
+      ...k8sOptions.headers,
+      authorization: `Bearer ${k8sOptions.token}`,
+    }),
+  }
+  const dispatcher = k8sDispatcher(k8sOptions.ca)
+  if (dispatcher !== undefined) init.dispatcher = dispatcher
+  return init
+}
+
+function k8sResourcePath(server: string, resourceOptions: K8sResourceOptions, op: string): URL {
+  let base: URL
+  try {
+    base = new URL(server)
+  } catch (err) {
+    // `new URL` only ever throws a TypeError.
+    const cause = err as Error
+    throw new K8sRequestError('K8S_CONFIG_ERROR', `Invalid API server URL for ctx.k8s.${op}: ${cause.message}`, server, op, { cause })
+  }
+  const { group, version, resource, namespace } = resourceOptions
+  if (!version || !resource) {
+    throw new K8sRequestError('K8S_CONFIG_ERROR', `ctx.k8s.${op} needs version and resource`, server, op)
+  }
+  const segments = group ? ['apis', group, version] : ['api', version]
+  if (namespace) segments.push('namespaces', namespace)
+  segments.push(resource)
+  base.pathname = base.pathname.replace(/\/+$/, '') + '/' + segments.map(encodeURIComponent).join('/')
+  base.search = ''
+  base.hash = ''
+  return base
+}
+
+function toK8sRequestError(err: unknown, url: string, op: string, timeoutMs: number | undefined): K8sRequestError {
+  if (err instanceof K8sRequestError) return err
+  if (err instanceof HttpRequestError) {
+    if (err.code === 'HTTP_TIMEOUT_ERROR') {
+      return new K8sRequestError('K8S_TIMEOUT_ERROR', `Kubernetes request timed out for ${op} ${url} after ${timeoutMs}ms`, url, op, {
+        cause: err,
+      })
+    }
+    return new K8sRequestError('K8S_FETCH_ERROR', `Kubernetes request failed for ${op} ${url}: ${err.message}`, url, op, { cause: err })
+  }
+  const cause = err instanceof Error ? err : undefined
+  const message = err instanceof Error ? err.message : String(err)
+  return new K8sRequestError('K8S_FETCH_ERROR', `Kubernetes request failed for ${op} ${url}: ${message}`, url, op, { cause })
+}
+
+/** Builds a K8S_API_ERROR from a non-2xx response, using the API server's Status object when it sent one. */
+function k8sApiError(response: HttpResponse, url: string, op: string): K8sRequestError {
+  let reason: string | null = null
+  let detail = ''
+  try {
+    const status = JSON.parse(response.body) as { reason?: unknown; message?: unknown }
+    if (typeof status.reason === 'string') reason = status.reason
+    if (typeof status.message === 'string') detail = `: ${status.message}`
+  } catch {
+    // Not a Status object (an ingress error page, for instance); the HTTP status still tells the story.
+  }
+  return new K8sRequestError(
+    'K8S_API_ERROR',
+    `Kubernetes API returned HTTP ${response.status}${reason ? ` ${reason}` : ''} for ${op} ${url}${detail}`,
+    url,
+    op,
+    { status: response.status, reason }
+  )
+}
+
+async function doK8sFetch(
+  url: string,
+  k8sOptions: K8sOptions,
+  op: K8sCompleteInfo['op'],
+  scope: IoScope | undefined
+): Promise<HttpResponse> {
+  const timeoutMs = resolveTimeoutMs(k8sOptions.timeout, scope)
+  const init = k8sRequestInit(k8sOptions)
+  // doFetch tracks the call and enforces the timeout; the k8s wrapper reports its own error event.
+  const fetchScope = scope && { ...scope, onIoError: undefined }
+  try {
+    return await doFetch(url, init, { scope: fetchScope, timeoutMs })
+  } catch (err) {
+    throw toK8sRequestError(err, url, op, timeoutMs)
+  }
+}
+
+function reportK8sError(scope: IoScope | undefined, err: K8sRequestError, startMs: number): void {
+  scope?.onIoError?.({
+    protocol: 'k8s',
+    op: err.op,
+    url: truncateUrl(err.url),
+    code: err.code,
+    duration_ms: Date.now() - startMs,
+    message: err.message,
+  })
+}
+
+async function doK8sGet(
+  url: string,
+  k8sOptions: K8sOptions,
+  scope: IoScope | undefined,
+  onK8sComplete?: BuildCtxOptions['onK8sComplete']
+): Promise<HttpResponse> {
+  const startMs = Date.now()
+  try {
+    const response = await doK8sFetch(url, k8sOptions, 'get', scope)
+    onK8sComplete?.({ op: 'get', url: truncateUrl(url), status: response.status, duration_ms: Date.now() - startMs })
+    return response
+  } catch (err) {
+    const k8sErr = toK8sRequestError(err, url, 'get', undefined)
+    reportK8sError(scope, k8sErr, startMs)
+    throw k8sErr
+  }
+}
+
+async function doK8sList(
+  server: string,
+  listOptions: K8sListOptions,
+  scope: IoScope | undefined,
+  onK8sComplete?: BuildCtxOptions['onK8sComplete']
+): Promise<K8sListResult> {
+  const startMs = Date.now()
+  let url = server
+  try {
+    const target = k8sResourcePath(server, listOptions, 'list')
+    const params: string[] = []
+    if (listOptions.labelSelector) params.push(`labelSelector=${encodeURIComponent(listOptions.labelSelector)}`)
+    if (listOptions.fieldSelector) params.push(`fieldSelector=${encodeURIComponent(listOptions.fieldSelector)}`)
+    if (listOptions.limit !== undefined) params.push(`limit=${encodeURIComponent(String(listOptions.limit))}`)
+    if (params.length > 0) target.search = `?${params.join('&')}`
+    url = target.toString()
+    const response = await doK8sFetch(url, listOptions, 'list', scope)
+    if (response.status < 200 || response.status >= 300) throw k8sApiError(response, url, 'list')
+    const parsed = JSON.parse(response.body) as { items?: unknown; metadata?: { continue?: unknown } }
+    const items = Array.isArray(parsed.items) ? (parsed.items as K8sObject[]) : []
+    const continueToken = typeof parsed.metadata?.continue === 'string' && parsed.metadata.continue !== '' ? parsed.metadata.continue : null
+    onK8sComplete?.({ op: 'list', url: truncateUrl(url), status: response.status, duration_ms: Date.now() - startMs, items: items.length })
+    return { items, continue: continueToken }
+  } catch (err) {
+    const k8sErr = toK8sRequestError(err, url, 'list', undefined)
+    reportK8sError(scope, k8sErr, startMs)
+    throw k8sErr
+  }
+}
+
+async function doK8sRead(
+  server: string,
+  readOptions: K8sReadOptions,
+  scope: IoScope | undefined,
+  onK8sComplete?: BuildCtxOptions['onK8sComplete']
+): Promise<K8sObject> {
+  const startMs = Date.now()
+  let url = server
+  try {
+    if (!readOptions.name) throw new K8sRequestError('K8S_CONFIG_ERROR', 'ctx.k8s.read needs a name', server, 'read')
+    const target = k8sResourcePath(server, readOptions, 'read')
+    target.pathname += `/${encodeURIComponent(readOptions.name)}`
+    url = target.toString()
+    const response = await doK8sFetch(url, readOptions, 'read', scope)
+    if (response.status < 200 || response.status >= 300) throw k8sApiError(response, url, 'read')
+    const object = JSON.parse(response.body) as K8sObject
+    onK8sComplete?.({ op: 'read', url: truncateUrl(url), status: response.status, duration_ms: Date.now() - startMs })
+    return object
+  } catch (err) {
+    const k8sErr = toK8sRequestError(err, url, 'read', undefined)
+    reportK8sError(scope, k8sErr, startMs)
+    throw k8sErr
+  }
+}
+
 interface ParsedFtpUrl {
   host: string
   port: number
@@ -1004,6 +1280,7 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
   const onHttpComplete = options?.onHttpComplete
   const onFtpComplete = options?.onFtpComplete
   const onS3Complete = options?.onS3Complete
+  const onK8sComplete = options?.onK8sComplete
   const testTimeoutMs = options?.testTimeoutMs
   const ctxStartMs = Date.now()
   const inFlight = new Set<InFlightCall>()
@@ -1058,6 +1335,17 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
       },
       async list(url, listOptions) {
         return doS3List(url, listOptions, scope, onS3Complete)
+      },
+    },
+    k8s: {
+      async get(url, k8sOptions) {
+        return doK8sGet(url, k8sOptions, scope, onK8sComplete)
+      },
+      async list(server, listOptions) {
+        return doK8sList(server, listOptions, scope, onK8sComplete)
+      },
+      async read(server, readOptions) {
+        return doK8sRead(server, readOptions, scope, onK8sComplete)
       },
     },
     assert(name, value, message) {

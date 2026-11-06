@@ -14,10 +14,12 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
       {
         instructions:
           'Sentinel is a synthetic testing & uptime monitoring platform. Tests are JavaScript ' +
-          'functions receiving a `ctx` object with three protocols — ctx.http (HTTP via undici), ' +
+          'functions receiving a `ctx` object with four protocols — ctx.http (HTTP via undici), ' +
           'ctx.ftp (ctx.ftp.ls/get via basic-ftp), and ctx.s3 (ctx.s3.get/head/list, SigV4-signed, works ' +
           'against any S3-compatible endpoint; list takes the bucket URL plus prefix/delimiter/all and ' +
-          'returns objects with key, size and lastModified) — plus ctx.assert, ctx.warn, ctx.log, ctx.now, and ' +
+          'returns objects with key, size and lastModified), and ctx.k8s (ctx.k8s.list/read/get: bearer-token ' +
+          'reads from a Kubernetes API server with an optional pinned CA, for CronJob/Job completion, Argo ' +
+          'Workflows and Deployment readiness) — plus ctx.assert, ctx.warn, ctx.log, ctx.now, and ' +
           'ctx.secrets. Tests are organized by free-form tags, which drive both the dashboard summary ' +
           '(get_dashboard_summary) and notification routing: a channel (Discord, Slack, webhook, email, ' +
           'or a Discord/Slack bot) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
