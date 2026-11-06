@@ -111,15 +111,19 @@ A named, global delivery target for alerts. Not scoped to a `Test` directly — 
 |-------|------|-------------|
 | `id` | `string` (nanoid) | Unique identifier |
 | `name` | `string` | Human-readable label |
-| `type` | `'discord' \| 'slack' \| 'webhook' \| 'email'` | Channel type |
+| `type` | `'discord' \| 'slack' \| 'webhook' \| 'email' \| 'discord_bot' \| 'slack_bot'` | Channel type. Webhook and email types post one message per event; bot types post one message per incident (see `IncidentThread`) |
 | `webhook_url` | `string \| null` | Target URL — required for `discord`/`slack`/`webhook` |
 | `email_to` | `string[] \| null` | Recipient addresses — required for `email` |
+| `channel_ref` | `string \| null` | Slack channel ID (`C…`) or Discord channel ID the bot posts into — required for `slack_bot`/`discord_bot` |
+| `bot_token_blob` | `bytea` | Bot token, stored with the same version-tagged cipher as `Secret.value_blob`. Never exposed; API responses carry `has_bot_token` instead |
 | `enabled` | `boolean` | Whether this channel is active |
 
 **Invariants:**
 - `webhook_url` must be a valid HTTPS URL when set
-- `type = 'email'` requires a non-empty `email_to`; every other type requires `webhook_url`
+- `type = 'email'` requires a non-empty `email_to`; `slack_bot`/`discord_bot` require a stored token and `channel_ref`; every other type requires `webhook_url` (enforced on create by the Zod schema and on update against the merged row)
+- The bot token is write-only: `PATCH` with `bot_token` replaces it, omitting it keeps it
 - A channel is global — it must be attached to a `Test` or a tag via `ChannelAssignment` before it receives anything
+- `POST /channels/:id/test` sends a one-off delivery check through any channel type, outside any incident
 
 ---
 
@@ -137,6 +141,31 @@ Attaches a `NotificationChannel` to a `Test` (directly) or to a tag (inherited b
 - Primary key is `(channel_id, scope_type, scope_value)` — one assignment per channel per scope
 - `event_types` must be non-empty and drawn only from `'fail' | 'warning' | 'recovery'`; defaults to all three (existing behavior) when not narrowed
 - A channel fires for a given test/event if **any** assignment matching that test — whether `scope_type = 'test'` directly, or `scope_type = 'tag'` via one of the test's tags — includes that event type. This lets a single test route, say, `warning` to one channel and `fail` to another without needing separate tests per event type.
+
+---
+
+### IncidentThread
+One incident as tracked on a bot channel: the provider's root message and the thread under it, so later events edit and reply instead of posting again. Backed by `notification_threads`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` (nanoid) | Unique identifier |
+| `test_id` | `string` | FK → Test (cascade) |
+| `channel_id` | `string` | FK → NotificationChannel (cascade) |
+| `state` | `'down' \| 'degraded'` | What the root message currently says |
+| `provider_root_id` | `string` | Slack message `ts` / Discord message id of the root |
+| `provider_thread_id` | `string` | Slack: same `ts`; Discord: the thread channel id |
+| `opened_at` | `timestamp` | When the root was posted — the downtime shown on recovery is measured from here |
+| `closed_at` | `timestamp \| null` | Set on recovery; `null` while the incident is open |
+| `last_update_at` | `timestamp` | Last thread reply; drives the heartbeat |
+| `last_update_message` | `string \| null` | Dedupe key (`state|error_message`) of the last reply |
+| `update_count` | `number` | Replies posted in the thread |
+
+**Invariants:**
+- At most one open thread per `(test_id, channel_id)` (partial unique index on `closed_at IS NULL`)
+- Opened only when the regular gating would alert (fail past the threshold outside the cooldown, or a warning); while open, every fail/warn evaluation of the test feeds it, including the ones the gating skips, and a reply is posted when the state or error message changed or the last reply is older than `INCIDENT_THREAD_HEARTBEAT_MS`
+- Closed on recovery regardless of the channel assignment's `event_types`: root edited to `up`, closing reply posted, thread archived (Discord) or ✅ reacted (Slack)
+- Closed threads are pruned with `NOTIFICATION_RETENTION_DAYS`; open threads are never pruned
 
 ---
 
@@ -169,6 +198,8 @@ Test (1) ──────────────────────→ (
 Test (1) ──────────────────────→ (M) UptimeDaily
 TestRun (1) ───────────────────→ (M) AssertionResult
 NotificationChannel (1) ───────→ (M) ChannelAssignment
+NotificationChannel (1) ───────→ (M) IncidentThread (bot types only)
+Test (1) ──────────────────────→ (M) IncidentThread
 
 ChannelAssignment.scope_value also matches tags (scope_type='tag'), which is a
 loose reference against Test.tags rather than a foreign key — a channel

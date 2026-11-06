@@ -81,6 +81,10 @@ pnpm workspaces manage the monorepo.
 - Warning alert fires on first `warn` result — no threshold, just cooldown
 - `lastNotificationAt` and `lastWarningAt` are tracked independently so a warning never suppresses a subsequent fail alert
 - Channel routing is filterable per event type: each `channel_assignments` row carries an `event_types` array, and the channel-selection query filters on the event type already resolved above — so a single test can route `warning` to one channel and `fail` to another without needing separate tests per event type
+- Two delivery models. Webhook and email channels get one message per event (`notifier/payloads.ts` builds the Discord embed, Slack attachment, generic JSON and email bodies). `discord_bot` and `slack_bot` channels go through `notifier/incidents.ts`: one root message per incident, edited on state change and on recovery, with every update as a reply in a thread (`notification_threads` holds the provider handles). Transports live in `notifier/transports/` behind one `IncidentTransport` interface (open / updateRoot / reply / close / post); Slack uses the Web API with a bot token, Discord the REST API with a bot token. No new dependency: both are plain `undici` calls
+- Open threads keep receiving updates even when the threshold/cooldown gating skips an alert (dedupe on `state|error_message`, heartbeat every `INCIDENT_THREAD_HEARTBEAT_MS`), and are closed on recovery regardless of the assignment's event filter. One extra query per notifier batch (`getOpenThreads`) feeds this
+- Bot tokens are stored with the secrets cipher and decrypted only at delivery time; `GET /channels` never selects the blob
+- `POST /channels/:id/test` (dashboard "send test", MCP `test_channel`) delivers a one-off message through any channel type
 
 ### Observability
 - **Pino** for structured JSON logging — logs are the primary operational output

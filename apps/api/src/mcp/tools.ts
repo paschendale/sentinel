@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { Test } from '@sentinel/shared'
-import { TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema } from '@sentinel/shared'
+import { TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
 import { runTest } from '../executor/run.js'
 import { enqueue } from '../db/result-buffer.js'
 
@@ -16,13 +16,7 @@ function textResult(text: string, isError = false): ToolResult {
 // Input shapes are advisory for the MCP client — every write is re-validated by the
 // route it forwards to, so refined schemas (CreateTestSchema, CreateNotificationChannelSchema)
 // are represented here by their unrefined field shapes.
-const channelFieldsShape = {
-  name: z.string().min(1).max(100),
-  type: z.enum(['discord', 'slack', 'webhook', 'email']),
-  webhook_url: z.string().url().optional(),
-  email_to: z.array(z.string().email()).min(1).max(10).optional(),
-  enabled: z.boolean().optional(),
-}
+const channelFieldsShape = NotificationChannelFieldsShape
 
 const assignmentShape = {
   channel_id: z.string().min(1),
@@ -176,7 +170,12 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'create_channel',
     {
       description:
-        'Create a notification channel. webhook_url is required for discord/slack/webhook types; email_to is required for email.',
+        'Create a notification channel. Types: discord, slack, webhook (one message per event, webhook_url required); ' +
+        'email (email_to required); discord_bot and slack_bot (bot_token + channel_ref required). Bot channels post one ' +
+        'message per incident and keep its history in a thread: the root is edited on state change and on recovery, ' +
+        'updates go in the thread, and the thread is archived when the test recovers. bot_token is write-only ' +
+        '(responses carry has_bot_token only). channel_ref is the Slack channel ID (C…) or Discord channel ID. ' +
+        'After creating a channel, call test_channel to confirm delivery.',
       inputSchema: channelFieldsShape,
     },
     async (input) => forward('POST', '/channels', input)
@@ -185,7 +184,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
   server.registerTool(
     'update_channel',
     {
-      description: 'Update fields of a notification channel (partial update).',
+      description: 'Update fields of a notification channel (partial update). Passing bot_token replaces the stored token.',
       inputSchema: { id: z.string(), ...channelFieldsShape },
     },
     async ({ id, ...fields }) => forward('PATCH', `/channels/${encodeURIComponent(id)}`, fields)
@@ -195,6 +194,17 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'delete_channel',
     { description: 'Delete a notification channel and its assignments.', inputSchema: { id: z.string() } },
     async ({ id }) => forward('DELETE', `/channels/${encodeURIComponent(id)}`)
+  )
+
+  server.registerTool(
+    'test_channel',
+    {
+      description:
+        'Send a one-off test message through a notification channel, outside any incident, to confirm the webhook, ' +
+        'bot token, channel ID or email address works. Returns ok and the HTTP status.',
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => forward('POST', `/channels/${encodeURIComponent(id)}/test`)
   )
 
   server.registerTool(

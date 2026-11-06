@@ -24,7 +24,8 @@ export async function getAssignedChannels(
   scopeValue: string,
 ): Promise<AssignedChannel[]> {
   const { rows } = await pool.query<AssignedChannel>(
-    `SELECT nc.id, nc.name, nc.type, nc.webhook_url, nc.email_to, nc.enabled, ca.event_types
+    `SELECT nc.id, nc.name, nc.type, nc.webhook_url, nc.email_to, nc.channel_ref,
+            (nc.bot_token_blob IS NOT NULL) AS has_bot_token, nc.enabled, ca.event_types
      FROM notification_channels nc
      JOIN channel_assignments ca ON ca.channel_id = nc.id
      WHERE ca.scope_type = $1 AND ca.scope_value = $2
@@ -49,12 +50,15 @@ export async function getEffectiveChannelsForTest(testId: string): Promise<Effec
     type: EffectiveChannelAssignment['type']
     webhook_url: string | null
     email_to: string[] | null
+    channel_ref: string | null
+    has_bot_token: boolean
     enabled: boolean
     scope_type: 'test' | 'tag'
     scope_value: string
     event_types: NotificationEventType[]
   }>(
-    `SELECT nc.id, nc.name, nc.type, nc.webhook_url, nc.email_to, nc.enabled,
+    `SELECT nc.id, nc.name, nc.type, nc.webhook_url, nc.email_to, nc.channel_ref,
+            (nc.bot_token_blob IS NOT NULL) AS has_bot_token, nc.enabled,
             ca.scope_type, ca.scope_value, ca.event_types
      FROM notification_channels nc
      JOIN tests t ON t.id = $1
@@ -78,6 +82,8 @@ export async function getEffectiveChannelsForTest(testId: string): Promise<Effec
         type: row.type,
         webhook_url: row.webhook_url,
         email_to: row.email_to,
+        channel_ref: row.channel_ref,
+        has_bot_token: row.has_bot_token,
         enabled: row.enabled,
         event_types: [...row.event_types],
         sources: [source],

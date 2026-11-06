@@ -1,4 +1,5 @@
 import { AGG_RETENTION_DAYS, NOTIFICATION_RETENTION_DAYS, PRUNE_BATCH_SIZE, RAW_RETENTION_DAYS } from '../config.js'
+import { pruneClosedThreads } from './queries/incident-threads.js'
 import { logger } from '../logger.js'
 import { pool } from './pool.js'
 
@@ -203,6 +204,17 @@ export async function runAggregation(): Promise<void> {
     )
   } catch (err) {
     logger.error({ event: 'aggregator.prune_notification_events_failed', err }, 'aggregator failed to prune notification_events')
+  }
+
+  try {
+    const cutoff = new Date(Date.now() - NOTIFICATION_RETENTION_DAYS * 86_400_000)
+    const deletedThreads = await pruneClosedThreads(cutoff)
+    logger.info(
+      { event: 'aggregator.prune_notification_threads', retention_days: NOTIFICATION_RETENTION_DAYS, deleted_rows: deletedThreads },
+      'aggregator pruned closed notification_threads rows',
+    )
+  } catch (err) {
+    logger.error({ event: 'aggregator.prune_notification_threads_failed', err }, 'aggregator failed to prune notification_threads')
   }
 
   logger.info({ event: 'aggregator.run_complete', duration_ms: Date.now() - runStartedAt }, 'aggregator maintenance run complete')

@@ -72,7 +72,8 @@ This starts only PostgreSQL and the Sentinel API (`paschendale/sentinel-api`) on
 | `FTP_TEMP_DIR` | No | Directory `ctx.ftp.get` and `ctx.s3.get` write temp downloads to (default: OS temp dir + `sentinel-ftp`) |
 | `FTP_MAX_DOWNLOAD_BYTES` | No | Max bytes `ctx.ftp.get` or `ctx.s3.get` will download before aborting (default: `5242880`, 5MB) |
 | `SENTINEL_INSTANCE` | No | Name for this deployment (letters, digits, `.`, `_`, `-`; max 64), e.g. `sao-paulo-1`. Every outbound request already carries `User-Agent: Sentinel (+https://github.com/paschendale/sentinel)`; when this is set, the User-Agent adds `; instance=<name>` and an `X-Sentinel-Instance: <name>` header is sent, so monitored servers can tell which location a probe came from |
-| `SECRETS_ENCRYPTION_KEY` | No | Base64-encoded 32-byte AES-256-GCM key for encrypting `ctx.secrets` values at rest (generate with `openssl rand -base64 32`). If unset, secrets are stored **unencrypted** — `ctx.secrets` still works, but the dashboard shows a warning banner |
+| `INCIDENT_THREAD_HEARTBEAT_MS` | No | How often an open incident thread on a bot channel gets a "still down" reply while nothing about the failure changes (default: `3600000`, 1 hour) |
+| `SECRETS_ENCRYPTION_KEY` | No | Base64-encoded 32-byte AES-256-GCM key for encrypting `ctx.secrets` values and bot channel tokens at rest (generate with `openssl rand -base64 32`). If unset, secrets are stored **unencrypted** — `ctx.secrets` still works, but the dashboard shows a warning banner |
 
 ### Single Container (no Compose)
 
@@ -468,13 +469,32 @@ When creating a test, configure:
 
 Sentinel sends alerts on state transitions.
 
-**Supported channel types:** Discord webhook, Slack webhook, generic webhook.
+**Supported channel types:** Discord webhook, Slack webhook, generic webhook, email (Resend), Discord bot, Slack bot.
+
+Webhook and email channels post **one message per event**. Bot channels post **one message per incident** and keep the history in a thread (see below).
 
 ### Setup
 
 1. Go to the **Channels** page in the dashboard.
-2. Create a channel with a name and webhook URL.
-3. Assign channels to tests (per-test) or to tags (all tests with that tag inherit the channel). Each assignment can be narrowed to a subset of event types (see below), so a single test can route warnings and failures to different channels instead of needing separate tests per event type.
+2. Create a channel with a name and a webhook URL, or (bot types) a bot token and the ID of the channel to post into.
+3. Click **send test** on the channel to confirm delivery (`POST /channels/:id/test` does the same).
+4. Assign channels to tests (per-test) or to tags (all tests with that tag inherit the channel). Each assignment can be narrowed to a subset of event types (see below), so a single test can route warnings and failures to different channels instead of needing separate tests per event type.
+
+### Bot channels: one message per incident
+
+A `discord_bot` or `slack_bot` channel posts through a bot token instead of a webhook, which lets Sentinel edit what it posted:
+
+- When a test first fails past its threshold (or first warns), the bot posts the **root message** and opens a **thread** under it.
+- Everything that happens while the incident lasts goes **into the thread**: the error message changing, the test flipping between failing and degraded, and a "still down" heartbeat every `INCIDENT_THREAD_HEARTBEAT_MS` (default 1 hour) while nothing changes. The channel itself stays at one line per incident.
+- When the test recovers, the root message is **edited** to the green "back UP" state with the downtime, a closing reply is posted in the thread, and the thread is archived (Discord) or marked with a ✅ reaction (Slack).
+
+An open incident is always closed where it was opened, even if the channel's assignment does not include the `recovery` event type. Failures below the threshold and failures inside the cooldown still feed an already-open thread; they just never open a new one.
+
+**Slack bot:** create a Slack app, add the bot token scope `chat:write` (and `reactions:write` for the ✅ on recovery), install it, invite the bot to the channel (`/invite @your-bot`), and use the Bot User OAuth Token (`xoxb-…`) plus the channel ID (`C…`, shown at the bottom of the channel details).
+
+**Discord bot:** create an application at discord.com/developers, add a bot and copy its token, invite it with the `bot` scope and the permissions View Channels, Send Messages, Create Public Threads, Send Messages in Threads and Embed Links, then use the channel ID (enable Developer Mode, right-click the channel, Copy Channel ID).
+
+Bot tokens are **write-only**: they are stored encrypted when `SECRETS_ENCRYPTION_KEY` is set (plaintext otherwise, like secrets) and never returned by any API response, which only carries `has_bot_token`.
 
 ### Alert types
 
@@ -500,7 +520,7 @@ A test's **Notifications** section on its detail page (`/tests/:id`) shows the f
 - **Failure alert** — includes test name, failure reason, last response time, and consecutive failure count.
 - **Recovery alert** — includes test name, downtime duration since the first alert, and last response time.
 
-Discord alerts use colored embeds (yellow for warning, red for failure, green for recovery). Slack alerts use attachments with the same colors. Generic webhooks receive a JSON payload with an `event` field (`"warning"`, `"fail"`, or `"recovery"`).
+Discord alerts use colored embeds (yellow for warning, red for failure, green for recovery). Slack alerts use attachments with the same colors. Generic webhooks receive a JSON payload with an `event` field (`"warning"`, `"fail"`, or `"recovery"`); a channel test sends `event: "test"`. Bot channels use the same embed/attachment shapes for the root message and plain one-line replies in the thread.
 
 ---
 

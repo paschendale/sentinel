@@ -8,18 +8,31 @@ import { ChannelTypeBadge } from '../../_components/channel-type-badge'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
-const CHANNEL_TYPES: NotificationChannelType[] = ['discord', 'slack', 'webhook', 'email']
+const CHANNEL_TYPES: NotificationChannelType[] = ['discord', 'slack', 'webhook', 'email', 'discord_bot', 'slack_bot']
+
+function isBotType(type: NotificationChannelType): boolean {
+  return type === 'discord_bot' || type === 'slack_bot'
+}
+
+const TYPE_HELP: Partial<Record<NotificationChannelType, string>> = {
+  discord_bot:
+    'One message per incident, updates in a thread. Needs a bot with View Channels, Send Messages, Create Public Threads, Send Messages in Threads and Embed Links on the channel.',
+  slack_bot:
+    'One message per incident, updates in a thread. Needs a bot token (xoxb-…) with chat:write, invited to the channel.',
+}
 
 interface ChannelFormState {
   name: string
   type: NotificationChannelType
   webhook_url: string
   email_to: string  // comma-separated for email type
+  channel_ref: string
+  bot_token: string // blank on edit = keep the stored token
   enabled: boolean
 }
 
 function emptyForm(): ChannelFormState {
-  return { name: '', type: 'discord', webhook_url: '', email_to: '', enabled: true }
+  return { name: '', type: 'discord', webhook_url: '', email_to: '', channel_ref: '', bot_token: '', enabled: true }
 }
 
 function channelToForm(c: NotificationChannel): ChannelFormState {
@@ -28,6 +41,8 @@ function channelToForm(c: NotificationChannel): ChannelFormState {
     type: c.type,
     webhook_url: c.webhook_url ?? '',
     email_to: (c.email_to ?? []).join(', '),
+    channel_ref: c.channel_ref ?? '',
+    bot_token: '',
     enabled: c.enabled,
   }
 }
@@ -41,6 +56,15 @@ function formToPayload(form: ChannelFormState) {
       enabled: form.enabled,
     }
   }
+  if (isBotType(form.type)) {
+    return {
+      name: form.name,
+      type: form.type,
+      channel_ref: form.channel_ref.trim(),
+      ...(form.bot_token.trim() ? { bot_token: form.bot_token.trim() } : {}),
+      enabled: form.enabled,
+    }
+  }
   return {
     name: form.name,
     type: form.type,
@@ -49,16 +73,22 @@ function formToPayload(form: ChannelFormState) {
   }
 }
 
+const inputClass =
+  'w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600'
+const labelClass = 'block text-zinc-500 text-xs mb-1 tracking-wider uppercase'
+
 interface ChannelFormProps {
   initial: ChannelFormState
   submitLabel: string
+  /** Editing an existing channel: a stored bot token may be kept by leaving the field blank. */
+  hasStoredToken: boolean
   onSubmit: (data: ChannelFormState) => Promise<void>
   onCancel: () => void
   error: string | null
   busy: boolean
 }
 
-function ChannelForm({ initial, submitLabel, onSubmit, onCancel, error, busy }: ChannelFormProps) {
+function ChannelForm({ initial, submitLabel, hasStoredToken, onSubmit, onCancel, error, busy }: ChannelFormProps) {
   const [form, setForm] = useState<ChannelFormState>(initial)
 
   function set<K extends keyof ChannelFormState>(k: K, v: ChannelFormState[K]) {
@@ -70,27 +100,29 @@ function ChannelForm({ initial, submitLabel, onSubmit, onCancel, error, busy }: 
     await onSubmit(form)
   }
 
+  const help = TYPE_HELP[form.type]
+
   return (
     <form onSubmit={e => void handleSubmit(e)} className="flex flex-col gap-3 mt-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-zinc-500 text-xs mb-1 tracking-wider uppercase">Name</label>
+          <label className={labelClass}>Name</label>
           <input
             type="text"
             value={form.name}
             onChange={e => set('name', e.target.value)}
             required
             maxLength={100}
-            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+            className={inputClass}
             placeholder="my-discord"
           />
         </div>
         <div>
-          <label className="block text-zinc-500 text-xs mb-1 tracking-wider uppercase">Type</label>
+          <label className={labelClass}>Type</label>
           <select
             value={form.type}
             onChange={e => set('type', e.target.value as NotificationChannelType)}
-            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+            className={inputClass}
           >
             {CHANNEL_TYPES.map(t => (
               <option key={t} value={t}>{t}</option>
@@ -98,15 +130,16 @@ function ChannelForm({ initial, submitLabel, onSubmit, onCancel, error, busy }: 
           </select>
         </div>
       </div>
-      {form.type === 'email' ? (
+      {help && <p className="text-zinc-500 text-xs">{help}</p>}
+      {form.type === 'email' && (
         <div>
-          <label className="block text-zinc-500 text-xs mb-1 tracking-wider uppercase">Recipients</label>
+          <label className={labelClass}>Recipients</label>
           <input
             type="text"
             value={form.email_to}
             onChange={e => set('email_to', e.target.value)}
             required
-            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+            className={inputClass}
             placeholder="you@example.com, team@example.com"
           />
           {form.email_to.trim() && (
@@ -117,15 +150,44 @@ function ChannelForm({ initial, submitLabel, onSubmit, onCancel, error, busy }: 
             </div>
           )}
         </div>
-      ) : (
+      )}
+      {isBotType(form.type) && (
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelClass}>Channel ID</label>
+            <input
+              type="text"
+              value={form.channel_ref}
+              onChange={e => set('channel_ref', e.target.value)}
+              required
+              maxLength={100}
+              className={inputClass}
+              placeholder={form.type === 'slack_bot' ? 'C0123456789' : '123456789012345678'}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Bot token</label>
+            <input
+              type="password"
+              value={form.bot_token}
+              onChange={e => set('bot_token', e.target.value)}
+              required={!hasStoredToken}
+              autoComplete="off"
+              className={inputClass}
+              placeholder={hasStoredToken ? 'unchanged' : form.type === 'slack_bot' ? 'xoxb-…' : 'bot token'}
+            />
+          </div>
+        </div>
+      )}
+      {!isBotType(form.type) && form.type !== 'email' && (
         <div>
-          <label className="block text-zinc-500 text-xs mb-1 tracking-wider uppercase">Webhook URL</label>
+          <label className={labelClass}>Webhook URL</label>
           <input
             type="url"
             value={form.webhook_url}
             onChange={e => set('webhook_url', e.target.value)}
             required
-            className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm px-3 py-2 outline-none focus:border-zinc-600"
+            className={inputClass}
             placeholder="https://discord.com/api/webhooks/..."
           />
         </div>
@@ -161,6 +223,16 @@ function ChannelForm({ initial, submitLabel, onSubmit, onCancel, error, busy }: 
   )
 }
 
+async function readError(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json() as { error?: unknown }
+    if (typeof body.error === 'string') return body.error
+  } catch {
+    // not JSON
+  }
+  return fallback
+}
+
 interface ChannelRowProps {
   channel: NotificationChannel
   onUpdated: () => void
@@ -171,6 +243,7 @@ function ChannelRow({ channel, onUpdated }: ChannelRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [testState, setTestState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle')
 
   async function handleUpdate(data: ChannelFormState) {
     setBusy(true)
@@ -182,7 +255,7 @@ function ChannelRow({ channel, onUpdated }: ChannelRowProps) {
         body: JSON.stringify(formToPayload(data)),
       })
       if (!res.ok) {
-        setError('Save failed.')
+        setError(await readError(res, 'Save failed.'))
         return
       }
       setEditing(false)
@@ -214,10 +287,28 @@ function ChannelRow({ channel, onUpdated }: ChannelRowProps) {
     }
   }
 
+  async function handleTest() {
+    setTestState('sending')
+    setError(null)
+    try {
+      const res = await fetchWithAuth(`${API_URL}/channels/${channel.id}/test`, { method: 'POST' })
+      if (!res.ok) {
+        setError(await readError(res, 'Test message failed.'))
+        setTestState('failed')
+        return
+      }
+      setTestState('sent')
+      setTimeout(() => setTestState('idle'), 3000)
+    } catch {
+      setError('Network error.')
+      setTestState('failed')
+    }
+  }
+
   return (
     <div className="py-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <ChannelTypeBadge type={channel.type} />
           <span className="text-zinc-100 text-sm">{channel.name}</span>
           {!channel.enabled && <span className="text-zinc-600 text-xs">disabled</span>}
@@ -231,8 +322,21 @@ function ChannelRow({ channel, onUpdated }: ChannelRowProps) {
               {channel.email_to.join(', ')}
             </span>
           )}
+          {channel.channel_ref && (
+            <span className="text-zinc-600 text-xs font-mono truncate max-w-xs">
+              {channel.channel_ref}{channel.has_bot_token ? '' : ' · no token'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4 text-sm">
+          <button
+            type="button"
+            onClick={() => void handleTest()}
+            disabled={testState === 'sending'}
+            className="text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+          >
+            {testState === 'sending' ? 'sending…' : testState === 'sent' ? 'sent ✓' : 'send test'}
+          </button>
           <button
             type="button"
             onClick={() => { setEditing(e => !e); setConfirmDelete(false) }}
@@ -275,6 +379,7 @@ function ChannelRow({ channel, onUpdated }: ChannelRowProps) {
         <ChannelForm
           initial={channelToForm(channel)}
           submitLabel="Save"
+          hasStoredToken={channel.has_bot_token}
           onSubmit={handleUpdate}
           onCancel={() => setEditing(false)}
           error={null}
@@ -305,7 +410,7 @@ export function ChannelManager({ channels }: { channels: NotificationChannel[] }
         body: JSON.stringify(formToPayload(data)),
       })
       if (!res.ok) {
-        setCreateError('Create failed.')
+        setCreateError(await readError(res, 'Create failed.'))
         return
       }
       setShowCreate(false)
@@ -335,6 +440,7 @@ export function ChannelManager({ channels }: { channels: NotificationChannel[] }
           <ChannelForm
             initial={emptyForm()}
             submitLabel="Create"
+            hasStoredToken={false}
             onSubmit={handleCreate}
             onCancel={() => { setShowCreate(false); setCreateError(null) }}
             error={createError}

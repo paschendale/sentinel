@@ -41,6 +41,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
 
@@ -78,6 +80,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
 
@@ -109,6 +113,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({
         rows: [{ id: 'ch-1', type: 'webhook', webhook_url: 'https://example.com/webhook', test_name: 'API Prod Check' }],
@@ -123,6 +129,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({
         rows: [{ id: 'ch-1', type: 'webhook', webhook_url: 'https://example.com/webhook', test_name: 'API Prod Check' }],
@@ -161,6 +169,8 @@ describe('triggerNotifications', () => {
         cooldown_ms: 300000,
       }],
     } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     triggerNotifications([{
       test_id: 'test-1',
@@ -188,6 +198,8 @@ describe('triggerNotifications', () => {
         cooldown_ms: 300000,
       }],
     } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     triggerNotifications([{
       test_id: 'test-1',
@@ -215,6 +227,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
 
@@ -245,6 +259,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({
         rows: [{ id: 'ch-1', type: 'webhook', webhook_url: 'https://example.com/webhook', test_name: 'API Prod Check' }],
@@ -278,6 +294,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({
         rows: [{ id: 'ch-1', type: 'webhook', webhook_url: 'https://example.com/webhook', test_name: 'API Prod Check' }],
@@ -308,6 +326,8 @@ describe('triggerNotifications', () => {
           cooldown_ms: 300000,
         }],
       } as never)
+      // open incident threads lookup (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({ rows: [] } as never)
       .mockResolvedValueOnce({
         rows: [{ id: 'ch-1', type: 'webhook', webhook_url: 'https://example.com/webhook', test_name: 'API Prod Check' }],

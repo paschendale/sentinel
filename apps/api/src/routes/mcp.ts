@@ -18,10 +18,13 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
           'ctx.ftp (ctx.ftp.ls/get via basic-ftp), and ctx.s3 (ctx.s3.get/head, SigV4-signed, works ' +
           'against any S3-compatible endpoint) — plus ctx.assert, ctx.warn, ctx.log, ctx.now, and ' +
           'ctx.secrets. Tests are organized by free-form tags, which drive both the dashboard summary ' +
-          '(get_dashboard_summary) and notification routing: a channel (Discord, Slack, webhook, or ' +
-          'email) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
+          '(get_dashboard_summary) and notification routing: a channel (Discord, Slack, webhook, email, ' +
+          'or a Discord/Slack bot) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
           'fail/warning/recovery event types, and only fires on state transitions past a failure ' +
-          'threshold and cooldown. Secrets are write-only (never readable back) and reach test code as ' +
+          'threshold and cooldown. Webhook channels post one message per event; discord_bot and slack_bot ' +
+          'channels (bot_token + channel_ref) post one message per incident, keep every update in a thread ' +
+          'under it, edit the root on state change and recovery, and archive the thread when the test ' +
+          'recovers. test_channel sends a one-off delivery check through any channel. Secrets are write-only (never readable back) and reach test code as ' +
           'ctx.secrets.NAME. Outbound identification: every ctx.http / ctx.s3 request and notification ' +
           'webhook sends `User-Agent: Sentinel (+https://github.com/paschendale/sentinel)` — with ' +
           '`; instance=<name>` and an `X-Sentinel-Instance: <name>` header when the deployment sets ' +
