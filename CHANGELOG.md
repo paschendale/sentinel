@@ -1,3 +1,10 @@
+# [1.29.0](https://github.com/paschendale/sentinel/compare/v1.28.0...v1.29.0) (2026-11-06)
+
+
+### Features
+
+* **executor:** ctx.k8s for read-only Kubernetes API checks ([59b4028](https://github.com/paschendale/sentinel/commit/59b40283e48087e659f5be2a4d5e54b7bcf890cc))
+
 # [1.28.0](https://github.com/paschendale/sentinel/compare/v1.27.0...v1.28.0) (2026-11-06)
 
 
