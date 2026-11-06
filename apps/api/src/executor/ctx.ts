@@ -56,6 +56,35 @@ export interface S3Options {
   timeout?: number
 }
 
+export interface S3ListOptions extends S3Options {
+  /** Only keys starting with this prefix. */
+  prefix?: string
+  /** Roll keys up at this delimiter (usually '/'); rolled-up groups come back in `prefixes`. */
+  delimiter?: string
+  /** Keys per page, 1..1000 (default: the service's own default, 1000). */
+  maxKeys?: number
+  /** Start listing after this key (lexicographic). */
+  startAfter?: string
+  /** Follow continuation tokens until the listing is exhausted, capped at S3_LIST_MAX_KEYS keys. Default: one page. */
+  all?: boolean
+}
+
+export interface S3Object {
+  key: string
+  size: number
+  lastModified: Date | null
+  etag: string | null
+  storageClass: string | null
+}
+
+export interface S3ListResult {
+  objects: S3Object[]
+  /** Common prefixes, when `delimiter` was given. */
+  prefixes: string[]
+  /** True when more keys exist beyond what was returned (one page without `all`, or the cap with it). */
+  truncated: boolean
+}
+
 export interface TestContext {
   http: {
     get(url: string, options?: HttpOptions): Promise<HttpResponse>
@@ -68,6 +97,7 @@ export interface TestContext {
   s3: {
     get(url: string, options: S3Options): Promise<HttpResponse>
     head(url: string, options: S3Options): Promise<HttpResponse>
+    list(url: string, options: S3ListOptions): Promise<S3ListResult>
   }
   assert: (name: string, value: unknown, message?: string) => void
   warn: (message: string) => void
@@ -103,11 +133,14 @@ export interface FtpCompleteInfo {
 }
 
 export interface S3CompleteInfo {
-  method: 'GET' | 'HEAD'
+  method: 'GET' | 'HEAD' | 'LIST'
   url: string
   status: number
   duration_ms: number
   region: string
+  /** LIST only: keys returned and pages fetched. */
+  keys?: number
+  pages?: number
 }
 
 export interface IoErrorInfo {
@@ -243,7 +276,7 @@ export class FtpRequestError extends Error {
 }
 
 export class S3RequestError extends Error {
-  readonly code: 'S3_SIGNING_ERROR' | 'S3_FETCH_ERROR' | 'S3_SIZE_LIMIT_ERROR' | 'S3_TIMEOUT_ERROR'
+  readonly code: 'S3_SIGNING_ERROR' | 'S3_FETCH_ERROR' | 'S3_SIZE_LIMIT_ERROR' | 'S3_TIMEOUT_ERROR' | 'S3_LIST_ERROR'
   readonly url: string
   readonly method: string
 
@@ -482,7 +515,7 @@ function signS3OrThrow(method: 'GET' | 'HEAD', url: string, s3Options: S3Options
 function toS3RequestError(
   err: unknown,
   url: string,
-  method: 'GET' | 'HEAD',
+  method: 'GET' | 'HEAD' | 'LIST',
   timeoutMs: number | undefined,
   timeoutSignal: AbortSignal | undefined,
   scope: IoScope | undefined,
@@ -551,6 +584,161 @@ async function doS3Head(
     return response
   } catch (err) {
     const s3Err = toS3RequestError(err, url, 'HEAD', timeoutMs, undefined, scope, undefined)
+    reportS3Error(scope, s3Err, startMs)
+    throw s3Err
+  }
+}
+
+/** Hard cap on keys a single ctx.s3.list({ all: true }) call accumulates across pages. */
+export const S3_LIST_MAX_KEYS = 10_000
+
+function decodeXmlText(value: string): string {
+  return value.replace(/&(quot|amp|lt|gt|apos|#x[0-9a-fA-F]+|#\d+);/g, (_match, entity: string) => {
+    switch (entity) {
+      case 'quot':
+        return '"'
+      case 'amp':
+        return '&'
+      case 'lt':
+        return '<'
+      case 'gt':
+        return '>'
+      case 'apos':
+        return "'"
+      default:
+        return String.fromCodePoint(entity[1] === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10))
+    }
+  })
+}
+
+/** Text of the first `<tag>…</tag>` child in `xml`, entity-decoded; null when absent or self-closing. */
+function xmlText(xml: string, tag: string): string | null {
+  const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(xml)
+  return match ? decodeXmlText(match[1] ?? '') : null
+}
+
+function xmlBlocks(xml: string, tag: string): string[] {
+  const blocks: string[] = []
+  const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g')
+  for (let match = re.exec(xml); match !== null; match = re.exec(xml)) blocks.push(match[1] ?? '')
+  return blocks
+}
+
+interface ListPage {
+  objects: S3Object[]
+  prefixes: string[]
+  truncated: boolean
+  nextToken: string | null
+}
+
+// ListObjectsV2 responses are flat, fixed-shape XML, so a few regexes cover them without an XML
+// dependency. Keys are entity-decoded (S3 escapes &, <, > and quotes); no `encoding-type` is
+// requested so the same parser works against every S3-compatible service.
+function parseListObjectsV2(xml: string, url: string): ListPage {
+  if (!/<ListBucketResult[\s>]/.test(xml)) {
+    throw new S3RequestError('S3_LIST_ERROR', `S3 list returned an unexpected body for ${url}: ${xml.slice(0, 200)}`, url, 'LIST')
+  }
+  const objects: S3Object[] = xmlBlocks(xml, 'Contents').map((block) => {
+    const lastModified = xmlText(block, 'LastModified')
+    const parsed = lastModified === null ? NaN : Date.parse(lastModified)
+    const etag = xmlText(block, 'ETag')
+    return {
+      key: xmlText(block, 'Key') ?? '',
+      size: Number(xmlText(block, 'Size') ?? 0),
+      lastModified: Number.isNaN(parsed) ? null : new Date(parsed),
+      etag: etag === null ? null : etag.replace(/^"|"$/g, ''),
+      storageClass: xmlText(block, 'StorageClass'),
+    }
+  })
+  const prefixes = xmlBlocks(xml, 'CommonPrefixes')
+    .map((block) => xmlText(block, 'Prefix'))
+    .filter((prefix): prefix is string => prefix !== null)
+  return {
+    objects,
+    prefixes,
+    truncated: xmlText(xml, 'IsTruncated') === 'true',
+    nextToken: xmlText(xml, 'NextContinuationToken'),
+  }
+}
+
+function buildListUrl(base: URL, listOptions: S3ListOptions, continuationToken: string | null): string {
+  const params: Array<[string, string]> = [['list-type', '2']]
+  if (listOptions.prefix) params.push(['prefix', listOptions.prefix])
+  if (listOptions.delimiter) params.push(['delimiter', listOptions.delimiter])
+  if (listOptions.maxKeys !== undefined) params.push(['max-keys', String(listOptions.maxKeys)])
+  if (listOptions.startAfter) params.push(['start-after', listOptions.startAfter])
+  if (continuationToken !== null) params.push(['continuation-token', continuationToken])
+  const url = new URL(base)
+  // Encoded by hand (not URLSearchParams) so spaces become %20, matching the SigV4 canonical form.
+  url.search = '?' + params.map(([key, value]) => `${awsUriEncode(key)}=${awsUriEncode(value)}`).join('&')
+  return url.toString()
+}
+
+async function doS3List(
+  url: string,
+  listOptions: S3ListOptions,
+  scope: IoScope | undefined,
+  onS3Complete?: BuildCtxOptions['onS3Complete']
+): Promise<S3ListResult> {
+  const { maxKeys } = listOptions
+  if (maxKeys !== undefined && (!Number.isInteger(maxKeys) || maxKeys < 1 || maxKeys > 1000)) {
+    throw new TypeError(`maxKeys must be an integer between 1 and 1000, got ${String(maxKeys)}`)
+  }
+  const timeoutMs = resolveTimeoutMs(listOptions.timeout, scope)
+  const startMs = Date.now()
+  const objects: S3Object[] = []
+  const prefixes: string[] = []
+  let truncated = false
+  let continuationToken: string | null = null
+  let pages = 0
+  let lastStatus = 0
+  try {
+    let base: URL
+    try {
+      base = new URL(url)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new S3RequestError('S3_SIGNING_ERROR', `Failed to sign S3 request for LIST ${url}: ${message}`, url, 'LIST', {
+        cause: err instanceof Error ? err : undefined,
+      })
+    }
+    // doFetch tracks each page and enforces the per-request timeout; S3 reports its own error event below.
+    const fetchScope = scope && { ...scope, onIoError: undefined }
+    for (;;) {
+      const pageUrl = buildListUrl(base, listOptions, continuationToken)
+      const signedHeaders = signS3OrThrow('GET', pageUrl, listOptions)
+      const response = await doFetch(pageUrl, { method: 'GET', headers: signedHeaders }, { scope: fetchScope, timeoutMs })
+      pages += 1
+      lastStatus = response.status
+      if (response.status < 200 || response.status >= 300) {
+        const code = xmlText(response.body, 'Code')
+        const message = xmlText(response.body, 'Message')
+        throw new S3RequestError(
+          'S3_LIST_ERROR',
+          `S3 list failed for ${url}: HTTP ${response.status}${code ? ` ${code}` : ''}${message ? `: ${message}` : ''}`,
+          url,
+          'LIST'
+        )
+      }
+      const page = parseListObjectsV2(response.body, url)
+      objects.push(...page.objects)
+      prefixes.push(...page.prefixes)
+      truncated = page.truncated
+      continuationToken = page.nextToken
+      if (!listOptions.all || !truncated || continuationToken === null || objects.length >= S3_LIST_MAX_KEYS) break
+    }
+    onS3Complete?.({
+      method: 'LIST',
+      url: truncateUrl(url),
+      status: lastStatus,
+      duration_ms: Date.now() - startMs,
+      region: listOptions.region,
+      keys: objects.length,
+      pages,
+    })
+    return { objects, prefixes, truncated }
+  } catch (err) {
+    const s3Err = toS3RequestError(err, url, 'LIST', timeoutMs, undefined, scope, undefined)
     reportS3Error(scope, s3Err, startMs)
     throw s3Err
   }
@@ -865,6 +1053,9 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
       },
       async head(url, s3Options) {
         return doS3Head(url, s3Options, scope, onS3Complete)
+      },
+      async list(url, listOptions) {
+        return doS3List(url, listOptions, scope, onS3Complete)
       },
     },
     assert(name, value, message) {

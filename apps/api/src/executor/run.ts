@@ -81,7 +81,8 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
     onS3Complete: (info) => {
       runLog.info(
         { event: 'test.s3', ...info },
-        `S3 ${info.method} ${info.url} -> ${info.status} (${info.duration_ms}ms, region=${info.region})`
+        `S3 ${info.method} ${info.url} -> ${info.status} (${info.duration_ms}ms, region=${info.region}` +
+          (info.keys === undefined ? ')' : `, keys=${info.keys}, pages=${info.pages ?? 1})`)
       )
     },
   })

@@ -255,9 +255,22 @@ const head = await ctx.s3.head('https://examplebucket.s3.us-east-1.amazonaws.com
   region: 'us-east-1',
 })
 ctx.assert('object metadata reachable', head.status === 200)
+
+// Presence check: at least one object written under today's prefix in the last 6 hours
+const listing = await ctx.s3.list('https://examplebucket.s3.us-east-1.amazonaws.com/', {
+  accessKey: ctx.secrets.S3_ACCESS_KEY,
+  secretKey: ctx.secrets.S3_SECRET_KEY,
+  region: 'us-east-1',
+  prefix: `exports/${ctx.now().toISOString().slice(0, 10)}/`,
+  all: true,
+})
+const fresh = listing.objects.filter((o) => o.lastModified && ctx.now() - o.lastModified < 6 * 3600 * 1000)
+ctx.assert('export written in the last 6 h', fresh.length > 0, `${listing.objects.length} objects, none fresh`)
 ```
 
 `ctx.s3.get(url, options)` downloads an object; `ctx.s3.head(url, options)` checks existence/metadata without downloading the body. Both sign the request with AWS Signature Version 4 — implemented directly with `node:crypto`, no AWS SDK — and return the same `{ status, body, headers, json() }` shape as `ctx.http`.
+
+`ctx.s3.list(bucketUrl, options)` lists objects (ListObjectsV2). `bucketUrl` is the bucket endpoint — `https://bucket.s3.region.amazonaws.com/`, `https://endpoint/bucket/` for path-style, or any S3-compatible service — and the key filter goes in the options, not the URL. It returns `{ objects, prefixes, truncated }`, where each object is `{ key, size, lastModified (Date | null), etag, storageClass }`, `prefixes` holds the groups rolled up by `delimiter`, and `truncated` means more keys exist than were returned. By default one page comes back (up to 1000 keys); with `all: true` continuation tokens are followed until the listing is exhausted or 10 000 keys have been collected, at which point `truncated` is `true`. A non-2xx response throws `S3RequestError` with `code: 'S3_LIST_ERROR'` and the service's error code in the message (for example `HTTP 403 AccessDenied`), so a bad key or a wrong bucket never reads as "no objects".
 
 `ctx.s3` options:
 
@@ -265,9 +278,17 @@ ctx.assert('object metadata reachable', head.status === 200)
 - `region` — required, must match the bucket's actual region (used in the SigV4 credential scope)
 - `sessionToken` — optional, for temporary/STS credentials
 - `headers` — optional extra headers (e.g. `Range: bytes=0-9`); these are included in the signature
-- `timeout` — optional request limit in milliseconds, same rule as `ctx.http` (exceeding it throws `S3_TIMEOUT_ERROR`)
+- `timeout` — optional request limit in milliseconds, same rule as `ctx.http` (exceeding it throws `S3_TIMEOUT_ERROR`); for `list` it applies to each page
 
-Like any other credential, store `accessKey`/`secretKey` as [secrets](#secrets) and read them via `ctx.secrets.NAME` rather than hardcoding them in test code, exactly as shown above. `url` can be virtual-hosted-style, path-style, or any S3-compatible endpoint (MinIO, Cloudflare R2, etc.) — signing only depends on the request's host, path, and query string, so nothing AWS-specific is required beyond the four SigV4 inputs. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL), `code: 'S3_FETCH_ERROR'` (the request itself failed), `code: 'S3_TIMEOUT_ERROR'` (over its time limit), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (see below).
+`ctx.s3.list` options, on top of the above:
+
+- `prefix` — only keys starting with this string
+- `delimiter` — roll keys up at this character (usually `/`); the groups come back in `prefixes`
+- `maxKeys` — keys per page, 1 to 1000
+- `startAfter` — start after this key
+- `all` — follow continuation tokens (capped at 10 000 keys); default is a single page
+
+Like any other credential, store `accessKey`/`secretKey` as [secrets](#secrets) and read them via `ctx.secrets.NAME` rather than hardcoding them in test code, exactly as shown above. `url` can be virtual-hosted-style, path-style, or any S3-compatible endpoint (MinIO, Cloudflare R2, etc.) — signing only depends on the request's host, path, and query string, so nothing AWS-specific is required beyond the four SigV4 inputs. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL), `code: 'S3_FETCH_ERROR'` (the request itself failed), `code: 'S3_TIMEOUT_ERROR'` (over its time limit), for `list`, `code: 'S3_LIST_ERROR'` (non-2xx or unparsable listing), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (see below).
 
 **Downloads are never persisted.** Like `ctx.ftp.get`, `ctx.s3.get` streams the object into the same server-managed temp directory (`FTP_TEMP_DIR`), reads it into memory, and deletes it before the call returns — your test only ever sees the string `body`, never a path, and nothing is left behind on disk. Downloads larger than `FTP_MAX_DOWNLOAD_BYTES` (default 5MB, shared with `ctx.ftp.get`) abort the request mid-transfer with an `S3_SIZE_LIMIT_ERROR`. The same periodic background sweep that backstops `ctx.ftp.get` also covers `ctx.s3.get`, since both write into the same directory — orphaned temp files from a crash or timed-out run are removed after 15 minutes either way. `ctx.s3.head` never downloads a body, so it has nothing to clean up.
 
