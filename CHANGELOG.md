@@ -1,3 +1,10 @@
+# [1.27.0](https://github.com/paschendale/sentinel/compare/v1.26.0...v1.27.0) (2026-11-06)
+
+
+### Features
+
+* **notifier:** Discord and Slack bot channels with one thread per incident ([f3dc27a](https://github.com/paschendale/sentinel/commit/f3dc27a030147b7d44d9d8d40925d604d4fd224a))
+
 # [1.26.0](https://github.com/paschendale/sentinel/compare/v1.25.1...v1.26.0) (2026-11-04)
 
 
