@@ -614,13 +614,14 @@ function decodeXmlText(value: string): string {
 /** Text of the first `<tag>…</tag>` child in `xml`, entity-decoded; null when absent or self-closing. */
 function xmlText(xml: string, tag: string): string | null {
   const match = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(xml)
-  return match ? decodeXmlText(match[1] ?? '') : null
+  // A matched capturing group is always a string (possibly empty).
+  return match === null ? null : decodeXmlText(match[1] as string)
 }
 
 function xmlBlocks(xml: string, tag: string): string[] {
   const blocks: string[] = []
   const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g')
-  for (let match = re.exec(xml); match !== null; match = re.exec(xml)) blocks.push(match[1] ?? '')
+  for (let match = re.exec(xml); match !== null; match = re.exec(xml)) blocks.push(match[1] as string)
   return blocks
 }
 
@@ -697,9 +698,10 @@ async function doS3List(
     try {
       base = new URL(url)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      throw new S3RequestError('S3_SIGNING_ERROR', `Failed to sign S3 request for LIST ${url}: ${message}`, url, 'LIST', {
-        cause: err instanceof Error ? err : undefined,
+      // `new URL` only ever throws a TypeError.
+      const cause = err as Error
+      throw new S3RequestError('S3_SIGNING_ERROR', `Failed to sign S3 request for LIST ${url}: ${cause.message}`, url, 'LIST', {
+        cause,
       })
     }
     // doFetch tracks each page and enforces the per-request timeout; S3 reports its own error event below.
