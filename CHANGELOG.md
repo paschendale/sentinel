@@ -1,3 +1,10 @@
+# [1.28.0](https://github.com/paschendale/sentinel/compare/v1.27.0...v1.28.0) (2026-11-06)
+
+
+### Features
+
+* **executor:** ctx.s3.list for object-storage presence and freshness checks ([53441ea](https://github.com/paschendale/sentinel/commit/53441eae382837f66306da1454662e172ba43855))
+
 # [1.27.0](https://github.com/paschendale/sentinel/compare/v1.26.0...v1.27.0) (2026-11-06)
 
 
