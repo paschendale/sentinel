@@ -26,10 +26,10 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     let rows: Test[]
     try {
       ;({ rows } = await pool.query<Test>(
-        `INSERT INTO tests (id, name, code, schedule_ms, timeout_ms, retries, uses_browser, enabled, tags)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO tests (id, name, code, schedule_ms, timeout_ms, retries, uses_browser, enabled, tags, failure_threshold, cooldown_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
-        [id, d.name, d.code, d.schedule_ms, d.timeout_ms, d.retries, d.uses_browser, d.enabled, tags]
+        [id, d.name, d.code, d.schedule_ms, d.timeout_ms, d.retries, d.uses_browser, d.enabled, tags, d.failure_threshold, d.cooldown_ms]
       ))
     } catch (err) {
       if (isCheckViolation(err)) {
@@ -71,10 +71,10 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
       for (const d of valid) {
         const id = nanoid()
         const { rows } = await client.query<Test>(
-          `INSERT INTO tests (id, name, code, schedule_ms, timeout_ms, retries, uses_browser, enabled, tags)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `INSERT INTO tests (id, name, code, schedule_ms, timeout_ms, retries, uses_browser, enabled, tags, failure_threshold, cooldown_ms)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            RETURNING *`,
-          [id, d.name, d.code, d.schedule_ms, d.timeout_ms, d.retries, d.uses_browser, d.enabled, d.tags]
+          [id, d.name, d.code, d.schedule_ms, d.timeout_ms, d.retries, d.uses_browser, d.enabled, d.tags, d.failure_threshold, d.cooldown_ms]
         )
         if (rows[0]) created.push(rows[0])
       }
@@ -205,6 +205,8 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
       [req.params.id]
     )
     if (result.rowCount === 0) return reply.status(404).send({ error: 'not found' })
+    // scope_value is a loose reference, not a foreign key: drop the test's own assignments.
+    await pool.query(`DELETE FROM channel_assignments WHERE scope_type = 'test' AND scope_value = $1`, [req.params.id])
     invalidateCache(req.params.id)
     testEvents.emit('test:deleted', req.params.id)
     return reply.status(204).send()

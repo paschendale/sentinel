@@ -1,5 +1,15 @@
 export type TestStatus = 'success' | 'warn' | 'fail' | 'timeout'
-export type NotificationChannelType = 'discord' | 'slack' | 'webhook' | 'email'
+export type NotificationChannelType = 'discord' | 'slack' | 'webhook' | 'email' | 'discord_bot' | 'slack_bot'
+
+/** Channel types that post through a bot token and keep one thread per incident. */
+export const BOT_CHANNEL_TYPES: readonly NotificationChannelType[] = ['discord_bot', 'slack_bot']
+
+export function isBotChannelType(type: NotificationChannelType): type is 'discord_bot' | 'slack_bot' {
+  return type === 'discord_bot' || type === 'slack_bot'
+}
+
+/** Lifecycle state of a bot channel's incident thread. */
+export type IncidentThreadState = 'down' | 'degraded'
 export type NotificationEventType = 'fail' | 'recovery' | 'warning'
 
 export interface Test {
@@ -50,7 +60,26 @@ export interface NotificationChannel {
   type: NotificationChannelType
   webhook_url: string | null
   email_to: string[] | null
+  /** Slack channel ID (C…) or Discord channel ID a bot channel posts into. */
+  channel_ref: string | null
+  /** Whether a bot token is stored. The token itself is write-only. */
+  has_bot_token: boolean
   enabled: boolean
+}
+
+/** One incident as tracked on a bot channel: the provider message/thread Sentinel keeps editing. */
+export interface IncidentThread {
+  id: string
+  test_id: string
+  channel_id: string
+  state: IncidentThreadState
+  provider_root_id: string
+  provider_thread_id: string
+  opened_at: Date
+  closed_at: Date | null
+  last_update_at: Date
+  last_update_message: string | null
+  update_count: number
 }
 
 /** A NotificationChannel as returned alongside a specific assignment — includes that assignment's event-type filter. */

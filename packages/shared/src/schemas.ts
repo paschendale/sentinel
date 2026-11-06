@@ -33,24 +33,56 @@ export const CreateTestSchema = TestFieldsSchema.refine(
 // (tests_timeout_schedule_margin_check), which always sees the post-update row.
 export const UpdateTestSchema = TestFieldsSchema.partial()
 
-export const CreateNotificationChannelSchema = z.object({
-  name: z.string().min(1).max(100),
-  type: z.enum(['discord', 'slack', 'webhook', 'email']),
-  webhook_url: z.string().url().optional(),
-  email_to: z.array(z.string().email()).min(1).max(10).optional(),
-  enabled: z.boolean().default(true),
-}).refine(
-  d => d.type === 'email' ? (d.email_to?.length ?? 0) > 0 : !!d.webhook_url,
-  { message: 'webhook_url required for webhook channels; email_to required for email channels' },
-)
+export const NotificationChannelTypeSchema = z.enum(['discord', 'slack', 'webhook', 'email', 'discord_bot', 'slack_bot'])
 
-export const UpdateNotificationChannelSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  type: z.enum(['discord', 'slack', 'webhook', 'email']).optional(),
+// Per-field shapes, exported for the MCP tool input schemas (the refined create schema has no .shape).
+export const NotificationChannelFieldsShape = {
+  name: z.string().min(1).max(100),
+  type: NotificationChannelTypeSchema,
   webhook_url: z.string().url().optional(),
   email_to: z.array(z.string().email()).min(1).max(10).optional(),
+  /** Bot token for discord_bot / slack_bot. Write-only: never returned. */
+  bot_token: z.string().min(1).max(500).optional(),
+  /** Slack channel ID (C…) or Discord channel ID for discord_bot / slack_bot. */
+  channel_ref: z.string().min(1).max(100).optional(),
   enabled: z.boolean().optional(),
+}
+
+/**
+ * What each channel type needs. Returns a message when something is missing, else null.
+ * Used by the create schema (refine) and by the PATCH route against the merged row.
+ */
+export function channelRequirementsError(input: {
+  type: z.infer<typeof NotificationChannelTypeSchema>
+  webhook_url?: string | null | undefined
+  email_to?: string[] | null | undefined
+  channel_ref?: string | null | undefined
+  has_bot_token: boolean
+}): string | null {
+  switch (input.type) {
+    case 'email':
+      return (input.email_to?.length ?? 0) > 0 ? null : 'email_to required for email channels'
+    case 'discord_bot':
+    case 'slack_bot':
+      if (!input.has_bot_token) return 'bot_token required for discord_bot and slack_bot channels'
+      if (!input.channel_ref) return 'channel_ref (the channel ID the bot posts into) required for discord_bot and slack_bot channels'
+      return null
+    default:
+      return input.webhook_url ? null : 'webhook_url required for discord, slack and webhook channels'
+  }
+}
+
+export const CreateNotificationChannelSchema = z.object({
+  ...NotificationChannelFieldsShape,
+  enabled: z.boolean().default(true),
+}).superRefine((d, ctx) => {
+  const err = channelRequirementsError({ ...d, has_bot_token: d.bot_token !== undefined })
+  if (err !== null) ctx.addIssue({ code: z.ZodIssueCode.custom, message: err })
 })
+
+// No cross-field refine here: a PATCH may touch one field at a time, so the route
+// validates channelRequirementsError() against the merged row.
+export const UpdateNotificationChannelSchema = z.object(NotificationChannelFieldsShape).partial()
 
 export const NotificationEventTypeSchema = z.enum(['fail', 'warning', 'recovery'])
 

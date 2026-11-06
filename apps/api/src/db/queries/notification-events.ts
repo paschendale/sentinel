@@ -10,6 +10,12 @@ export type NotificationEventReason =
   | 'no_channels'
   | 'http_error'
   | 'http_non_2xx'
+  // Bot channels: lifecycle of an incident thread (phase 'sent' or 'failed').
+  | 'thread_opened'
+  | 'thread_updated'
+  | 'thread_heartbeat'
+  | 'thread_closed'
+  | 'thread_update_failed'
 
 export interface NotificationEventInsert {
   test_id: string

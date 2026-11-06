@@ -79,6 +79,19 @@ if (SECRETS_ENCRYPTION_KEY && Buffer.from(SECRETS_ENCRYPTION_KEY, 'base64').leng
   throw new Error('SECRETS_ENCRYPTION_KEY must decode to exactly 32 bytes (base64-encoded)')
 }
 
+/** How often an open incident thread on a bot channel gets a "still down" reply while
+ *  nothing about the failure changes. Default 1 hour. */
+export const INCIDENT_THREAD_HEARTBEAT_MS = parseIntEnvInRange(
+  'INCIDENT_THREAD_HEARTBEAT_MS',
+  60 * 60 * 1000,
+  60 * 1000,
+  7 * 24 * 60 * 60 * 1000
+)
+
+/** Base URLs of the Slack and Discord APIs used by bot channels. Overridable for tests. */
+export const SLACK_API_URL = optionalEnv('SLACK_API_URL', 'https://slack.com/api')
+export const DISCORD_API_URL = optionalEnv('DISCORD_API_URL', 'https://discord.com/api/v10')
+
 /** Optional name for this Sentinel deployment (e.g. `sao-paulo-1`), sent on every outbound
  *  HTTP/S3/webhook request in the User-Agent and an `X-Sentinel-Instance` header so the
  *  receiving side can tell which location a probe came from. Unset → User-Agent only. */

@@ -129,7 +129,8 @@ describe('runAggregation', () => {
     await runAggregation()
     // upsert + pg_tables (no partitions returned) + create partition x3 + prune uptime_daily
     // + prune notification_events (one batch, under the batch size)
-    expect(mockQuery).toHaveBeenCalledTimes(7)
+    // + prune closed notification_threads
+    expect(mockQuery).toHaveBeenCalledTimes(8)
   })
 })
 
