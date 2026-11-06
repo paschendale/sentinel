@@ -228,6 +228,7 @@ interface TestContext {
   s3: {
     get(url: string, options: S3Options): Promise<HttpResponse>
     head(url: string, options: S3Options): Promise<HttpResponse>
+    list(bucketUrl: string, options: S3ListOptions): Promise<S3ListResult>
   }
   assert: (name: string, value: boolean, message?: string) => void
   warn: (message: string) => void
@@ -277,6 +278,28 @@ interface S3Options {
   headers?: Record<string, string> // extra headers (e.g. Range) — included in the SigV4 signature
   timeout?: number                 // per-request limit, ms, covering headers and full body; without it the run's timeout_ms bounds the request
 }
+
+interface S3ListOptions extends S3Options {
+  prefix?: string      // only keys starting with this
+  delimiter?: string   // roll keys up at this character; groups come back in `prefixes`
+  maxKeys?: number     // keys per page, 1..1000
+  startAfter?: string  // start after this key
+  all?: boolean        // follow continuation tokens, capped at 10 000 keys; default one page
+}
+
+interface S3Object {
+  key: string
+  size: number
+  lastModified: Date | null
+  etag: string | null
+  storageClass: string | null
+}
+
+interface S3ListResult {
+  objects: S3Object[]
+  prefixes: string[]   // common prefixes when `delimiter` was given
+  truncated: boolean   // more keys exist than were returned
+}
 ```
 
 **Method behaviour:**
@@ -288,5 +311,6 @@ interface S3Options {
 - When a run times out, every pending `ctx.http`, `ctx.s3` and `ctx.ftp` call is aborted (FTP by closing the connection), and later calls from the same run fail immediately
 - `ctx.ftp.ls`/`ctx.ftp.get` route through `basic-ftp`; `url` is a full `ftp://[user:pass@]host[:port]/path`. `get` downloads to a server-managed temp file (`FTP_TEMP_DIR`), reads it into `body`, and deletes it before returning — the file never outlives the call. Downloads are capped by `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) and aborted if exceeded. A periodic sweep job deletes any orphaned temp file older than `FTP_TEMP_MAX_AGE_MS` as a backstop for crash/timeout edge cases. User code never sees a file path — only the returned string body.
 - `ctx.s3.get`/`ctx.s3.head` sign the request with AWS Signature Version 4, hand-rolled with `node:crypto` (no AWS SDK — see Approved Dependencies) using the supplied `accessKey`/`secretKey`/`region` (and `sessionToken` if given). `url` is the full object URL — virtual-hosted-style (`https://bucket.s3.region.amazonaws.com/key`), path-style, or any S3-compatible endpoint (MinIO, R2, etc.) all work the same way since signing is derived entirely from the URL's host/path/query. `options.headers` (e.g. `Range`) are included in the signature. `ctx.s3.head` has no response body and routes through the same in-memory undici client as `ctx.http`. `ctx.s3.get` downloads through the *same* server-managed temp file mechanism as `ctx.ftp.get` — same directory (`FTP_TEMP_DIR`), same size cap (`FTP_MAX_DOWNLOAD_BYTES`), same periodic sweep backstop (`FTP_TEMP_MAX_AGE_MS`) — rather than buffering the object in memory; the file is deleted before returning, and user code never sees a path, only the returned string `body`. Both methods return the same `HttpResponse` shape as `ctx.http`. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL, thrown before any network call), `code: 'S3_FETCH_ERROR'` (the underlying request failed), `code: 'S3_TIMEOUT_ERROR'` (over `options.timeout`, same rule as `ctx.http`), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (download exceeded `FTP_MAX_DOWNLOAD_BYTES`, aborted mid-transfer).
+- `ctx.s3.list` issues signed ListObjectsV2 requests (`?list-type=2` plus `prefix`, `delimiter`, `max-keys`, `start-after`, `continuation-token`, each hand-encoded so the request URL matches the SigV4 canonical query) against the bucket endpoint given as `bucketUrl`, through the same in-memory path as `ctx.s3.head`. The XML is parsed with a few regexes (flat, fixed shape, entity-decoded keys), never an XML library. One page per call unless `all: true`, which follows `NextContinuationToken` until `IsTruncated` is false or `S3_LIST_MAX_KEYS` (10 000) keys were collected; `truncated` reports either stop. `options.timeout` bounds each page. A non-2xx page throws `code: 'S3_LIST_ERROR'` with the `<Code>` and `<Message>` of the service's error body, and a 2xx body without `<ListBucketResult` throws the same code; both are reported as an `io_error` with `op: 'LIST'`. The run log's `test.s3` event for a listing carries `method: 'LIST'`, `keys` and `pages`.
 - `ctx.secrets` is a plain, frozen object (not a getter/method) mapping every `Secret.name` to its decrypted value — accessing a name that doesn't exist yields `undefined`, same as any missing object property; it never throws. It's backed by an in-memory cache (`apps/api/src/executor/secrets-cache.ts`) decrypted once at process startup and refreshed synchronously on every secret create/rotate/delete, so building `ctx` never queries the database or does crypto on the test-execution hot path.
 - No `ctx.fs`, no `ctx.exec`, no `require()`, no `import`

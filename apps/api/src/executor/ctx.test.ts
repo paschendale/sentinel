@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildCtx, FtpRequestError, HttpRequestError, S3RequestError } from './ctx.js'
+import { buildCtx, FtpRequestError, HttpRequestError, S3_LIST_MAX_KEYS, S3RequestError } from './ctx.js'
 import { FTP_MAX_DOWNLOAD_BYTES, FTP_TEMP_DIR } from '../config.js'
 
 const { fetchMock } = vi.hoisted(() => ({
@@ -432,5 +432,183 @@ describe('executor ctx s3', () => {
       expect(err).toMatchObject({ code: 'S3_SIZE_LIMIT_ERROR' })
     }
     expect(unlinkMock).toHaveBeenCalled()
+  })
+})
+
+describe('executor ctx s3 list', () => {
+  const creds = {
+    accessKey: 'AKIAIOSFODNN7EXAMPLE',
+    secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+    region: 'us-east-1',
+  }
+
+  const listXml = (opts: { keys: string[]; truncated?: boolean; next?: string; prefixes?: string[] }) =>
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>examplebucket</Name>' +
+    `<IsTruncated>${opts.truncated ? 'true' : 'false'}</IsTruncated>` +
+    (opts.next ? `<NextContinuationToken>${opts.next}</NextContinuationToken>` : '') +
+    opts.keys
+      .map(
+        (key, i) =>
+          `<Contents><Key>${key}</Key><LastModified>2026-11-0${(i % 9) + 1}T00:00:00.000Z</LastModified>` +
+          `<ETag>&quot;etag-${i}&quot;</ETag><Size>${(i + 1) * 100}</Size><StorageClass>STANDARD</StorageClass></Contents>`
+      )
+      .join('') +
+    (opts.prefixes ?? []).map((p) => `<CommonPrefixes><Prefix>${p}</Prefix></CommonPrefixes>`).join('') +
+    '</ListBucketResult>'
+
+  // doFetch reads `body` as an iterable of chunks, like undici's Response.body.
+  const xmlResponse = (xml: string, status = 200) => ({
+    status,
+    body: [Buffer.from(xml)],
+    headers: { forEach: vi.fn() },
+  })
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+  })
+
+  it('sends a signed ListObjectsV2 request and parses objects and common prefixes', async () => {
+    fetchMock.mockResolvedValue(
+      xmlResponse(listXml({ keys: ['photos/2026/a.jpg', 'photos/2026/b &amp; c.jpg'], prefixes: ['photos/2025/'] }))
+    )
+    const { ctx } = buildCtx()
+
+    const result = await ctx.s3.list('https://examplebucket.s3.amazonaws.com/', {
+      ...creds,
+      prefix: 'photos/20',
+      delimiter: '/',
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method: string; headers: Record<string, string> }]
+    expect(url).toBe('https://examplebucket.s3.amazonaws.com/?list-type=2&prefix=photos%2F20&delimiter=%2F')
+    expect(init.method).toBe('GET')
+    expect(init.headers.Authorization).toMatch(/^AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE\//)
+    expect(init.headers['x-amz-content-sha256']).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+
+    expect(result.truncated).toBe(false)
+    expect(result.prefixes).toEqual(['photos/2025/'])
+    expect(result.objects).toEqual([
+      { key: 'photos/2026/a.jpg', size: 100, lastModified: new Date('2026-11-01T00:00:00.000Z'), etag: 'etag-0', storageClass: 'STANDARD' },
+      { key: 'photos/2026/b & c.jpg', size: 200, lastModified: new Date('2026-11-02T00:00:00.000Z'), etag: 'etag-1', storageClass: 'STANDARD' },
+    ])
+  })
+
+  it('returns one page with truncated=true unless all is set, then follows continuation tokens', async () => {
+    fetchMock
+      .mockResolvedValueOnce(xmlResponse(listXml({ keys: ['a'], truncated: true, next: 'tok 1' })))
+      .mockResolvedValueOnce(xmlResponse(listXml({ keys: ['a'], truncated: true, next: 'tok 1' })))
+      .mockResolvedValueOnce(xmlResponse(listXml({ keys: ['b'] })))
+    const onS3Complete = vi.fn()
+    const { ctx } = buildCtx({ onS3Complete })
+
+    const onePage = await ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, maxKeys: 1 })
+    expect(onePage.truncated).toBe(true)
+    expect(onePage.objects.map((o) => o.key)).toEqual(['a'])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const everything = await ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, maxKeys: 1, all: true })
+    expect(everything.truncated).toBe(false)
+    expect(everything.objects.map((o) => o.key)).toEqual(['a', 'b'])
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      'https://examplebucket.s3.amazonaws.com/?list-type=2&max-keys=1&continuation-token=tok%201'
+    )
+    expect(onS3Complete).toHaveBeenLastCalledWith(
+      expect.objectContaining({ method: 'LIST', status: 200, region: 'us-east-1', keys: 2, pages: 2 })
+    )
+  })
+
+  it('stops at S3_LIST_MAX_KEYS and reports truncated when a listing is larger than the cap', async () => {
+    const pageKeys = Array.from({ length: 1000 }, (_, i) => `k${i}`)
+    fetchMock.mockResolvedValue(xmlResponse(listXml({ keys: pageKeys, truncated: true, next: 'more' })))
+    const { ctx } = buildCtx()
+
+    const result = await ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, all: true })
+
+    expect(result.objects).toHaveLength(S3_LIST_MAX_KEYS)
+    expect(result.truncated).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(S3_LIST_MAX_KEYS / 1000)
+  })
+
+  it('throws S3_LIST_ERROR carrying the service error code on a non-2xx response', async () => {
+    fetchMock.mockResolvedValue(
+      xmlResponse('<?xml version="1.0"?><Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>', 403)
+    )
+    const onIoError = vi.fn()
+    const { ctx } = buildCtx({ onIoError })
+
+    await expect(ctx.s3.list('https://examplebucket.s3.amazonaws.com/', creds)).rejects.toMatchObject({
+      name: 'S3RequestError',
+      code: 'S3_LIST_ERROR',
+      message: 'S3 list failed for https://examplebucket.s3.amazonaws.com/: HTTP 403 AccessDenied: Access Denied',
+    })
+    expect(onIoError).toHaveBeenCalledWith(expect.objectContaining({ protocol: 's3', op: 'LIST', code: 'S3_LIST_ERROR' }))
+  })
+
+  it('decodes every XML entity form in keys and tolerates sparse Contents blocks', async () => {
+    const xml =
+      '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><IsTruncated>false</IsTruncated>' +
+      '<Contents><Key>a &lt;b&gt; &apos;c&apos; &#65;&#x42;</Key></Contents>' +
+      '<Contents><Key>no-date</Key><LastModified>not a date</LastModified><Size>7</Size></Contents>' +
+      '</ListBucketResult>'
+    fetchMock.mockResolvedValue(xmlResponse(xml))
+    const { ctx } = buildCtx()
+
+    const result = await ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, startAfter: 'Z' })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://examplebucket.s3.amazonaws.com/?list-type=2&start-after=Z')
+    expect(result.objects).toEqual([
+      { key: "a <b> 'c' AB", size: 0, lastModified: null, etag: null, storageClass: null },
+      { key: 'no-date', size: 7, lastModified: null, etag: null, storageClass: null },
+    ])
+    expect(result.prefixes).toEqual([])
+  })
+
+  it('stops after a truncated page that carries no continuation token', async () => {
+    fetchMock.mockResolvedValue(xmlResponse(listXml({ keys: ['only'], truncated: true })))
+    const { ctx } = buildCtx()
+
+    const result = await ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, all: true })
+
+    expect(result.objects.map((o) => o.key)).toEqual(['only'])
+    expect(result.truncated).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws S3_LIST_ERROR on a 2xx body that is not a listing, and on an error body without Code/Message', async () => {
+    const { ctx } = buildCtx()
+
+    fetchMock.mockResolvedValueOnce(xmlResponse('<html><body>Sign in</body></html>', 200))
+    await expect(ctx.s3.list('https://examplebucket.s3.amazonaws.com/', creds)).rejects.toMatchObject({
+      code: 'S3_LIST_ERROR',
+      message: expect.stringContaining('unexpected body'),
+    })
+
+    fetchMock.mockResolvedValueOnce(xmlResponse('', 502))
+    await expect(ctx.s3.list('https://examplebucket.s3.amazonaws.com/', creds)).rejects.toMatchObject({
+      code: 'S3_LIST_ERROR',
+      message: 'S3 list failed for https://examplebucket.s3.amazonaws.com/: HTTP 502',
+    })
+  })
+
+  it('maps a per-page timeout to S3_TIMEOUT_ERROR', async () => {
+    fetchMock.mockImplementation((_url: string, init: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason))
+      })
+    )
+    const { ctx } = buildCtx()
+
+    await expect(ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, timeout: 5 })).rejects.toMatchObject({
+      code: 'S3_TIMEOUT_ERROR',
+    })
+  })
+
+  it('rejects an out-of-range maxKeys and a malformed URL before any request', async () => {
+    const { ctx } = buildCtx()
+    await expect(ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, maxKeys: 0 })).rejects.toThrow(TypeError)
+    await expect(ctx.s3.list('not a url', creds)).rejects.toMatchObject({ code: 'S3_SIGNING_ERROR' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
