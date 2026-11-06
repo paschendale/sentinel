@@ -65,7 +65,12 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     {
       description:
         'Create a monitoring test. code is a JavaScript function body receiving ctx and must return a ' +
-        'boolean. ctx supports three protocols — ctx.http (HTTP/undici), ctx.ftp.ls/get (FTP), and ' +
+        'boolean. ctx supports four protocols — ctx.http (HTTP/undici), ctx.ftp.ls/get (FTP), ' +
+        'ctx.k8s.list/read/get (Kubernetes API reads with a bearer token and optional CA: list(server, ' +
+        '{token, ca, group, version, resource, namespace, labelSelector, fieldSelector, limit}) returns ' +
+        '{items, continue}, read(server, {..., name}) returns the object, both throw K8S_API_ERROR with ' +
+        'status and reason on non-2xx — for CronJob/Job completion, Argo Workflows and Deployment ' +
+        'readiness), and ' +
         'ctx.s3.get/head/list (S3-compatible object storage, SigV4-signed; list(bucketUrl, {prefix, ' +
         'delimiter, maxKeys, startAfter, all}) returns {objects:[{key,size,lastModified,etag}], prefixes, ' +
         'truncated} for presence/freshness checks on a prefix) — not just HTTP checks. Also ' +

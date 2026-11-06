@@ -78,6 +78,12 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
         `${info.protocol.toUpperCase()} ${info.op} ${info.url} failed: ${info.code} (${info.duration_ms}ms)`
       )
     },
+    onK8sComplete: (info) => {
+      runLog.info(
+        { event: 'test.k8s', ...info },
+        `K8s ${info.op} ${info.url} -> ${info.status} (${info.duration_ms}ms${info.items === undefined ? '' : `, items=${info.items}`})`
+      )
+    },
     onS3Complete: (info) => {
       runLog.info(
         { event: 'test.s3', ...info },

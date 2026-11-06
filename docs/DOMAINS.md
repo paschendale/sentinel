@@ -230,6 +230,11 @@ interface TestContext {
     head(url: string, options: S3Options): Promise<HttpResponse>
     list(bucketUrl: string, options: S3ListOptions): Promise<S3ListResult>
   }
+  k8s: {
+    get(url: string, options: K8sOptions): Promise<HttpResponse>          // raw GET, no status check
+    list(server: string, options: K8sListOptions): Promise<K8sListResult>  // throws K8S_API_ERROR on non-2xx
+    read(server: string, options: K8sReadOptions): Promise<K8sObject>      // throws K8S_API_ERROR on non-2xx (404 included)
+  }
   assert: (name: string, value: boolean, message?: string) => void
   warn: (message: string) => void
   log: (message: string) => void
@@ -300,6 +305,26 @@ interface S3ListResult {
   prefixes: string[]   // common prefixes when `delimiter` was given
   truncated: boolean   // more keys exist than were returned
 }
+
+interface K8sOptions {
+  token: string                    // bearer token (a ServiceAccount token from ctx.secrets)
+  ca?: string                      // PEM bundle to pin the API server's certificate; system trust store otherwise
+  headers?: Record<string, string>
+  timeout?: number                 // per-request limit, ms, same rule as ctx.http
+}
+
+interface K8sResourceOptions extends K8sOptions {
+  group?: string      // omit for the core group (/api/v1)
+  version: string
+  resource: string    // plural, e.g. 'cronjobs'
+  namespace?: string  // omit for cluster-scoped resources or an all-namespaces list
+}
+
+interface K8sListOptions extends K8sResourceOptions { labelSelector?: string; fieldSelector?: string; limit?: number }
+interface K8sReadOptions extends K8sResourceOptions { name: string }
+
+type K8sObject = Record<string, unknown>
+interface K8sListResult { items: K8sObject[]; continue: string | null }
 ```
 
 **Method behaviour:**
@@ -312,5 +337,6 @@ interface S3ListResult {
 - `ctx.ftp.ls`/`ctx.ftp.get` route through `basic-ftp`; `url` is a full `ftp://[user:pass@]host[:port]/path`. `get` downloads to a server-managed temp file (`FTP_TEMP_DIR`), reads it into `body`, and deletes it before returning — the file never outlives the call. Downloads are capped by `FTP_MAX_DOWNLOAD_BYTES` (default 5MB) and aborted if exceeded. A periodic sweep job deletes any orphaned temp file older than `FTP_TEMP_MAX_AGE_MS` as a backstop for crash/timeout edge cases. User code never sees a file path — only the returned string body.
 - `ctx.s3.get`/`ctx.s3.head` sign the request with AWS Signature Version 4, hand-rolled with `node:crypto` (no AWS SDK — see Approved Dependencies) using the supplied `accessKey`/`secretKey`/`region` (and `sessionToken` if given). `url` is the full object URL — virtual-hosted-style (`https://bucket.s3.region.amazonaws.com/key`), path-style, or any S3-compatible endpoint (MinIO, R2, etc.) all work the same way since signing is derived entirely from the URL's host/path/query. `options.headers` (e.g. `Range`) are included in the signature. `ctx.s3.head` has no response body and routes through the same in-memory undici client as `ctx.http`. `ctx.s3.get` downloads through the *same* server-managed temp file mechanism as `ctx.ftp.get` — same directory (`FTP_TEMP_DIR`), same size cap (`FTP_MAX_DOWNLOAD_BYTES`), same periodic sweep backstop (`FTP_TEMP_MAX_AGE_MS`) — rather than buffering the object in memory; the file is deleted before returning, and user code never sees a path, only the returned string `body`. Both methods return the same `HttpResponse` shape as `ctx.http`. Failures throw `S3RequestError` with `code: 'S3_SIGNING_ERROR'` (malformed URL, thrown before any network call), `code: 'S3_FETCH_ERROR'` (the underlying request failed), `code: 'S3_TIMEOUT_ERROR'` (over `options.timeout`, same rule as `ctx.http`), or, for `get`, `code: 'S3_SIZE_LIMIT_ERROR'` (download exceeded `FTP_MAX_DOWNLOAD_BYTES`, aborted mid-transfer).
 - `ctx.s3.list` issues signed ListObjectsV2 requests (`?list-type=2` plus `prefix`, `delimiter`, `max-keys`, `start-after`, `continuation-token`, each hand-encoded so the request URL matches the SigV4 canonical query) against the bucket endpoint given as `bucketUrl`, through the same in-memory path as `ctx.s3.head`. The XML is parsed with a few regexes (flat, fixed shape, entity-decoded keys), never an XML library. One page per call unless `all: true`, which follows `NextContinuationToken` until `IsTruncated` is false or `S3_LIST_MAX_KEYS` (10 000) keys were collected; `truncated` reports either stop. `options.timeout` bounds each page. A non-2xx page throws `code: 'S3_LIST_ERROR'` with the `<Code>` and `<Message>` of the service's error body, and a 2xx body without `<ListBucketResult` throws the same code; both are reported as an `io_error` with `op: 'LIST'`. The run log's `test.s3` event for a listing carries `method: 'LIST'`, `keys` and `pages`.
+- `ctx.k8s` issues GETs against a Kubernetes API server with `Authorization: Bearer <token>` and `Accept: application/json`, through the same in-memory `doFetch` path as `ctx.http`. `list`/`read` build the path from the resource coordinates (`/api/{version}` for the core group, `/apis/{group}/{version}` otherwise, then `/namespaces/{ns}`, the plural resource and, for `read`, the name; every segment URL-encoded) and the selectors/limit as query parameters. When `ca` is given the request goes through an undici `Agent` whose connector pins that PEM bundle; agents are cached per distinct bundle (at most 16, then the cache is cleared) so TLS sessions are reused across runs. `list` returns `{ items, continue }` (`continue` from `metadata.continue` when `limit` truncated the list); `read` returns the parsed object. A non-2xx response on `list`/`read` throws `K8sRequestError` with `code: 'K8S_API_ERROR'`, `status` (the HTTP status) and `reason` (the Status object's `reason`, null when the body is not a Status object), so a 404 or 403 never reads as an empty result; `get` returns the raw `HttpResponse` without a status check. Other codes: `'K8S_CONFIG_ERROR'` (empty token, invalid server URL, missing `version`/`resource`/`name`; thrown before any network call), `'K8S_FETCH_ERROR'`, `'K8S_TIMEOUT_ERROR'` (over `options.timeout`). Failures are reported as an `io_error` with `protocol: 'k8s'`; successes emit the run event `test.k8s` with `op`, `url`, `status` and, for `list`, `items`.
 - `ctx.secrets` is a plain, frozen object (not a getter/method) mapping every `Secret.name` to its decrypted value — accessing a name that doesn't exist yields `undefined`, same as any missing object property; it never throws. It's backed by an in-memory cache (`apps/api/src/executor/secrets-cache.ts`) decrypted once at process startup and refreshed synchronously on every secret create/rotate/delete, so building `ctx` never queries the database or does crypto on the test-execution hot path.
 - No `ctx.fs`, no `ctx.exec`, no `require()`, no `import`

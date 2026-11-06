@@ -292,6 +292,70 @@ Like any other credential, store `accessKey`/`secretKey` as [secrets](#secrets) 
 
 **Downloads are never persisted.** Like `ctx.ftp.get`, `ctx.s3.get` streams the object into the same server-managed temp directory (`FTP_TEMP_DIR`), reads it into memory, and deletes it before the call returns — your test only ever sees the string `body`, never a path, and nothing is left behind on disk. Downloads larger than `FTP_MAX_DOWNLOAD_BYTES` (default 5MB, shared with `ctx.ftp.get`) abort the request mid-transfer with an `S3_SIZE_LIMIT_ERROR`. The same periodic background sweep that backstops `ctx.ftp.get` also covers `ctx.s3.get`, since both write into the same directory — orphaned temp files from a crash or timed-out run are removed after 15 minutes either way. `ctx.s3.head` never downloads a body, so it has nothing to clean up.
 
+#### `ctx.k8s` — Kubernetes API reads
+
+```js
+const server = 'https://my-cluster.example.com:6443'
+const auth = { token: ctx.secrets.K8S_TOKEN, ca: ctx.secrets.K8S_CA }
+
+// Did the nightly CronJob succeed in the last 26 hours?
+const job = await ctx.k8s.read(server, { ...auth, group: 'batch', version: 'v1', resource: 'cronjobs', namespace: 'jobs', name: 'nightly-export' })
+const lastSuccess = job.status?.lastSuccessfulTime ? new Date(job.status.lastSuccessfulTime) : null
+ctx.assert('nightly-export succeeded recently', lastSuccess && ctx.now() - lastSuccess < 26 * 3600 * 1000, `last success: ${lastSuccess}`)
+
+// Are all Deployments in a namespace fully ready?
+const { items } = await ctx.k8s.list(server, { ...auth, group: 'apps', version: 'v1', resource: 'deployments', namespace: 'web' })
+const notReady = items.filter((d) => (d.status?.readyReplicas ?? 0) < (d.spec?.replicas ?? 0)).map((d) => d.metadata.name)
+ctx.assert('all deployments ready', notReady.length === 0, `not ready: ${notReady.join(', ')}`)
+
+// Did the latest Argo Workflow spawned by a CronWorkflow finish?
+const runs = await ctx.k8s.list(server, { ...auth, group: 'argoproj.io', version: 'v1alpha1', resource: 'workflows', namespace: 'argo', labelSelector: 'workflows.argoproj.io/cron-workflow=hourly-tiles' })
+const latest = runs.items.sort((a, b) => b.metadata.creationTimestamp.localeCompare(a.metadata.creationTimestamp))[0]
+ctx.assert('latest hourly-tiles run succeeded', latest?.status?.phase === 'Succeeded', `phase: ${latest?.status?.phase}`)
+```
+
+`ctx.k8s` reads from a Kubernetes API server with a bearer token — normally a ServiceAccount token with a read-only ClusterRole — so a test can check that CronJobs and Jobs completed, that Argo Workflows (or any custom resource) finished, and that Deployments are ready, without anything running inside the cluster. Sentinel never writes to the cluster; the helper only issues GETs.
+
+- `ctx.k8s.list(server, options)` lists a resource and returns `{ items, continue }`; `continue` is set when `limit` cut the list short.
+- `ctx.k8s.read(server, options)` reads one object by `name` and returns it parsed.
+- `ctx.k8s.get(url, options)` is the raw form: any API server path, the same `{ status, body, headers, json() }` as `ctx.http`, no status check.
+
+Options, on every call: `token` (required), `ca` (PEM bundle the server's certificate must chain to; without it the system trust store is used), `headers`, `timeout` (same rule as `ctx.http`). `list` and `read` take the resource coordinates: `group` (omit for the core group), `version`, `resource` (plural), `namespace` (omit for cluster-scoped resources or a list across all namespaces); `list` also takes `labelSelector`, `fieldSelector` and `limit`; `read` takes `name`. Keep `token` and `ca` in [secrets](#secrets).
+
+`list` and `read` throw `K8sRequestError` with `code: 'K8S_API_ERROR'` on any non-2xx response, carrying the HTTP `status` and the API server's `reason` (`NotFound`, `Forbidden`, …), so a missing object or a revoked token never reads as "zero items". Other codes: `K8S_CONFIG_ERROR` (empty token, bad server URL, missing coordinates; thrown before any request), `K8S_FETCH_ERROR` (the request itself failed) and `K8S_TIMEOUT_ERROR` (over `timeout`).
+
+Cluster side, a minimal read-only identity:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: sentinel-reader, namespace: monitoring }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: sentinel-reader }
+rules:
+  - apiGroups: ["", "apps", "batch"]
+    resources: ["pods", "namespaces", "deployments", "cronjobs", "jobs"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: sentinel-reader }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sentinel-reader }
+subjects: [{ kind: ServiceAccount, name: sentinel-reader, namespace: monitoring }]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sentinel-reader-token
+  namespace: monitoring
+  annotations: { kubernetes.io/service-account.name: sentinel-reader }
+type: kubernetes.io/service-account-token
+```
+
+Then store `data.token` (base64-decoded) as the `token` secret and `data.ca\.crt` as the `ca` secret. Add `argoproj.io` / `workflows`, `cronworkflows` to the rules for Argo checks.
+
 #### `ctx.secrets` — Encrypted secret access
 
 Reference values registered on the [Secrets page](#secrets) instead of hardcoding API keys or credentials in test code:

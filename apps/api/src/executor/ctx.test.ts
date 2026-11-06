@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildCtx, FtpRequestError, HttpRequestError, S3_LIST_MAX_KEYS, S3RequestError } from './ctx.js'
+import { buildCtx, FtpRequestError, HttpRequestError, K8sRequestError, S3_LIST_MAX_KEYS, S3RequestError } from './ctx.js'
 import { FTP_MAX_DOWNLOAD_BYTES, FTP_TEMP_DIR } from '../config.js'
 
 const { fetchMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
 }))
 
+const { agentMock } = vi.hoisted(() => ({
+  agentMock: vi.fn(),
+}))
+
 vi.mock('undici', () => ({
   fetch: fetchMock,
+  Agent: agentMock,
 }))
 
 const { accessMock, listMock, downloadToMock, closeMock, trackProgressMock } = vi.hoisted(() => ({
@@ -610,5 +615,200 @@ describe('executor ctx s3 list', () => {
     await expect(ctx.s3.list('https://examplebucket.s3.amazonaws.com/', { ...creds, maxKeys: 0 })).rejects.toThrow(TypeError)
     await expect(ctx.s3.list('not a url', creds)).rejects.toMatchObject({ code: 'S3_SIGNING_ERROR' })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('executor ctx k8s', () => {
+  const server = 'https://k8s.example.test:6443'
+  const auth = { token: 'sa-token' }
+
+  const jsonResponse = (value: unknown, status = 200) => ({
+    status,
+    body: [Buffer.from(JSON.stringify(value))],
+    headers: { forEach: vi.fn() },
+  })
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    agentMock.mockReset().mockImplementation(function (this: { opts: unknown }, opts: unknown) {
+      this.opts = opts
+    })
+  })
+
+  it('lists a namespaced resource with the bearer token, JSON accept header and selectors', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ kind: 'CronJobList', metadata: { continue: '' }, items: [{ metadata: { name: 'nightly' } }] })
+    )
+    const onK8sComplete = vi.fn()
+    const { ctx } = buildCtx({ onK8sComplete })
+
+    const result = await ctx.k8s.list(server, {
+      ...auth,
+      group: 'batch',
+      version: 'v1',
+      resource: 'cronjobs',
+      namespace: 'jobs',
+      labelSelector: 'app in (a,b)',
+      limit: 50,
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method: string; headers: Record<string, string>; dispatcher?: unknown }]
+    expect(url).toBe('https://k8s.example.test:6443/apis/batch/v1/namespaces/jobs/cronjobs?labelSelector=app%20in%20(a%2Cb)&limit=50')
+    expect(init.method).toBe('GET')
+    expect(init.headers.authorization).toBe('Bearer sa-token')
+    expect(init.headers.accept).toBe('application/json')
+    expect(init.headers['user-agent']).toContain('Sentinel')
+    expect(init.dispatcher).toBeUndefined()
+    expect(agentMock).not.toHaveBeenCalled()
+
+    expect(result).toEqual({ items: [{ metadata: { name: 'nightly' } }], continue: null })
+    expect(onK8sComplete).toHaveBeenCalledWith(expect.objectContaining({ op: 'list', status: 200, items: 1 }))
+  })
+
+  it('uses the core group path for cluster-wide lists and reports a continue token', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ metadata: { continue: 'next-page' }, items: [{}, {}] }))
+    const { ctx } = buildCtx()
+
+    const result = await ctx.k8s.list(`${server}/`, { ...auth, version: 'v1', resource: 'pods', fieldSelector: 'status.phase=Failed' })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://k8s.example.test:6443/api/v1/pods?fieldSelector=status.phase%3DFailed')
+    expect(result.items).toHaveLength(2)
+    expect(result.continue).toBe('next-page')
+  })
+
+  it('pins the CA through one undici Agent per bundle', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }))
+    const { ctx } = buildCtx()
+    const ca = '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n'
+
+    await ctx.k8s.list(server, { ...auth, ca, version: 'v1', resource: 'namespaces' })
+    await ctx.k8s.list(server, { ...auth, ca, version: 'v1', resource: 'namespaces' })
+
+    expect(agentMock).toHaveBeenCalledTimes(1)
+    expect(agentMock).toHaveBeenCalledWith({ connect: { ca } })
+    const first = (fetchMock.mock.calls[0]?.[1] as { dispatcher: unknown }).dispatcher
+    const second = (fetchMock.mock.calls[1]?.[1] as { dispatcher: unknown }).dispatcher
+    expect(first).toBeDefined()
+    expect(second).toBe(first)
+  })
+
+  it('reads one object, and turns a 404 Status into K8S_API_ERROR with status and reason', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ kind: 'Deployment', status: { readyReplicas: 2 } }))
+    const onIoError = vi.fn()
+    const { ctx } = buildCtx({ onIoError })
+
+    const deployment = await ctx.k8s.read(server, { ...auth, group: 'apps', version: 'v1', resource: 'deployments', namespace: 'web', name: 'site' })
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://k8s.example.test:6443/apis/apps/v1/namespaces/web/deployments/site')
+    expect(deployment).toEqual({ kind: 'Deployment', status: { readyReplicas: 2 } })
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ kind: 'Status', reason: 'NotFound', message: 'deployments.apps "gone" not found' }, 404)
+    )
+    await expect(
+      ctx.k8s.read(server, { ...auth, group: 'apps', version: 'v1', resource: 'deployments', namespace: 'web', name: 'gone' })
+    ).rejects.toMatchObject({
+      name: 'K8sRequestError',
+      code: 'K8S_API_ERROR',
+      status: 404,
+      reason: 'NotFound',
+      message:
+        'Kubernetes API returned HTTP 404 NotFound for read https://k8s.example.test:6443/apis/apps/v1/namespaces/web/deployments/gone: deployments.apps "gone" not found',
+    })
+    expect(onIoError).toHaveBeenCalledWith(expect.objectContaining({ protocol: 'k8s', op: 'read', code: 'K8S_API_ERROR' }))
+  })
+
+  it('keeps the HTTP status when an error body is not a Status object', async () => {
+    fetchMock.mockResolvedValue({ status: 502, body: [Buffer.from('<html>bad gateway</html>')], headers: { forEach: vi.fn() } })
+    const { ctx } = buildCtx()
+
+    await expect(ctx.k8s.list(server, { ...auth, version: 'v1', resource: 'pods' })).rejects.toMatchObject({
+      code: 'K8S_API_ERROR',
+      status: 502,
+      reason: null,
+      message: 'Kubernetes API returned HTTP 502 for list https://k8s.example.test:6443/api/v1/pods',
+    })
+  })
+
+  it('get returns the raw response without a status check', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ kind: 'Status', code: 403 }, 403))
+    const onK8sComplete = vi.fn()
+    const { ctx } = buildCtx({ onK8sComplete })
+
+    const res = await ctx.k8s.get(`${server}/version`, { ...auth, headers: { 'x-extra': '1' } })
+
+    expect(res.status).toBe(403)
+    expect(res.json()).toEqual({ kind: 'Status', code: 403 })
+    expect((fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> }).headers['x-extra']).toBe('1')
+    expect(onK8sComplete).toHaveBeenCalledWith(expect.objectContaining({ op: 'get', status: 403 }))
+  })
+
+  it('evicts the agent cache once it holds 16 bundles', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ items: [] }))
+    // The cache is module state shared with the other CA test, so start from a fresh module instance.
+    vi.resetModules()
+    const { buildCtx: freshBuildCtx } = await import('./ctx.js')
+    const { ctx } = freshBuildCtx()
+    const bundle = (i: number) => `-----BEGIN CERTIFICATE-----\nbundle-${i}\n-----END CERTIFICATE-----\n`
+
+    for (let i = 0; i < 16; i++) await ctx.k8s.list(server, { ...auth, ca: bundle(i), version: 'v1', resource: 'namespaces' })
+    expect(agentMock).toHaveBeenCalledTimes(16)
+    await ctx.k8s.list(server, { ...auth, ca: bundle(0), version: 'v1', resource: 'namespaces' })
+    expect(agentMock).toHaveBeenCalledTimes(16) // still cached
+    await ctx.k8s.list(server, { ...auth, ca: bundle(16), version: 'v1', resource: 'namespaces' })
+    expect(agentMock).toHaveBeenCalledTimes(17) // cache cleared, new agent
+    await ctx.k8s.list(server, { ...auth, ca: bundle(0), version: 'v1', resource: 'namespaces' })
+    expect(agentMock).toHaveBeenCalledTimes(18) // bundle 0 was evicted with the rest
+  })
+
+  it('throws K8S_FETCH_ERROR when a 2xx body is not JSON', async () => {
+    fetchMock.mockResolvedValue({ status: 200, body: [Buffer.from('<html>login</html>')], headers: { forEach: vi.fn() } })
+    const { ctx } = buildCtx()
+
+    await expect(ctx.k8s.list(server, { ...auth, version: 'v1', resource: 'pods' })).rejects.toMatchObject({
+      code: 'K8S_FETCH_ERROR',
+      message: expect.stringContaining('Kubernetes request failed for list'),
+    })
+  })
+
+  it('reports a Status without message as status and reason only', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ kind: 'Status', reason: 'Forbidden' }, 403))
+    const { ctx } = buildCtx()
+
+    await expect(ctx.k8s.read(server, { ...auth, version: 'v1', resource: 'pods', namespace: 'a', name: 'p' })).rejects.toMatchObject({
+      code: 'K8S_API_ERROR',
+      status: 403,
+      reason: 'Forbidden',
+      message: 'Kubernetes API returned HTTP 403 Forbidden for read https://k8s.example.test:6443/api/v1/namespaces/a/pods/p',
+    })
+  })
+
+  it('rejects a missing token, a bad server URL, missing resource fields and a missing name before any request', async () => {
+    const { ctx } = buildCtx()
+
+    await expect(ctx.k8s.get(`${server}/version`, { token: '' })).rejects.toMatchObject({ code: 'K8S_CONFIG_ERROR' })
+    await expect(ctx.k8s.list('nope', { ...auth, version: 'v1', resource: 'pods' })).rejects.toMatchObject({ code: 'K8S_CONFIG_ERROR' })
+    await expect(ctx.k8s.list(server, { ...auth, version: '', resource: 'pods' })).rejects.toMatchObject({ code: 'K8S_CONFIG_ERROR' })
+    await expect(ctx.k8s.read(server, { ...auth, version: 'v1', resource: 'pods', name: '' })).rejects.toMatchObject({ code: 'K8S_CONFIG_ERROR' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('maps network failures and per-request timeouts to K8S_FETCH_ERROR and K8S_TIMEOUT_ERROR', async () => {
+    const { ctx } = buildCtx()
+
+    fetchMock.mockRejectedValueOnce(new TypeError('ECONNREFUSED'))
+    await expect(ctx.k8s.list(server, { ...auth, version: 'v1', resource: 'pods' })).rejects.toMatchObject({
+      code: 'K8S_FETCH_ERROR',
+      message: expect.stringContaining('ECONNREFUSED'),
+    })
+
+    fetchMock.mockImplementationOnce(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason))
+        })
+    )
+    const err = await ctx.k8s.read(server, { ...auth, version: 'v1', resource: 'pods', name: 'p', timeout: 5 }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(K8sRequestError)
+    expect(err).toMatchObject({ code: 'K8S_TIMEOUT_ERROR', op: 'read' })
   })
 })
