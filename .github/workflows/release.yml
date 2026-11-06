@@ -3,6 +3,15 @@ name: Release
 on:
   push:
     branches: [main]
+  # Rebuild and push the images for a tag that semantic-release already created, for when
+  # the release job failed after tagging (e.g. a rejected git-notes push) and the image jobs
+  # were skipped. Runs the tests, skips semantic-release, then builds from the given tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build images for (e.g. v1.29.0)
+        required: true
+        type: string
 
 concurrency:
   group: release-main
@@ -78,8 +87,8 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     outputs:
-      published: ${{ steps.check.outputs.published }}
-      tag: ${{ steps.check.outputs.tag }}
+      published: ${{ steps.check.outputs.published || steps.manual.outputs.published }}
+      tag: ${{ steps.check.outputs.tag || steps.manual.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -97,17 +106,28 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Use the requested existing tag
+        id: manual
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git rev-parse -q --verify "refs/tags/${{ inputs.tag }}" >/dev/null || { echo "tag ${{ inputs.tag }} does not exist"; exit 1; }
+          echo "published=true" >> $GITHUB_OUTPUT
+          echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+
       - name: Capture version before release
         id: before
+        if: github.event_name == 'push'
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Run semantic-release
+        if: github.event_name == 'push'
         run: pnpm exec semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Detect if a new release was published
         id: check
+        if: github.event_name == 'push'
         run: |
           AFTER=$(node -p "require('./package.json').version")
           if [ "${{ steps.before.outputs.version }}" != "$AFTER" ]; then
