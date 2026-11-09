@@ -1,3 +1,10 @@
+# [1.30.0](https://github.com/paschendale/sentinel/compare/v1.29.0...v1.30.0) (2026-11-09)
+
+
+### Features
+
+* **dashboard:** list tests in sections by state on the dashboard and status page ([794fe25](https://github.com/paschendale/sentinel/commit/794fe259fec2f4f4a4ed03898668ae8114f6ad11))
+
 # [1.29.0](https://github.com/paschendale/sentinel/compare/v1.28.0...v1.29.0) (2026-11-06)
 
 
