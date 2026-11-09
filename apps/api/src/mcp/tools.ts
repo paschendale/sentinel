@@ -147,10 +147,25 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
   server.registerTool(
     'get_dashboard_summary',
     {
-      description: 'Get the dashboard summary for all tests (last status, 7-day pass rate, avg latency), optionally filtered by tag.',
-      inputSchema: { tag: z.string().optional() },
+      description:
+        'Get the dashboard summary for all tests (last status, 7-day pass rate, avg latency), ordered by ' +
+        'section: critical (down past its failure threshold), warning (a warning, or failing under the ' +
+        'threshold), recovered (passing, but a run in the last 24 h did not pass), clean, disabled. Each ' +
+        'test carries its section, problem_started_at / problem_ended_at / problem_worst for the current or ' +
+        'last problem, and last_problem_at. Optionally filter by tag and by sections (e.g. ' +
+        '["critical","warning"] for what needs attention now).',
+      inputSchema: {
+        tag: z.string().optional(),
+        sections: z.array(z.enum(['critical', 'warning', 'recovered', 'clean', 'disabled'])).optional(),
+      },
     },
-    async ({ tag }) => forward('GET', tag ? `/dashboard?tag=${encodeURIComponent(tag)}` : '/dashboard')
+    async ({ tag, sections }) => {
+      const params = new URLSearchParams()
+      if (tag) params.set('tag', tag)
+      if (sections && sections.length > 0) params.set('section', sections.join(','))
+      const qs = params.toString()
+      return forward('GET', qs ? `/dashboard?${qs}` : '/dashboard')
+    }
   )
 
   server.registerTool(

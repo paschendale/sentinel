@@ -108,34 +108,67 @@ async function flushTestState(rows: RunResult[]): Promise<void> {
   const placeholders = deduped.map((r, i) => {
     const b = i * 3
     values.push(r.test_id, r.status, r.finished_at)
-    return `($${b + 1},$${b + 2},$${b + 3}::timestamptz)`
+    return `($${b + 1}::text,$${b + 2}::text,$${b + 3}::timestamptz)`
   })
 
-  // LEFT JOIN reads existing consecutive_failures so it can be incremented correctly.
-  // JOIN tests to read failure_threshold and compute public_status atomically.
+  // LEFT JOIN reads the previous state so consecutive_failures can be incremented and the
+  // problem window (problem_started_at/ended_at/worst, last_problem_at) maintained; JOIN tests
+  // reads failure_threshold so public_status is computed atomically.
   await pool.query(
-    `INSERT INTO test_state (test_id, last_status, consecutive_failures, last_run_at, public_status)
+    `WITH v(test_id, last_status, last_run_at) AS (VALUES ${placeholders.join(',')}),
+     calc AS (
+       SELECT
+         v.test_id,
+         v.last_status,
+         v.last_run_at,
+         CASE WHEN v.last_status = 'success' OR v.last_status = 'warn' THEN 0
+              ELSE COALESCE(ts.consecutive_failures, 0) + 1
+         END AS consecutive_failures,
+         CASE
+           WHEN v.last_status = 'success' THEN 'up'
+           WHEN v.last_status = 'warn' THEN 'degraded'
+           WHEN (COALESCE(ts.consecutive_failures, 0) + 1) >= t.failure_threshold THEN 'down'
+           ELSE 'degraded'
+         END AS public_status,
+         COALESCE(ts.public_status, 'unknown') AS prev_public_status,
+         ts.problem_started_at AS prev_started_at,
+         ts.problem_ended_at   AS prev_ended_at,
+         ts.problem_worst      AS prev_worst,
+         ts.last_problem_at    AS prev_last_problem_at
+       FROM v
+       LEFT JOIN test_state ts ON ts.test_id = v.test_id
+       JOIN tests t ON t.id = v.test_id
+     )
+     INSERT INTO test_state (test_id, last_status, consecutive_failures, last_run_at, public_status,
+                             problem_started_at, problem_ended_at, problem_worst, last_problem_at)
      SELECT
-       v.test_id,
-       v.last_status,
-       CASE WHEN v.last_status = 'success' OR v.last_status = 'warn' THEN 0
-            ELSE COALESCE(ts.consecutive_failures, 0) + 1
-       END,
-       v.last_run_at,
-       CASE
-         WHEN v.last_status = 'success' THEN 'up'
-         WHEN v.last_status = 'warn' THEN 'degraded'
-         WHEN (COALESCE(ts.consecutive_failures, 0) + 1) >= t.failure_threshold THEN 'down'
-         ELSE 'degraded'
-       END
-     FROM (VALUES ${placeholders.join(',')}) AS v(test_id, last_status, last_run_at)
-     LEFT JOIN test_state ts ON ts.test_id = v.test_id
-     JOIN tests t ON t.id = v.test_id
+       test_id,
+       last_status,
+       consecutive_failures,
+       last_run_at,
+       public_status,
+       -- a new streak starts when a non-passing state follows a passing (or unknown) one
+       CASE WHEN public_status <> 'up' AND prev_public_status IN ('up', 'unknown') THEN last_run_at
+            ELSE prev_started_at END,
+       -- the streak ends on the first passing run after it; it stays open while the state is not up
+       CASE WHEN public_status <> 'up' THEN NULL
+            WHEN prev_public_status IN ('down', 'degraded') THEN last_run_at
+            ELSE prev_ended_at END,
+       CASE WHEN public_status = 'up' THEN prev_worst
+            WHEN prev_public_status IN ('up', 'unknown') THEN public_status
+            WHEN public_status = 'down' OR prev_worst = 'down' THEN 'down'
+            ELSE 'degraded' END,
+       CASE WHEN last_status <> 'success' THEN last_run_at ELSE prev_last_problem_at END
+     FROM calc
      ON CONFLICT (test_id) DO UPDATE SET
        last_status          = EXCLUDED.last_status,
        consecutive_failures = EXCLUDED.consecutive_failures,
        last_run_at          = EXCLUDED.last_run_at,
-       public_status        = EXCLUDED.public_status`,
+       public_status        = EXCLUDED.public_status,
+       problem_started_at   = EXCLUDED.problem_started_at,
+       problem_ended_at     = EXCLUDED.problem_ended_at,
+       problem_worst        = EXCLUDED.problem_worst,
+       last_problem_at      = EXCLUDED.last_problem_at`,
     values,
   )
 

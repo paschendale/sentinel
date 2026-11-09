@@ -3,12 +3,15 @@
 import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from './status-buckets-view'
 import { TagList } from '../../_components/tag-list'
+import { SINCE_TONE_CLASS, type SinceText } from '../../_components/sections'
 
 interface Props {
   test: PublicStatusTest
   buckets: StatusBucket[]
   loading: boolean
   period: StatusPeriod
+  /** The section's "since" line (failing for…, recovered … ago); omitted for clean tests. */
+  since?: SinceText
 }
 
 function computeUptimePct(buckets: StatusBucket[]): number | null {
@@ -47,7 +50,7 @@ function sampleBuckets(buckets: StatusBucket[], target: number): StatusBucket[] 
   return Array.from({ length: target }, (_, i) => buckets[Math.floor(i * step)]!)
 }
 
-export function StatusGridCard({ test, buckets, loading, period }: Props) {
+export function StatusGridCard({ test, buckets, loading, period, since }: Props) {
   const uptimePct = buckets.length > 0 ? computeUptimePct(buckets) : null
   const displayBuckets = buckets.length > 0 ? sampleBuckets(buckets, GRID_BUCKET_COUNT) : []
   const detailHref = `/status/tests/${test.id}`
@@ -79,6 +82,13 @@ export function StatusGridCard({ test, buckets, loading, period }: Props) {
           )}
           <span className="text-[10px] font-normal text-zinc-600 ml-1.5">{period}</span>
         </p>
+
+        {since && since.tone !== 'muted' && (
+          <p className={`text-xs leading-snug ${SINCE_TONE_CLASS[since.tone]}`} suppressHydrationWarning>
+            {since.text}
+            {since.sub && <span className="block text-zinc-500">{since.sub}</span>}
+          </p>
+        )}
 
         {/* Mini histogram */}
         {loading ? (

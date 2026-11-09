@@ -280,3 +280,31 @@ describe('GET /status/test/:id/events', () => {
     expect(runsCall[1]).toEqual(['t1', '2026-07-01T00:00:00.000Z', '2026-07-02T00:00:00.000Z', 1])
   })
 })
+
+describe('GET /status sections', () => {
+  beforeEach(() => {
+    mockQuery.mockClear()
+  })
+
+  it('adds the problem window and section to every test', async () => {
+    const recent = new Date(Date.now() - 30 * 60 * 1000)
+    mockQuery
+      .mockResolvedValueOnce({ rows: [makeTestRow({ id: 'a' }), makeTestRow({ id: 'b' }), makeTestRow({ id: 'c', enabled: false })] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({
+        rows: [
+          { test_id: 'a', public_status: 'down', problem_started_at: recent, problem_ended_at: null, problem_worst: 'down', last_problem_at: recent },
+          { test_id: 'b', public_status: 'up', problem_started_at: recent, problem_ended_at: recent.toISOString(), problem_worst: 'degraded', last_problem_at: recent },
+        ],
+      } as never)
+
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status' })
+    const body = JSON.parse(res.body) as Array<Record<string, unknown>>
+    expect(body.map((t) => t.section)).toEqual(['critical', 'recovered', 'disabled'])
+    expect(body[0]).toMatchObject({ problem_started_at: recent.toISOString(), problem_ended_at: null, problem_worst: 'down' })
+    expect(body[1]).toMatchObject({ problem_ended_at: recent.toISOString(), problem_worst: 'degraded' })
+    expect(body[2]).toMatchObject({ problem_started_at: null, last_problem_at: null, problem_worst: null })
+    expect(mockQuery.mock.calls[2]![0]).toContain('problem_started_at, problem_ended_at, problem_worst, last_problem_at')
+  })
+})

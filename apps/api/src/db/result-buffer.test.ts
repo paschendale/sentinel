@@ -189,6 +189,20 @@ describe('flushTestState deduplication', () => {
     expect(sql).toContain('public_status')
     expect(sql).not.toContain('last_notification_at')
   })
+
+  it('maintains the problem window in the same upsert', async () => {
+    enqueue(makeResult())
+    await flush()
+
+    const sql = mockQuery.mock.calls[2]![0] as string
+    for (const col of ['problem_started_at', 'problem_ended_at', 'problem_worst', 'last_problem_at']) {
+      expect(sql).toMatch(new RegExp(`${col}\\s+=\\s+EXCLUDED\\.${col}`))
+    }
+    // a streak starts when a non-passing state follows a passing or unknown one, and ends on the first pass
+    expect(sql).toContain("public_status <> 'up' AND prev_public_status IN ('up', 'unknown') THEN last_run_at")
+    expect(sql).toContain("WHEN prev_public_status IN ('down', 'degraded') THEN last_run_at")
+    expect(sql).toContain("CASE WHEN last_status <> 'success' THEN last_run_at ELSE prev_last_problem_at END")
+  })
 })
 
 describe('enqueue immediate flush at 100 rows', () => {

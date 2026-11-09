@@ -1,3 +1,5 @@
+import type { ProblemWindow, StatusSection } from './sections.js'
+
 export type TestStatus = 'success' | 'warn' | 'fail' | 'timeout'
 export type NotificationChannelType = 'discord' | 'slack' | 'webhook' | 'email' | 'discord_bot' | 'slack_bot'
 
@@ -127,7 +129,7 @@ export interface TestState {
   last_run_at: Date | null
 }
 
-export interface TestSummary {
+export interface TestSummary extends ProblemWindow {
   id: string
   name: string
   enabled: boolean
@@ -136,6 +138,11 @@ export interface TestSummary {
   last_run_at: string | null
   pass_rate_7d: number | null
   avg_latency_ms: number | null
+  public_status: PublicStatusOutcome
+  consecutive_failures: number
+  failure_threshold: number
+  /** Where the test is listed; see statusSection(). */
+  section: StatusSection
 }
 
 export interface Incident {
@@ -173,7 +180,7 @@ export interface PublicStatusDay {
   outcome: PublicStatusOutcome
 }
 
-export interface PublicStatusTest {
+export interface PublicStatusTest extends ProblemWindow {
   id: string
   name: string
   enabled: boolean
@@ -181,6 +188,8 @@ export interface PublicStatusTest {
   current_status: PublicStatusOutcome
   uptime_pct_30d: number | null
   days: PublicStatusDay[]
+  /** Where the test is listed; see statusSection(). */
+  section: StatusSection
 }
 
 /** A single check's outcome, shown on the public status page (mirrors the admin run history). */
