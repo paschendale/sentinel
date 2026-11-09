@@ -5,6 +5,7 @@ import Link from 'next/link'
 import type { TestSummary, StatusBucket, StatusBucketTest, StatusPeriod } from '@sentinel/shared'
 import { StatusBucketsView } from '../status/_components/status-buckets-view'
 import { TagList } from './tag-list'
+import { SINCE_TONE_CLASS, SectionBlock, SectionSummary, groupBySection, sinceText, visibleSections } from './sections'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -14,6 +15,7 @@ type SortKey = 'name' | 'status' | 'last_run_at' | 'avg_latency_ms'
 
 const STATUS_ORDER: Record<string, number> = { success: 0, warn: 1, fail: 2, timeout: 2 }
 
+/** Sorts inside one section when a column header was clicked; otherwise the section's own order stands. */
 function sortTests(tests: TestSummary[], key: SortKey | null, dir: 'asc' | 'desc'): TestSummary[] {
   if (!key) return tests
   const mul = dir === 'asc' ? 1 : -1
@@ -92,6 +94,15 @@ function StatusBadge({ status }: { status: TestSummary['last_status'] }) {
   )
 }
 
+const COLUMNS: Array<{ key: SortKey | null; label: string; className: string }> = [
+  { key: 'name', label: 'Name', className: '' },
+  { key: 'status', label: 'Status', className: 'w-24' },
+  { key: null, label: 'Since', className: 'w-56' },
+  { key: 'last_run_at', label: 'Last Run', className: 'w-24' },
+  { key: 'avg_latency_ms', label: 'Avg Response', className: 'w-28' },
+  { key: null, label: 'History', className: 'w-64' },
+]
+
 interface Props {
   tests: TestSummary[]
   tag?: string
@@ -103,6 +114,7 @@ export function DashboardTable({ tests, tag }: Props) {
   const [loading, setLoading] = useState(true)
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [now, setNow] = useState(() => new Date())
 
   function handleSort(key: SortKey) {
     if (sortKey === key) {
@@ -113,7 +125,12 @@ export function DashboardTable({ tests, tag }: Props) {
     }
   }
 
-  const sorted = sortTests(tests, sortKey, sortDir)
+  const groups = groupBySection(tests)
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -134,98 +151,124 @@ export function DashboardTable({ tests, tag }: Props) {
   const bucketCount = period === '30d' ? 30 : 100
 
   return (
-    <>
-      <div className="flex gap-2 mb-4">
-        {PERIODS.map(p => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`text-xs px-3 py-1 rounded-sm transition-colors ${
-              period === p
-                ? 'bg-zinc-100 text-zinc-950'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
-            }`}
-          >
-            {p}
-          </button>
-        ))}
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SectionSummary groups={groups} />
+        <div className="flex gap-2">
+          {PERIODS.map(p => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`text-xs px-3 py-1 rounded-sm transition-colors ${
+                period === p
+                  ? 'bg-zinc-100 text-zinc-950'
+                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-zinc-600 text-xs tracking-widest uppercase">
-            {(['name', 'status', 'last_run_at', 'avg_latency_ms'] as SortKey[]).map(key => {
-              const labels: Record<SortKey, string> = { name: 'Name', status: 'Status', last_run_at: 'Last Run', avg_latency_ms: 'Avg Response' }
-              return (
-                <th key={key} className="text-left pb-4 font-normal">
-                  <button
-                    onClick={() => handleSort(key)}
-                    className="flex items-center gap-1 hover:text-zinc-400 transition-colors"
-                  >
-                    {labels[key]}
-                    <SortIcon active={sortKey === key} dir={sortDir} />
-                  </button>
-                </th>
-              )
-            })}
-            <th className="text-left pb-4 font-normal w-64">History</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map(test => {
-            const buckets = bucketData.get(test.id) ?? []
-            return (
-              <tr key={test.id} className="hover:bg-zinc-900/50 transition-opacity duration-150">
-                <td className="py-3 pr-8">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Link href={`/tests/${test.id}`} className="text-zinc-100 hover:text-white transition-colors shrink-0">
-                      {test.name}
-                    </Link>
-                    {!test.enabled && <span className="text-zinc-600 text-xs shrink-0">disabled</span>}
-                    <TagList
-                      tags={test.tags ?? []}
-                      className="min-w-0"
-                      renderTag={t => (
-                        <Link
-                          key={t}
-                          href={`/?tag=${encodeURIComponent(t)}`}
-                          className="text-xs px-1.5 py-0.5 bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-sm transition-colors"
-                        >
-                          {t}
-                        </Link>
-                      )}
-                    />
-                  </div>
-                </td>
-                <td className="py-3 pr-8">
-                  <StatusBadge status={test.last_status} />
-                </td>
-                <td className="py-3 pr-8 text-zinc-400">
-                  <time dateTime={test.last_run_at ?? undefined} suppressHydrationWarning>
-                    {formatRelativeTime(test.last_run_at)}
-                  </time>
-                </td>
-                <td className="py-3 pr-8 text-zinc-400">
-                  {test.avg_latency_ms != null ? `${test.avg_latency_ms}ms` : '—'}
-                </td>
-                <td className="py-3 w-64">
-                  {loading ? (
-                    <div className="flex gap-px w-full">
-                      {Array.from({ length: bucketCount }).map((_, i) => (
-                        <div key={i} className="flex-1 min-w-0 aspect-square rounded-[1px] bg-zinc-800/60 animate-pulse" />
-                      ))}
-                    </div>
-                  ) : buckets.length > 0 ? (
-                    <StatusBucketsView testId={test.id} buckets={buckets} period={period} />
-                  ) : (
-                    <span className="text-zinc-600">—</span>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </>
+      {visibleSections(groups).map(section => {
+        const rows = sortTests(groups[section], sortKey, sortDir)
+        return (
+          <SectionBlock key={section} section={section} count={rows.length}>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1100px] table-fixed text-sm">
+                <thead>
+                  <tr className="text-zinc-600 text-xs tracking-widest uppercase">
+                    {COLUMNS.map(col => (
+                      <th key={col.label} className={`text-left pb-3 pt-1 font-normal ${col.className}`}>
+                        {col.key ? (
+                          <button
+                            onClick={() => handleSort(col.key!)}
+                            className="flex items-center gap-1 hover:text-zinc-400 transition-colors"
+                          >
+                            {col.label}
+                            <SortIcon active={sortKey === col.key} dir={sortDir} />
+                          </button>
+                        ) : (
+                          col.label
+                        )}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(test => {
+                    const buckets = bucketData.get(test.id) ?? []
+                    const since = sinceText(
+                      {
+                        ...test,
+                        failing:
+                          test.section === 'warning' && test.consecutive_failures > 0
+                            ? { count: test.consecutive_failures, threshold: test.failure_threshold }
+                            : null,
+                      },
+                      now,
+                    )
+                    return (
+                      <tr key={test.id} className="hover:bg-zinc-900/50 transition-opacity duration-150 align-middle">
+                        <td className="py-3 pr-6">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Link href={`/tests/${test.id}`} className="text-zinc-100 hover:text-white transition-colors shrink-0">
+                              {test.name}
+                            </Link>
+                            {!test.enabled && <span className="text-zinc-600 text-xs shrink-0">disabled</span>}
+                            <TagList
+                              tags={test.tags ?? []}
+                              className="min-w-0"
+                              renderTag={t => (
+                                <Link
+                                  key={t}
+                                  href={`/?tag=${encodeURIComponent(t)}`}
+                                  className="text-xs px-1.5 py-0.5 bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-sm transition-colors"
+                                >
+                                  {t}
+                                </Link>
+                              )}
+                            />
+                          </div>
+                        </td>
+                        <td className="py-3 pr-6">
+                          <StatusBadge status={test.last_status} />
+                        </td>
+                        <td className="py-3 pr-6" suppressHydrationWarning>
+                          <span className={`block ${SINCE_TONE_CLASS[since.tone]}`}>{since.text}</span>
+                          {since.sub && <span className="block text-xs text-zinc-500">{since.sub}</span>}
+                        </td>
+                        <td className="py-3 pr-6 text-zinc-400">
+                          <time dateTime={test.last_run_at ?? undefined} suppressHydrationWarning>
+                            {formatRelativeTime(test.last_run_at)}
+                          </time>
+                        </td>
+                        <td className="py-3 pr-6 text-zinc-400">
+                          {test.avg_latency_ms != null ? `${test.avg_latency_ms}ms` : '—'}
+                        </td>
+                        <td className="py-3 w-64">
+                          {loading ? (
+                            <div className="flex gap-px w-full">
+                              {Array.from({ length: bucketCount }).map((_, i) => (
+                                <div key={i} className="flex-1 min-w-0 aspect-square rounded-[1px] bg-zinc-800/60 animate-pulse" />
+                              ))}
+                            </div>
+                          ) : buckets.length > 0 ? (
+                            <StatusBucketsView testId={test.id} buckets={buckets} period={period} />
+                          ) : (
+                            <span className="text-zinc-600">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </SectionBlock>
+        )
+      })}
+    </div>
   )
 }

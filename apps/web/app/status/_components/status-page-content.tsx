@@ -6,6 +6,7 @@ import type { PublicStatusOutcome, PublicStatusTest, StatusBucket, StatusBucketT
 import { StatusBucketsView } from './status-buckets-view'
 import { StatusGridCard } from './status-grid-card'
 import { TagList } from '../../_components/tag-list'
+import { SINCE_TONE_CLASS, SectionBlock, SectionSummary, groupBySection, sinceText, visibleSections } from '../../_components/sections'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
@@ -180,21 +181,30 @@ export function StatusPageContent({ tests, tag }: Props) {
     </div>
   )
 
+  const groups = groupBySection(tests)
+  const now = new Date()
+
   if (view === 'grid') {
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
         {controls}
-        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
-          {tests.map(test => (
-            <StatusGridCard
-              key={test.id}
-              test={test}
-              buckets={bucketData.get(test.id) ?? []}
-              loading={loading}
-              period={period}
-            />
-          ))}
-        </div>
+        <SectionSummary groups={groups} />
+        {visibleSections(groups).map(section => (
+          <SectionBlock key={section} section={section} count={groups[section].length}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+              {groups[section].map(test => (
+                <StatusGridCard
+                  key={test.id}
+                  test={test}
+                  buckets={bucketData.get(test.id) ?? []}
+                  loading={loading}
+                  period={period}
+                  since={sinceText(test, now)}
+                />
+              ))}
+            </div>
+          </SectionBlock>
+        ))}
       </div>
     )
   }
@@ -202,9 +212,13 @@ export function StatusPageContent({ tests, tag }: Props) {
   return (
     <div className="space-y-8">
       {controls}
+      <SectionSummary groups={groups} />
 
+      {visibleSections(groups).map(section => (
+      <SectionBlock key={section} section={section} count={groups[section].length}>
       <div className="max-w-2xl mx-auto space-y-8">
-        {tests.map(test => {
+        {groups[section].map(test => {
+          const since = sinceText(test, now)
           const buckets = bucketData.get(test.id) ?? []
           const uptimePct = buckets.length > 0 ? computeUptimePct(buckets) : null
 
@@ -239,6 +253,9 @@ export function StatusPageContent({ tests, tag }: Props) {
                   )}
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
+                  {since.tone !== 'muted' && (
+                    <span className={`text-xs ${SINCE_TONE_CLASS[since.tone]}`} suppressHydrationWarning>{since.text}</span>
+                  )}
                   <CurrentLabel status={test.current_status} />
                   <a
                     href={`/status/tests/${test.id}`}
@@ -269,6 +286,8 @@ export function StatusPageContent({ tests, tag }: Props) {
           )
         })}
       </div>
+      </SectionBlock>
+      ))}
     </div>
   )
 }

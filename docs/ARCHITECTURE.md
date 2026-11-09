@@ -110,7 +110,8 @@ pnpm workspaces manage the monorepo.
 - Client Components only where interactivity is required (code editor, run button)
 
 ### Key UI Areas
-- **Dashboard**: test list with last status, last run time, 7-day sparkline
+- **Dashboard**: tests stacked in sections by state (critical failures, warnings, recoveries in the last 24 h, no problems in the last 24 h, disabled — the last two collapsed), each row with last status, a "since" line from the problem window on `TestState`, last run time and history bars; column sorting applies inside each section. `GET /dashboard` returns each test's `section` and accepts `?section=critical,warning`
+- **Public status page**: the same sections in grid and list views, with a summary bar of counts; tag status pages too
 - **Test editor**: Monaco Editor (lazy-loaded, not bundled eagerly) for JS code editing
 - **Test detail**: recent runs, pass/fail history, duration chart
 - **Public status page**: SSG/ISR from `UptimeDaily` only — never queries raw `test_runs`

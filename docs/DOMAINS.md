@@ -180,12 +180,20 @@ Runtime state for each test. Tracks alert logic. Persisted to DB but treated as 
 | `last_notification_at` | `timestamp \| null` | When the last fail/recovery alert was fired |
 | `last_warning_at` | `timestamp \| null` | When the last warning alert was fired |
 | `last_run_at` | `timestamp \| null` | When the test last executed |
+| `public_status` | `'up' \| 'degraded' \| 'down' \| 'unknown'` | `up` on a pass; `degraded` on a warning or a failure under `failure_threshold`; `down` once consecutive failures reach it |
+| `problem_started_at` | `timestamp \| null` | First run of the current, or most recent, streak of non-`up` state |
+| `problem_ended_at` | `timestamp \| null` | First `up` run after that streak; null while the streak is ongoing |
+| `problem_worst` | `'down' \| 'degraded' \| null` | Worst state reached during that streak |
+| `last_problem_at` | `timestamp \| null` | Most recent run that was not a pass (warn, fail or timeout) |
+
+**Sections** (`statusSection()` in `@sentinel/shared`, used by the API, both web pages and MCP): `disabled` when the test is disabled; else `critical` when `public_status = 'down'`; `warning` when `degraded`; `recovered` when `up` and `last_problem_at` is within the last 24 h; otherwise `clean`. Order inside a section (`compareInSection()`): newest `problem_started_at` first for critical and warning, most recent recovery first for recovered, by name otherwise. Tags take no part, so a test's section always matches what the notifier was told.
 
 **Invariants:**
 - `consecutive_failures` resets to 0 on `success` or `warn` (neither is a failure streak)
 - A **fail** notification fires when `consecutive_failures >= threshold` AND `now - last_notification_at > cooldown`
 - A **warning** notification fires on the first `warn` result (no threshold), then after `cooldown` elapses — tracked independently via `last_warning_at` so it never blocks a subsequent fail alert
 - A **recovery** notification fires on `success` if either `last_notification_at` or `last_warning_at` is set; both are cleared on recovery
+- The problem window is written by the same per-run upsert that sets `public_status`: a streak starts when a non-`up` state follows `up` or `unknown`, stays open through any mix of `degraded` and `down`, and ends on the first `up` run; `problem_worst` only rises within a streak. Migration 020 backfilled it from the last 7 days of runs, counting a streak as `down` when it held at least `failure_threshold` failing runs
 
 ---
 

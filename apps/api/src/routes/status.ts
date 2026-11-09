@@ -9,6 +9,7 @@ import type {
   StatusPeriod,
   TestRun,
 } from '@sentinel/shared'
+import { statusSection } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import { getDistinctTags } from '../db/queries/assignments.js'
 
@@ -21,7 +22,21 @@ type UdRow = {
   failure_count: number
 }
 
-type StateRow = { test_id: string; public_status: string }
+type StateRow = {
+  test_id: string
+  public_status: string
+  problem_started_at: Date | string | null
+  problem_ended_at: Date | string | null
+  problem_worst: 'down' | 'degraded' | null
+  last_problem_at: Date | string | null
+}
+
+const STATE_COLUMNS = 'test_id, public_status, problem_started_at, problem_ended_at, problem_worst, last_problem_at'
+
+function iso(v: Date | string | null | undefined): string | null {
+  if (v === null || v === undefined) return null
+  return v instanceof Date ? v.toISOString() : String(v)
+}
 
 function dayOutcome(successCount: number, failureCount: number): PublicStatusDay['outcome'] {
   if (failureCount > 0 && successCount === 0) return 'down'
@@ -42,7 +57,7 @@ function utcDayStrings(): string[] {
   return out
 }
 
-function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRow[]): PublicStatusTest[] {
+function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRow[], now = new Date()): PublicStatusTest[] {
   const dayStrings = utcDayStrings()
   const udByTest = new Map<string, Map<string, { s: number; f: number }>>()
 
@@ -79,6 +94,12 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRo
 
     const state = stateMap.get(t.id)
     const current_status = (state?.public_status ?? 'unknown') as PublicStatusTest['current_status']
+    const window = {
+      problem_started_at: iso(state?.problem_started_at),
+      problem_ended_at: iso(state?.problem_ended_at),
+      problem_worst: state?.problem_worst ?? null,
+      last_problem_at: iso(state?.last_problem_at),
+    }
 
     return {
       id: t.id,
@@ -88,6 +109,8 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRo
       current_status,
       uptime_pct_30d,
       days,
+      ...window,
+      section: statusSection({ enabled: t.enabled, public_status: current_status, last_problem_at: window.last_problem_at }, now),
     }
   })
 }
@@ -105,7 +128,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     )
     const testIds = tests.map(t => t.id)
     const { rows: stateRows } = await pool.query<StateRow>(
-      `SELECT test_id, public_status FROM test_state WHERE test_id = ANY($1)`,
+      `SELECT ${STATE_COLUMNS} FROM test_state WHERE test_id = ANY($1)`,
       [testIds],
     )
     return reply.send(buildPublicStatus(tests, udRows, stateRows))
@@ -135,7 +158,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       [testIds],
     )
     const { rows: stateRows } = await pool.query<StateRow>(
-      `SELECT test_id, public_status FROM test_state WHERE test_id = ANY($1)`,
+      `SELECT ${STATE_COLUMNS} FROM test_state WHERE test_id = ANY($1)`,
       [testIds],
     )
     return reply.send(buildPublicStatus(tests, udRows, stateRows))
@@ -157,7 +180,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       [id],
     )
     const { rows: stateRows } = await pool.query<StateRow>(
-      `SELECT test_id, public_status FROM test_state WHERE test_id = $1`,
+      `SELECT ${STATE_COLUMNS} FROM test_state WHERE test_id = $1`,
       [id],
     )
     const [result] = buildPublicStatus(tests, udRows, stateRows)
