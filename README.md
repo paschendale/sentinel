@@ -22,6 +22,7 @@ Sentinel lets you write synthetic tests as plain JavaScript functions that run o
 - Notification channels: Discord, Slack, and generic webhooks
 - Encrypted secret store — read via `ctx.secrets.NAME` in test code, values are write-only after creation
 - Public read-only status pages (per-tag)
+- Dashboard and status page list tests in sections by state — **critical failures**, **warnings**, **recoveries in the last 24 hours**, **no problems in the last 24 hours** (collapsed), and **disabled** (collapsed) — with how long each problem has lasted or when it recovered
 - Prometheus metrics endpoint
 - Export and import all test definitions as JSON
 - MCP server for AI coding agents (e.g. Claude Code) to manage tests, channels, and secrets programmatically
