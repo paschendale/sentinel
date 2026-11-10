@@ -348,3 +348,34 @@ describe('triggerNotifications', () => {
     expect(sent).toBeDefined()
   })
 })
+
+describe('parallel delivery', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockRequest.mockReset()
+  })
+
+  it('does not hold back other tests behind one hung webhook', async () => {
+    const state = (id: string) => ({ test_id: id, test_name: id, consecutive_failures: 3, last_notification_at: null, last_warning_at: null, failure_threshold: 3, cooldown_ms: 0 })
+    mockQuery.mockImplementation(((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM test_state ts')) return Promise.resolve({ rows: [state('slow'), state('fast')] })
+      if (sql.includes('SELECT DISTINCT nc.id')) {
+        const url = params?.[0] === 'slow' ? 'https://slow.example.com' : 'https://fast.example.com'
+        return Promise.resolve({ rows: [{ id: `ch-${String(params?.[0])}`, type: 'webhook', webhook_url: url, email_to: null, channel_ref: null, bot_token_blob: null }] })
+      }
+      return Promise.resolve({ rows: [] })
+    }) as never)
+    const delivered: string[] = []
+    mockRequest.mockImplementation(((url: string) => {
+      if (url.includes('slow')) return new Promise(() => {}) // never answers
+      delivered.push(url)
+      return Promise.resolve({ statusCode: 200 })
+    }) as never)
+
+    triggerNotifications([
+      { test_id: 'slow', new_status: 'fail', prev_status: 'success', error_message: 'x', duration_ms: 1 },
+      { test_id: 'fast', new_status: 'fail', prev_status: 'success', error_message: 'y', duration_ms: 1 },
+    ])
+    await vi.waitFor(() => expect(delivered).toEqual(['https://fast.example.com']))
+  })
+})

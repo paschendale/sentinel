@@ -1,6 +1,5 @@
-import { request } from 'undici'
 import { DISCORD_API_URL } from '../../config.js'
-import { withSentinelHeaders } from '../../outbound-headers.js'
+import { notifyRequest } from '../http.js'
 import { TransportError, type BotCredentials, type IncidentHandles, type IncidentTransport } from './types.js'
 
 /** Public threads auto-archive after a day of silence; Sentinel archives explicitly on recovery. */
@@ -16,12 +15,12 @@ async function call(
   path: string,
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const res = await request(`${DISCORD_API_URL}${path}`, {
+  const res = await notifyRequest(`${DISCORD_API_URL}${path}`, {
     method,
-    headers: withSentinelHeaders({ 'content-type': 'application/json', authorization: `Bot ${creds.token}` }),
-    body: JSON.stringify(body),
+    headers: { authorization: `Bot ${creds.token}` },
+    body,
   })
-  const text = await res.body.text()
+  const text = res.text
   if (res.statusCode < 200 || res.statusCode >= 300) {
     throw new TransportError(`Discord ${method} ${path} returned HTTP ${res.statusCode}: ${text.slice(0, 200)}`, res.statusCode)
   }

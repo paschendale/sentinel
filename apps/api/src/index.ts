@@ -5,6 +5,7 @@ import { ensurePartitions, startAggregator, stopAggregator } from './db/aggregat
 import { startFtpTempSweep, stopFtpTempSweep } from './executor/ftp-temp-sweep.js'
 import { warmSecretsCache } from './executor/secrets-cache.js'
 import { migrate } from './db/migrate.js'
+import { startReconciler, stopReconciler } from './notifier/reconciler.js'
 
 await migrate()
 await ensurePartitions()
@@ -14,6 +15,7 @@ await startScheduler()
 startFlusher()
 startAggregator()
 startFtpTempSweep()
+startReconciler()
 const port = Number(process.env['PORT'] ?? 3001)
 await app.listen({ port, host: '0.0.0.0' })
 
@@ -25,6 +27,7 @@ async function shutdown(): Promise<void> {
   stopFlusher()
   stopAggregator()
   stopFtpTempSweep()
+  stopReconciler()
   // Waits for a flush already in flight, then writes what is left.
   await drain()
   await app.close()

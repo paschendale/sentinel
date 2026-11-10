@@ -1,4 +1,4 @@
-import { request } from 'undici'
+import pLimit from 'p-limit'
 import { isBotChannelType, isPassing, type IncidentThread, type NotificationChannelType, type TestStatus } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import {
@@ -9,11 +9,13 @@ import { CHANNEL_SCOPE_MATCH_SQL } from '../db/queries/assignments.js'
 import { decryptBotToken, type DeliverableChannel } from '../db/queries/channels.js'
 import { getOpenThreads } from '../db/queries/incident-threads.js'
 import { RESEND_API_KEY, RESEND_FROM } from '../config.js'
-import { withSentinelHeaders } from '../outbound-headers.js'
+import { logger } from '../logger.js'
+import { notifyRequest } from './http.js'
 import { closeOpenIncidents, deliverIncidentEvent, touchOpenIncidents, type IncidentContext } from './incidents.js'
 import {
   discordMessage,
   emailMessage,
+  RESEND_API_URL,
   slackMessage,
   stateForEvent,
   webhookMessage,
@@ -29,15 +31,20 @@ export interface NotificationCandidate {
   duration_ms: number
 }
 
+const log = logger.child({ component: 'notifier' })
+
+/** Tests evaluated at once; each test's channels are delivered in parallel. */
+const TEST_CONCURRENCY = 4
+
 export function triggerNotifications(candidates: NotificationCandidate[]): void {
   runNotifications(candidates).catch((err: unknown) => {
-    console.error('notifier: unhandled error', err)
+    log.error({ event: 'notifier.unhandled_error', err }, 'notifier: unhandled error')
   })
 }
 
 type Event = 'fail' | 'warning' | 'recovery'
 
-async function runNotifications(candidates: NotificationCandidate[]): Promise<void> {
+export async function runNotifications(candidates: NotificationCandidate[]): Promise<void> {
   const actionable = candidates.filter(c => {
     // Warned and failing runs are always evaluated, so a missed threshold crossing can still notify.
     if (!isPassing(c.new_status)) return true
@@ -75,75 +82,97 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
     threadsByTest.set(thread.test_id, list)
   }
 
-  for (const candidate of actionable) {
-    const state = stateMap.get(candidate.test_id)
-    const consecutive = state?.consecutive_failures ?? 0
-    const lastNotifiedAt = state?.last_notification_at ?? null
-    const lastWarningAt = state?.last_warning_at ?? null
-    const threshold = state?.failure_threshold ?? 3
-    const cooldown = state?.cooldown_ms ?? 86_400_000
-    const threads = threadsByTest.get(candidate.test_id) ?? []
+  // One hung endpoint must not hold back the other tests' alerts.
+  const limit = pLimit(TEST_CONCURRENCY)
+  await Promise.all(actionable.map((candidate) => limit(async () => {
+    try {
+      await evaluateCandidate(candidate, stateMap.get(candidate.test_id), threadsByTest.get(candidate.test_id) ?? [])
+    } catch (err) {
+      log.error({ event: 'notifier.candidate_failed', test_id: candidate.test_id, err }, `notifier: evaluating test ${candidate.test_id} failed`)
+    }
+  })))
+}
 
-    const eventType: Event = isPassing(candidate.new_status) ? 'recovery'
-      : candidate.new_status === 'warn' ? 'warning'
-      : 'fail'
+interface CandidateState {
+  test_id: string
+  test_name: string
+  consecutive_failures: number
+  last_notification_at: Date | null
+  last_warning_at: Date | null
+  failure_threshold: number
+  cooldown_ms: number
+}
 
-    const ctx: IncidentContext = {
-      testId: candidate.test_id,
+async function evaluateCandidate(
+  candidate: NotificationCandidate,
+  state: CandidateState | undefined,
+  threads: IncidentThread[],
+): Promise<void> {
+  const consecutive = state?.consecutive_failures ?? 0
+  const lastNotifiedAt = state?.last_notification_at ?? null
+  const lastWarningAt = state?.last_warning_at ?? null
+  const threshold = state?.failure_threshold ?? 3
+  const cooldown = state?.cooldown_ms ?? 86_400_000
+
+  const eventType: Event = isPassing(candidate.new_status) ? 'recovery'
+    : candidate.new_status === 'warn' ? 'warning'
+    : 'fail'
+
+  const ctx: IncidentContext = {
+    testId: candidate.test_id,
+    consecutiveFailures: consecutive,
+    failureThreshold: threshold,
+    cooldownMs: cooldown,
+    info: {
+      testName: state?.test_name ?? candidate.test_id,
       consecutiveFailures: consecutive,
-      failureThreshold: threshold,
-      cooldownMs: cooldown,
-      info: {
-        testName: state?.test_name ?? candidate.test_id,
-        consecutiveFailures: consecutive,
-        errorMessage: candidate.error_message,
-        durationMs: candidate.duration_ms,
-        downtimeMs: null,
-      },
-    }
+      errorMessage: candidate.error_message,
+      durationMs: candidate.duration_ms,
+      downtimeMs: null,
+    },
+  }
 
-    await logNotificationEventSafe({
-      test_id: candidate.test_id,
-      event: eventType,
-      phase: 'evaluated',
-      consecutive_failures: consecutive,
-      failure_threshold: threshold,
-      cooldown_ms: cooldown,
-    })
+  await logNotificationEventSafe({
+    test_id: candidate.test_id,
+    event: eventType,
+    phase: 'evaluated',
+    consecutive_failures: consecutive,
+    failure_threshold: threshold,
+    cooldown_ms: cooldown,
+  })
 
-    if (eventType === 'warning') {
-      // warning: no threshold check; uses last_warning_at for cooldown (independent of fail cooldown)
-      if (lastWarningAt !== null && Date.now() - lastWarningAt.getTime() < cooldown) {
-        await logSkippedEvent(candidate.test_id, 'warning', consecutive, threshold, cooldown, 'cooldown_active')
-        await touchOpenIncidents('warning', ctx, threads)
-        continue
-      }
-      await dispatchForTest(ctx, 'warning', null, threads)
-    } else if (eventType === 'fail') {
-      // fail/timeout: check per-test threshold and cooldown (last_notification_at only — not affected by warnings)
-      if (consecutive < threshold) {
-        await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'below_threshold')
-        await touchOpenIncidents('fail', ctx, threads)
-        continue
-      }
-      if (lastNotifiedAt !== null && Date.now() - lastNotifiedAt.getTime() < cooldown) {
-        await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'cooldown_active')
-        await touchOpenIncidents('fail', ctx, threads)
-        continue
-      }
-      await dispatchForTest(ctx, 'fail', null, threads)
-    } else {
-      // recovery: an open incident is always closed where it was opened, whatever the
-      // channel's event filter says; webhook/email channels get a recovery message only
-      // if a fail or warning was previously sent.
-      await closeOpenIncidents(ctx, threads)
-      if (lastNotifiedAt === null && lastWarningAt === null) {
-        await logSkippedEvent(candidate.test_id, 'recovery', consecutive, threshold, cooldown, 'no_prior_notification')
-        continue
-      }
-      const downtimeFrom = lastNotifiedAt ?? lastWarningAt
-      await dispatchForTest(ctx, 'recovery', downtimeFrom, [])
+  if (eventType === 'warning') {
+    // warning: no threshold check; uses last_warning_at for cooldown (independent of fail cooldown)
+    if (lastWarningAt !== null && Date.now() - lastWarningAt.getTime() < cooldown) {
+      await logSkippedEvent(candidate.test_id, 'warning', consecutive, threshold, cooldown, 'cooldown_active')
+      await touchOpenIncidents('warning', ctx, threads)
+      return
     }
+    await dispatchForTest(ctx, 'warning', null, threads)
+  } else if (eventType === 'fail') {
+    // fail/timeout: check per-test threshold and cooldown (last_notification_at only — not affected by warnings)
+    if (consecutive < threshold) {
+      await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'below_threshold')
+      await touchOpenIncidents('fail', ctx, threads)
+      return
+    }
+    if (lastNotifiedAt !== null && Date.now() - lastNotifiedAt.getTime() < cooldown) {
+      await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'cooldown_active')
+      await touchOpenIncidents('fail', ctx, threads)
+      return
+    }
+    await dispatchForTest(ctx, 'fail', null, threads)
+  } else {
+    // recovery: an open incident is always closed where it was opened, whatever the
+    // channel's event filter says; webhook/email channels get a recovery message only
+    // if a fail or warning was previously sent.
+    await closeOpenIncidents(ctx, threads)
+    if (lastNotifiedAt === null && lastWarningAt === null) {
+      await logSkippedEvent(candidate.test_id, 'recovery', consecutive, threshold, cooldown, 'no_prior_notification')
+      return
+    }
+    const downtimeFrom = lastNotifiedAt ?? lastWarningAt
+    await dispatchForTest(ctx, 'recovery', downtimeFrom, [])
   }
 }
 
@@ -207,79 +236,88 @@ async function dispatchForTest(
     return
   }
 
-  for (const row of rows) {
-    // A bot channel is closed by closeOpenIncidents() on recovery; nothing else to send.
-    if (event === 'recovery' && isBotChannelType(row.type)) continue
+  await Promise.all(rows.map((row) => deliverToChannel(row, ctx, event, info, openThreads)))
+}
 
-    await logNotificationEventSafe({
-      test_id: testId,
-      channel_id: row.id,
-      event,
-      phase: 'attempted',
-      consecutive_failures: consecutiveFailures,
-      failure_threshold: failureThreshold,
-      cooldown_ms: cooldownMs,
-    })
+async function deliverToChannel(
+  row: ChannelRow,
+  ctx: IncidentContext,
+  event: Event,
+  info: EventInfo,
+  openThreads: IncidentThread[],
+): Promise<void> {
+  const { testId, consecutiveFailures, failureThreshold, cooldownMs } = ctx
+  // A bot channel is closed by closeOpenIncidents() on recovery; nothing else to send.
+  if (event === 'recovery' && isBotChannelType(row.type)) return
 
-    try {
-      if (isBotChannelType(row.type)) {
-        if (event === 'recovery') continue // closed above by closeOpenIncidents()
-        const channel: DeliverableChannel = {
-          id: row.id,
-          type: row.type,
-          webhook_url: row.webhook_url,
-          email_to: row.email_to,
-          channel_ref: row.channel_ref,
-          bot_token: decryptBotToken(row.bot_token_blob ?? null, row.id),
-        }
-        const open = openThreads.find(t => t.channel_id === row.id)
-        await deliverIncidentEvent(channel, event, ctx, open)
-        continue
+  await logNotificationEventSafe({
+    test_id: testId,
+    channel_id: row.id,
+    event,
+    phase: 'attempted',
+    consecutive_failures: consecutiveFailures,
+    failure_threshold: failureThreshold,
+    cooldown_ms: cooldownMs,
+  })
+
+  try {
+    if (isBotChannelType(row.type)) {
+      if (event === 'recovery') return // closed above by closeOpenIncidents()
+      const channel: DeliverableChannel = {
+        id: row.id,
+        type: row.type,
+        webhook_url: row.webhook_url,
+        email_to: row.email_to,
+        channel_ref: row.channel_ref,
+        bot_token: decryptBotToken(row.bot_token_blob ?? null, row.id),
       }
+      const open = openThreads.find(t => t.channel_id === row.id)
+      await deliverIncidentEvent(channel, event, ctx, open)
+      return
+    }
 
-      const statusCode = await sendOneShot(row, event, testId, info)
-      if (statusCode < 200 || statusCode >= 300) {
-        await logNotificationEventSafe({
-          test_id: testId,
-          channel_id: row.id,
-          event,
-          phase: 'failed',
-          reason: 'http_non_2xx',
-          consecutive_failures: consecutiveFailures,
-          failure_threshold: failureThreshold,
-          cooldown_ms: cooldownMs,
-          http_status: statusCode,
-          error_message: `non-2xx status: ${statusCode}`,
-        })
-        continue
-      }
-
-      await logNotificationEventSafe({
-        test_id: testId,
-        channel_id: row.id,
-        event,
-        phase: 'sent',
-        consecutive_failures: consecutiveFailures,
-        failure_threshold: failureThreshold,
-        cooldown_ms: cooldownMs,
-        http_status: statusCode,
-      })
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
+    const statusCode = await sendOneShot(row, event, testId, info)
+    if (statusCode < 200 || statusCode >= 300) {
       await logNotificationEventSafe({
         test_id: testId,
         channel_id: row.id,
         event,
         phase: 'failed',
-        reason: 'http_error',
+        reason: 'http_non_2xx',
         consecutive_failures: consecutiveFailures,
         failure_threshold: failureThreshold,
         cooldown_ms: cooldownMs,
-        http_status: err instanceof TransportError ? err.httpStatus : null,
-        error_message: message.slice(0, 2000),
+        http_status: statusCode,
+        error_message: `non-2xx status: ${statusCode}`,
       })
-      console.error(`notifier: failed to dispatch to ${row.type} for test ${testId}`, err)
+      return
     }
+
+    await logNotificationEventSafe({
+      test_id: testId,
+      channel_id: row.id,
+      event,
+      phase: 'sent',
+      consecutive_failures: consecutiveFailures,
+      failure_threshold: failureThreshold,
+      cooldown_ms: cooldownMs,
+      http_status: statusCode,
+    })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    await logNotificationEventSafe({
+      test_id: testId,
+      channel_id: row.id,
+      event,
+      phase: 'failed',
+      reason: 'http_error',
+      consecutive_failures: consecutiveFailures,
+      failure_threshold: failureThreshold,
+      cooldown_ms: cooldownMs,
+      http_status: err instanceof TransportError ? err.httpStatus : null,
+      error_message: message.slice(0, 2000),
+    })
+    log.warn({ event: 'notifier.delivery_failed', test_id: testId, channel_id: row.id, channel_type: row.type, err: message }, `notifier: failed to deliver ${event} to ${row.type} channel ${row.id} for test ${testId}`)
   }
 }
 
@@ -292,13 +330,10 @@ export async function sendOneShot(
 ): Promise<number> {
   if (channel.type === 'email') {
     if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured')
-    const response = await request('https://api.resend.com/emails', {
+    const response = await notifyRequest(RESEND_API_URL, {
       method: 'POST',
-      headers: withSentinelHeaders({
-        'content-type': 'application/json',
-        'authorization': `Bearer ${RESEND_API_KEY}`,
-      }),
-      body: JSON.stringify(emailMessage(event, info, channel.email_to ?? [], RESEND_FROM)),
+      headers: { authorization: `Bearer ${RESEND_API_KEY}` },
+      body: emailMessage(event, info, channel.email_to ?? [], RESEND_FROM),
     })
     return response.statusCode
   }
@@ -308,11 +343,8 @@ export async function sendOneShot(
     : channel.type === 'slack'
       ? slackMessage(state, info)
       : webhookMessage(event, testId, info)
-  const response = await request(channel.webhook_url!, {
-    method: 'POST',
-    headers: withSentinelHeaders({ 'content-type': 'application/json' }),
-    body: JSON.stringify(body),
-  })
+  if (!channel.webhook_url) throw new TransportError('channel has no webhook_url')
+  const response = await notifyRequest(channel.webhook_url, { method: 'POST', body })
   return response.statusCode
 }
 
@@ -341,6 +373,6 @@ async function logNotificationEventSafe(
   try {
     await insertNotificationEvent(input)
   } catch (err: unknown) {
-    console.error('notifier: failed to write notification event', err)
+    log.error({ event: 'notifier.event_log_failed', err }, 'notifier: failed to write notification event')
   }
 }

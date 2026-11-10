@@ -1,6 +1,9 @@
 import type { NotificationChannelType, NotificationEventType } from '@sentinel/shared'
 import { formatDuration } from '@sentinel/shared'
 
+/** Resend's send-email endpoint, used by email channels. */
+export const RESEND_API_URL = 'https://api.resend.com/emails'
+
 export type IncidentState = 'down' | 'degraded' | 'up'
 
 export interface EventInfo {
