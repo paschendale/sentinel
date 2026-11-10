@@ -1110,3 +1110,23 @@ API: `GET /dashboard` returns `section`, `public_status`, `consecutive_failures`
 - The public status title is `STATUS_PAGE_TITLE` (optional, default "Service status").
 
 **Deferred:** vocabulary in notifications and MCP text, docs, repo URLs (Session C).
+
+## 2026-11-10 · Revamp C · Words, docs, repo home, wrap-up
+
+**What was built:** Notification messages, email and the channel test use the brand words (Outage / Degraded / Recovered, sentence case, no emoji, state token colours); webhook JSON is unchanged. The MCP instructions were rewritten as paragraphs that map every wire value to its word and cover email and bot channels, incidents, bulk and the return-value rule; the MCP server reports the release version. The docs were restructured into `docs/guide/`, `docs/reference/api.md`, `docs/dev/` and `docs/FORKING.md`, with a short README, an agent-first CONTRIBUTING.md (RULES.md and .metaprompt now point to it) and ROADMAP.md in place of PROJECT.md. GitHub URLs point at `territorial-dev/sentinel`.
+
+**Files changed:**
+- `apps/api/src/notifier/payloads.ts`, `channel-test.ts`, `incidents.ts` (comments), `incidents.test.ts`
+- `apps/api/src/routes/mcp.ts` (`MCP_INSTRUCTIONS`), `mcp/tools.ts`, `version.ts` (new), `outbound-headers.ts`; `Dockerfile`, `apps/api/Dockerfile` (write `VERSION`)
+- `apps/web/app/_components/ui/public-header.tsx`, two copy fixes in the incident view and editor
+- `README.md`, `CONTRIBUTING.md`, `ROADMAP.md`, `RULES.md`, `.metaprompt`, `docs/guide/*`, `docs/reference/api.md`, `docs/dev/{ARCHITECTURE,DOMAINS,DESIGN}.md`, `docs/FORKING.md`; `LICENSE-COMMERCIAL.md` (renamed); `docker-compose.yml` (`STATUS_PAGE_TITLE`)
+- Removed: `PROJECT.md`, `docs/PRODUCT.md`, `docs/REPOSITORY.md` (absorbed into README, ROADMAP and ARCHITECTURE)
+
+**Decisions:**
+- Docker Hub images keep the `paschendale/*` names (owner's call); only GitHub URLs moved.
+- The version comes from the root package.json (semantic-release bumps it). The runtime images ship no root package.json, so the Dockerfiles write a `VERSION` file next to `dist/`; no new env var.
+- `MCP_INSTRUCTIONS` is an exported array of paragraphs so a fork appends one for its own protocol instead of editing a long string.
+- Migration numbers `900`–`999` are reserved for forks (runner applies by file name, so order of arrival does not matter).
+- The design system's rules and component guidelines now live in `docs/dev/DESIGN.md`, since the handoff folder they came from is deleted.
+
+**Deferred:** `GET /status/test/:id/events` is public and still returns run `error_message`s; the web no longer calls it and it stays for compatibility, but it should drop the field or require auth in a later release. Moving the Docker images to a `territorial-dev` namespace.
