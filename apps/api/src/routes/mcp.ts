@@ -28,7 +28,13 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
           'threshold and cooldown. Webhook channels post one message per event; discord_bot and slack_bot ' +
           'channels (bot_token + channel_ref) post one message per incident, keep every update in a thread ' +
           'under it, edit the root on state change and recovery, and archive the thread when the test ' +
-          'recovers. test_channel sends a one-off delivery check through any channel. Secrets are write-only (never readable back) and reach test code as ' +
+          'recovers. test_channel sends a one-off delivery check through any channel. Incidents are stored: one opens when a ' +
+          'test reaches Outage (tests sharing an incident:<group> tag share one), keeps a timeline and a five-section ' +
+          'report with internal and public versions, and resolves when every linked test is Operational. Agents can ' +
+          'read incidents, add internal notes, set the state, link tests and draft the report (list_incidents, ' +
+          'get_incident, add_incident_note, set_incident_state, link_incident_test, draft_incident_report); publishing ' +
+          'an incident, a public note or the report is for a signed-in person only. bulk_update_tests enables, ' +
+          'disables, runs, deletes or re-tags many tests at once. Secrets are write-only (never readable back) and reach test code as ' +
           'ctx.secrets.NAME. Outbound identification: every ctx.http / ctx.s3 request and notification ' +
           'webhook sends `User-Agent: Sentinel (+https://github.com/paschendale/sentinel)` — with ' +
           '`; instance=<name>` and an `X-Sentinel-Instance: <name>` header when the deployment sets ' +

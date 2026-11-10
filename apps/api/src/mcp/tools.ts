@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { BulkTestFieldsShape, TEST_RESULT_CONTRACT, TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
+import { BulkTestFieldsShape, IncidentReportShape, IncidentStateSchema, TEST_RESULT_CONTRACT, TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
 import { RUN_NOW_ERRORS, runNow } from '../executor/run-now.js'
 
 type ToolResult = CallToolResult
@@ -34,7 +34,7 @@ function assignmentUrl(scopeType: 'test' | 'tag', scopeValue: string): string {
 
 export function registerMcpTools(server: McpServer, app: FastifyInstance, authorization: string): void {
   async function forward(
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     url: string,
     payload?: unknown
   ): Promise<ToolResult> {
@@ -145,8 +145,83 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
 
   server.registerTool(
     'get_test_incidents',
-    { description: 'Get derived incidents (failure streaks crossing the threshold) for a test.', inputSchema: { id: z.string() } },
+    {
+      description:
+        'Get one test\'s incident history as time windows (start, end, duration, failure count, ongoing): failure ' +
+        'streaks that crossed its threshold, from stored incidents and the retained runs. For the incidents themselves ' +
+        '(timeline, report, other affected tests) use list_incidents / get_incident.',
+      inputSchema: { id: z.string() },
+    },
     async ({ id }) => forward('GET', `/tests/${encodeURIComponent(id)}/incidents`)
+  )
+
+  // --- incidents ---
+
+  server.registerTool(
+    'list_incidents',
+    {
+      description:
+        'List stored incidents, open first, then newest. Sentinel opens an incident (state investigating) when a test ' +
+        'reaches Outage; tests sharing an incident:<group> tag join the same incident (a Degraded test joins an open one ' +
+        'but never opens one); it resolves when every linked test is Operational. Each item has severity (down/degraded), ' +
+        'state, times, affected tests, published_at (null = internal) and report_state (none/draft/published).',
+      inputSchema: { state: z.enum(['open', 'resolved', 'all']).optional() },
+    },
+    async ({ state }) => forward('GET', state ? `/incidents?state=${state}` : '/incidents')
+  )
+
+  server.registerTool(
+    'get_incident',
+    {
+      description: 'Get one incident with its affected tests, full timeline (system entries and notes, internal and public) and report (both versions).',
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => forward('GET', `/incidents/${encodeURIComponent(id)}`)
+  )
+
+  server.registerTool(
+    'add_incident_note',
+    {
+      description:
+        'Add a note to an incident\'s timeline, e.g. what you found or did. Notes from agents are always internal: ' +
+        'only a signed-in person can show a note on the status page.',
+      inputSchema: { id: z.string(), body: z.string().min(1).max(5000) },
+    },
+    async ({ id, body }) => forward('POST', `/incidents/${encodeURIComponent(id)}/updates`, { body, public: false })
+  )
+
+  server.registerTool(
+    'set_incident_state',
+    {
+      description:
+        'Move an incident through investigating → identified → monitoring → resolved (or rename it with title). ' +
+        'Sentinel sets investigating and resolved itself; set identified once the cause is known and monitoring once a ' +
+        'fix is out. Resolving by hand ends every link; moving a resolved incident back reopens it. Writes a timeline entry.',
+      inputSchema: { id: z.string(), state: IncidentStateSchema.optional(), title: z.string().min(1).max(200).optional() },
+    },
+    async ({ id, ...change }) => forward('PATCH', `/incidents/${encodeURIComponent(id)}`, change)
+  )
+
+  server.registerTool(
+    'link_incident_test',
+    {
+      description: 'Link another test to an incident by hand (when it is affected but not in the same incident:<group>).',
+      inputSchema: { id: z.string(), test_id: z.string() },
+    },
+    async ({ id, test_id }) => forward('POST', `/incidents/${encodeURIComponent(id)}/tests`, { test_id })
+  )
+
+  server.registerTool(
+    'draft_incident_report',
+    {
+      description:
+        'Write or revise the incident report. Five sections — summary, impact, root_cause, resolution, follow_ups — each ' +
+        'with an internal and a public version (Markdown: paragraphs, lists, links, inline code). Only the sections and ' +
+        'versions you pass are replaced. Public versions must leave out hostnames, pod names, error messages and people. ' +
+        'The report stays a draft: only a signed-in person can publish it.',
+      inputSchema: { id: z.string(), ...IncidentReportShape },
+    },
+    async ({ id, ...sections }) => forward('PUT', `/incidents/${encodeURIComponent(id)}/report`, sections)
   )
 
   // --- overview ---
