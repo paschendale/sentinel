@@ -197,10 +197,10 @@ Tick when done; add one line of notes if the next session needs to know somethin
 - [x] A4 bulk
 - [x] A5 incidents
 - [x] A6 tests green
-- [ ] B1 foundations
-- [ ] B2 routes
-- [ ] B3 pages
-- [ ] B4 checks
+- [x] B1 foundations
+- [x] B2 routes
+- [x] B3 pages
+- [x] B4 checks
 - [ ] C1 vocabulary
 - [ ] C2 docs
 - [ ] C3 repo URLs
@@ -222,3 +222,12 @@ Session A (done; last run 36 test files, 300 tests green, typecheck clean):
 - For the PR description (C5), the A3 pre-upgrade check: `curl -s -H "Authorization: Bearer $TOKEN" $API/tests/export | jq -r '.tests[] | select(.code | test("return\\s+[^;\\n]*(===|!==|==|!=|<|>|&&|\\|\\||!)")) | .name'` lists tests that return an expression which could be `false`.
 - Error bodies are now always `{ error: string, details? }`; validation errors put the zod breakdown in `details` (the web's channel form already reads `error` as a string).
 - `IMPLEMENTATION_LOG.md` has the Session A entry (C moves the file to `docs/dev/`).
+
+Session B (done; typecheck clean, `next build` green, screenshots of every page in dark and light at 1280 and 400, no horizontal scroll):
+- Layout: `apps/web/app/styles/tokens.css` (the values a fork edits) and `components.css` (`sn-*` classes ported from bundle.css); the React library is `apps/web/app/_components/ui/` with a barrel `index.ts`. Tailwind's palette is replaced by the tokens. Routes: `app/(public)/…` for `/` and `/status/…`, `app/admin/page.tsx` sign-in, `app/admin/(app)/…` for everything signed in, `app/admin/signout/route.ts`. Redirects in `next.config.ts`.
+- Word mapping for the web lives in `apps/web/lib/states.ts` (kinds, section titles/descriptions, event labels) on top of the shared label maps. Formatting (times "18:43 UTC", "2 h 27 min", uptime with one decimal) in `lib/format.ts`. C: if notification messages need the section descriptions, lift them into shared.
+- New optional env var `STATUS_PAGE_TITLE` (web server, read at request time; default "Service status"). C2: add it to the deployment env table and the compose examples.
+- `uptimePct(success, warn, failure, digits = 0)` in shared now takes decimals and never returns 100 while a run failed (so 999/1000 is 99, not 100); API callers keep whole percents. Test added in `state.test.ts`.
+- C1 words still to fix outside the web: `ctx.assert` is `ctx.assert(name, value, message?)`, but `components.md` (CodeBlock) and the prototype show `ctx.assert(cond, msg)`; use the real order in docs. The public footer links `github.com/paschendale/sentinel` (`app/_components/ui/public-header.tsx`): C3 changes it.
+- Public check pages no longer show recent runs or error messages (brand book: public text has no error messages). `GET /status/test/:id/events` is unused by the web now; it stays for compatibility.
+- Throwaway stack on disbelief for screenshots: API container `sentinel-revamp-api` (port 100.90.83.39:3101, DB `sentinel_dev` in `sentinel-revamp-pg`, admin/admin) with seeded tests and incidents. Web locally: `API_URL=NEXT_PUBLIC_API_URL=http://100.90.83.39:3101 pnpm dev -p 3100`. Remove `sentinel-revamp-api` with the other revamp containers at the end of C.

@@ -1089,3 +1089,24 @@ API: `GET /dashboard` returns `section`, `public_status`, `consecutive_failures`
 - The A3 commit has no `BREAKING CHANGE` footer so semantic-release does not cut a major; the upgrade check goes in the PR description.
 
 **Deferred:** docs restructure and vocabulary in notification messages (Session C); the web for incidents and bulk (Session B); splitting `ctx.ts` and moving remaining route SQL into `db/queries`.
+
+## 2026-11-10 · Revamp B · Web: design system, routes under /admin, every page rebuilt
+
+**What was built:** The design system in the web app (tokens as CSS variables in dark and light, Inconsolata and Inter through `next/font`, the `sn-*` component CSS, a Tailwind theme that only knows the tokens) and a component library in `apps/web/app/_components/ui/` named after `components.md`. The public status page is now `/`; everything signed in lives under `/admin` with one AppHeader; old paths redirect. Every page was rebuilt to the prototype on the real API, including the new incidents list and incident page (state stepper, publish dialogs, timeline with composer, two-version report editor) and search with bulk actions on the dashboard.
+
+**Files changed:**
+- `apps/web/app/styles/tokens.css`, `components.css` (new); `globals.css`, `layout.tsx`, `tailwind.config.ts`, `next.config.ts` (redirects), `middleware.ts`, `icon.svg`, `assets/Logos/`
+- `apps/web/app/_components/ui/*` (new library); old `_components/*` removed
+- `apps/web/app/(public)/…` (`/`, `/status`, `/status/[slug]`, `/status/tests/[id]`, `/status/incidents/[id]`), `apps/web/app/admin/…` (sign-in, `signout` route, `(app)` group with tests, incidents, notifications, secrets, tokens)
+- `apps/web/lib/api-server.ts`, `auth-client.ts`, `auth-cookie.ts`, `format.ts`, `states.ts`, `markdown.tsx`, `theme.ts`, `site.ts`, `use-status.ts`
+- `packages/shared/src/state.ts`: `uptimePct(…, digits)`; never reads 100 while a run failed
+
+**Decisions:**
+- Component styling stays in plain CSS classes ported from the design system's bundle; React components render them. Tailwind's palette is replaced by the tokens, so stock colour classes do not exist.
+- Theme: a boot script in `<head>` applies the stored choice before paint; without one, `/admin` is dark and public pages follow the OS.
+- Session: middleware gates `/admin/*` (reads the JWT expiry without verifying it); a 401 from the API goes through `/admin/signout`, which clears the cookie, so an expired token cannot loop.
+- Public pages render per request (`force-dynamic`); the API's 30 s cache carries the load. Public check pages no longer list runs or error messages.
+- Incident report Markdown is rendered by a small hand-written subset (paragraphs, lists, links, inline code) as React elements; no new dependency.
+- The public status title is `STATUS_PAGE_TITLE` (optional, default "Service status").
+
+**Deferred:** vocabulary in notifications and MCP text, docs, repo URLs (Session C).
