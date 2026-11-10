@@ -117,6 +117,48 @@ describe('executor ctx http', () => {
   })
 })
 
+describe('executor ctx response size cap', () => {
+  beforeEach(() => {
+    fetchMock.mockReset()
+  })
+
+  function bigBody(total: number) {
+    return {
+      status: 200,
+      headers: { forEach: vi.fn() },
+      body: (async function* () {
+        const chunk = Buffer.alloc(64 * 1024)
+        for (let sent = 0; sent < total; sent += chunk.length) yield chunk
+      })(),
+    }
+  }
+
+  it('fails ctx.http with HTTP_SIZE_LIMIT_ERROR once the body passes the cap, and aborts the fetch', async () => {
+    fetchMock.mockResolvedValue(bigBody(FTP_MAX_DOWNLOAD_BYTES + 128 * 1024))
+    const { ctx } = buildCtx()
+    const err = await ctx.http.get('https://example.com/huge').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HttpRequestError)
+    expect(err).toMatchObject({ code: 'HTTP_SIZE_LIMIT_ERROR' })
+    const init = fetchMock.mock.calls[0]![1] as { signal: AbortSignal }
+    expect(init.signal.aborted).toBe(true)
+  })
+
+  it('still reads a body under the cap', async () => {
+    fetchMock.mockResolvedValue(bigBody(256 * 1024))
+    const { ctx } = buildCtx()
+    const res = await ctx.http.get('https://example.com/ok')
+    expect(res.body.length).toBe(256 * 1024)
+  })
+
+  it('maps the cap to K8S_SIZE_LIMIT_ERROR for ctx.k8s', async () => {
+    fetchMock.mockResolvedValue(bigBody(FTP_MAX_DOWNLOAD_BYTES + 128 * 1024))
+    const { ctx } = buildCtx()
+    const err = await ctx.k8s.get('https://k8s.example.com/api/v1/pods', { token: 't' }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(K8sRequestError)
+    expect(err).toMatchObject({ code: 'K8S_SIZE_LIMIT_ERROR' })
+  })
+})
+
 describe('executor ctx ftp', () => {
   beforeEach(() => {
     accessMock.mockReset()

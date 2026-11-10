@@ -292,7 +292,7 @@ function runAbortedMessage(scope: IoScope | undefined): string | null {
   return reason instanceof Error ? reason.message : 'test run aborted'
 }
 
-type HttpRequestErrorCode = 'HTTP_FETCH_ERROR' | 'HTTP_REDIRECT_ERROR' | 'HTTP_TIMEOUT_ERROR'
+type HttpRequestErrorCode = 'HTTP_FETCH_ERROR' | 'HTTP_REDIRECT_ERROR' | 'HTTP_TIMEOUT_ERROR' | 'HTTP_SIZE_LIMIT_ERROR'
 
 export class HttpRequestError extends Error {
   readonly code: HttpRequestErrorCode
@@ -355,7 +355,7 @@ export class S3RequestError extends Error {
 }
 
 export class K8sRequestError extends Error {
-  readonly code: 'K8S_CONFIG_ERROR' | 'K8S_FETCH_ERROR' | 'K8S_TIMEOUT_ERROR' | 'K8S_API_ERROR'
+  readonly code: 'K8S_CONFIG_ERROR' | 'K8S_FETCH_ERROR' | 'K8S_TIMEOUT_ERROR' | 'K8S_API_ERROR' | 'K8S_SIZE_LIMIT_ERROR'
   readonly url: string
   readonly op: string
   /** HTTP status of the API server's response, for K8S_API_ERROR. */
@@ -402,16 +402,30 @@ async function doFetch(url: string, init: RequestInit, options: FetchOptions = {
   const startMs = Date.now()
   const call = scope?.track(`${method} ${truncateUrl(url)}`)
   const timeoutSignal = timeoutMs === undefined ? undefined : AbortSignal.timeout(Math.max(1, Math.ceil(timeoutMs)))
-  const signal = combineSignals([scope?.runSignal, timeoutSignal, init.signal ?? undefined])
+  // Aborted when the body passes the size cap, so the rest is never downloaded.
+  const sizeController = new AbortController()
+  const signal = combineSignals([sizeController.signal, scope?.runSignal, timeoutSignal, init.signal ?? undefined])
   try {
     const res = await fetch(url, { ...init, signal: signal ?? null })
     if (call) call.headersReceived = true
-    // Read the body as a stream (not res.text()) so a timeout can report how far the download got.
+    // Read the body as a stream (not res.text()) so a timeout can report how far the download got,
+    // and stop once it exceeds the shared download cap (same limit as ctx.s3.get and ctx.ftp.get).
     const chunks: Uint8Array[] = []
+    let size = 0
     if (res.body) {
       for await (const chunk of res.body) {
-        chunks.push(chunk)
+        size += chunk.byteLength
         if (call) call.bytes += chunk.byteLength
+        if (size > FTP_MAX_DOWNLOAD_BYTES) {
+          sizeController.abort()
+          throw new HttpRequestError(
+            'HTTP_SIZE_LIMIT_ERROR',
+            `HTTP response exceeded max size of ${FTP_MAX_DOWNLOAD_BYTES} bytes for ${method} ${url}`,
+            url,
+            method,
+          )
+        }
+        chunks.push(chunk)
       }
     }
     const body = new TextDecoder().decode(Buffer.concat(chunks))
@@ -452,6 +466,7 @@ function toHttpRequestError(
   scope: IoScope | undefined,
   call: InFlightCall | undefined
 ): HttpRequestError {
+  if (err instanceof HttpRequestError && err.code === 'HTTP_SIZE_LIMIT_ERROR') return err
   const cause = err instanceof Error ? err : undefined
   const runAborted = runAbortedMessage(scope)
   if (runAborted != null) {
@@ -608,6 +623,9 @@ function toS3RequestError(
 ): S3RequestError {
   if (err instanceof S3RequestError) return err
   const cause = err instanceof Error ? err : undefined
+  if (err instanceof HttpRequestError && err.code === 'HTTP_SIZE_LIMIT_ERROR') {
+    return new S3RequestError('S3_SIZE_LIMIT_ERROR', `S3 response exceeded max size of ${FTP_MAX_DOWNLOAD_BYTES} bytes for ${method} ${url}`, url, method, { cause })
+  }
   const runAborted = runAbortedMessage(scope)
   if (runAborted != null) {
     return new S3RequestError(
@@ -966,6 +984,9 @@ function k8sResourcePath(server: string, resourceOptions: K8sResourceOptions, op
 function toK8sRequestError(err: unknown, url: string, op: string, timeoutMs: number | undefined): K8sRequestError {
   if (err instanceof K8sRequestError) return err
   if (err instanceof HttpRequestError) {
+    if (err.code === 'HTTP_SIZE_LIMIT_ERROR') {
+      return new K8sRequestError('K8S_SIZE_LIMIT_ERROR', `Kubernetes response exceeded max size of ${FTP_MAX_DOWNLOAD_BYTES} bytes for ${op} ${url}`, url, op, { cause: err })
+    }
     if (err.code === 'HTTP_TIMEOUT_ERROR') {
       return new K8sRequestError('K8S_TIMEOUT_ERROR', `Kubernetes request timed out for ${op} ${url} after ${timeoutMs}ms`, url, op, {
         cause: err,
