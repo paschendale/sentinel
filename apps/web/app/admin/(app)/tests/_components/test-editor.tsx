@@ -150,7 +150,7 @@ export function TestEditor({ test }: { test?: Test }) {
             <TextField id="f-threshold" label="Failure threshold" type="number" min={1} value={threshold} onChange={(e) => setThreshold(e.target.value)} error={errors.failureThreshold} hint="Failed runs in a row before Outage." />
             <TextField id="f-cooldown" label="Alert cooldown (hours)" type="number" min={0} step="0.5" value={cooldownH} onChange={(e) => setCooldownH(e.target.value)} error={errors.cooldown} hint="0 turns repeats off." />
           </div>
-          <TextField id="f-tags" label="Tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="layer:services, tier:critical" hint="Comma separated. Tags drive status pages and alert routing; incident:<group> joins one incident." />
+          <TextField id="f-tags" label="Tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="layer:services, tier:core" hint="Comma separated. Tags drive status pages and alert routing; incident:<group> joins one incident." />
           <Switch label="Scheduled" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           <Field label="Channels on this test" htmlFor="f-channel" hint="Tag routing is set on the Notifications page; these apply to this test only.">
             <div>

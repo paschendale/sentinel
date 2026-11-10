@@ -311,7 +311,7 @@ export function IncidentView({ incident: i, tests, fetchedAt }: { incident: Inci
         onConfirm={() => call('/publish', {}, 'Published. The status page now shows this incident.')}
       >
         The status page will show a banner with the title, state, start time, {i.tests.length === 1 ? 'the affected check' : `the ${i.tests.length} affected checks`} and{' '}
-        {publicNotes === 1 ? 'the 1 note' : `the ${publicNotes} notes`} marked “Show on status page”. Internal notes stay private.
+        {publicNotes === 1 ? 'the 1 note' : `the ${publicNotes} notes`} marked “Show on status page”. Internal notes stay off the status page.
       </ConfirmDialog>
       <ConfirmDialog
         open={dialog === 'report'}
@@ -323,7 +323,7 @@ export function IncidentView({ incident: i, tests, fetchedAt }: { incident: Inci
         preview={REPORT_SECTIONS.some((s) => publicReport[s].trim()) ? <IncidentReport sections={publicReport} /> : <p className="sn-emptyline">The public version is empty. Write it first.</p>}
         onConfirm={() => call('/report/publish', {}, published ? 'Report published.' : 'Report published. It appears once the incident is published.')}
       >
-        This public text will appear on the incident’s public page{published ? '' : ' once the incident is published'}. The internal version stays private.
+        This public text will appear on the incident’s public page{published ? '' : ' once the incident is published'}. The internal version stays off the status page.
       </ConfirmDialog>
       <Toast message={toast} onDone={() => setToast(null)} />
     </>
