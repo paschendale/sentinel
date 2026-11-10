@@ -5,6 +5,7 @@ import type { RunResult } from '../executor/run.js'
 import { logger } from '../logger.js'
 import { pool } from './pool.js'
 import { triggerNotifications } from '../notifier/dispatch.js'
+import { applyIncidentTransitions, type IncidentLink } from './queries/incidents.js'
 import { recordTestResult } from '../metrics/index.js'
 
 const log = logger.child({ component: 'result-buffer' })
@@ -25,6 +26,7 @@ let inFlight: Promise<void> | null = null
 export interface StateTransition {
   test_id: string
   test_name: string
+  test_tags: string[]
   run: RunResult
   prev_last_status: TestStatus | null
   prev_public_status: PublicStatusOutcome
@@ -161,6 +163,7 @@ async function flushOnce(): Promise<void> {
 async function writeChunk(rows: RunResult[]): Promise<void> {
   const client = await pool.connect()
   let transitions: StateTransition[] = []
+  let incidents = new Map<string, IncidentLink>()
   let written: RunResult[] = []
   try {
     await client.query('BEGIN')
@@ -169,6 +172,8 @@ async function writeChunk(rows: RunResult[]): Promise<void> {
       await insertTestRuns(client, written)
       await insertAssertions(client, written)
       transitions = await upsertTestState(client, written)
+      // Incidents open, join and resolve on the same state changes, in the same transaction.
+      incidents = await applyIncidentTransitions(client, transitions)
     }
     await client.query('COMMIT')
   } catch (err) {
@@ -188,6 +193,8 @@ async function writeChunk(rows: RunResult[]): Promise<void> {
         prev_status: t.prev_last_status,
         error_message: t.run.error_message,
         duration_ms: t.run.duration_ms,
+        incident_id: incidents.get(t.test_id)?.incident_id ?? null,
+        incident_transition: incidents.get(t.test_id)?.transition ?? null,
       })),
     )
   }
@@ -248,6 +255,7 @@ async function insertAssertions(client: pg.PoolClient, rows: RunResult[]): Promi
 interface UpsertRow {
   test_id: string
   test_name: string
+  test_tags: string[]
   public_status: Exclude<PublicStatusOutcome, 'unknown'>
   prev_public_status: PublicStatusOutcome
   prev_last_status: TestStatus | null
@@ -280,6 +288,7 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
        SELECT
          v.test_id,
          t.name AS test_name,
+         t.tags AS test_tags,
          v.last_status,
          v.last_run_at,
          -- mirrors nextConsecutiveFailures() and publicStatusFor() in packages/shared/src/state.ts
@@ -335,7 +344,7 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
          last_problem_at      = EXCLUDED.last_problem_at
        RETURNING test_id
      )
-     SELECT c.test_id, c.test_name, c.public_status, c.prev_public_status, c.prev_last_status, c.consecutive_failures
+     SELECT c.test_id, c.test_name, c.test_tags, c.public_status, c.prev_public_status, c.prev_last_status, c.consecutive_failures
      FROM calc c JOIN upserted u ON u.test_id = c.test_id`,
     values,
   )
@@ -343,6 +352,7 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
   return out.map((r) => ({
     test_id: r.test_id,
     test_name: r.test_name,
+    test_tags: r.test_tags ?? [],
     run: latest.get(r.test_id)!,
     prev_last_status: r.prev_last_status,
     prev_public_status: r.prev_public_status,

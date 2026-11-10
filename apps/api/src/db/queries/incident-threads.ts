@@ -43,13 +43,14 @@ export async function openThread(input: {
   provider_root_id: string
   provider_thread_id: string
   message: string | null
+  incident_id?: string | null
 }): Promise<IncidentThread> {
   const { rows } = await pool.query<IncidentThread>(
     `INSERT INTO notification_threads
-       (id, test_id, channel_id, state, provider_root_id, provider_thread_id, last_update_message)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (id, test_id, channel_id, state, provider_root_id, provider_thread_id, last_update_message, incident_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING ${COLUMNS}`,
-    [nanoid(), input.test_id, input.channel_id, input.state, input.provider_root_id, input.provider_thread_id, input.message],
+    [nanoid(), input.test_id, input.channel_id, input.state, input.provider_root_id, input.provider_thread_id, input.message, input.incident_id ?? null],
   )
   return rows[0]!
 }

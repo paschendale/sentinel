@@ -28,6 +28,8 @@ import { TransportError, type BotCredentials, type IncidentHandles, type Inciden
 
 export interface IncidentContext {
   testId: string
+  /** Stored incident the test belongs to, recorded on threads and audit rows. */
+  incidentId?: string | null
   info: EventInfo
   consecutiveFailures: number
   failureThreshold: number
@@ -73,6 +75,7 @@ async function logEvent(
   try {
     queueNotificationEvent({
       test_id: ctx.testId,
+      incident_id: ctx.incidentId ?? null,
       channel_id: channelId,
       event,
       phase,
@@ -120,6 +123,7 @@ export async function deliverIncidentEvent(
     provider_root_id: handles.rootId,
     provider_thread_id: handles.threadId,
     message: dedupeKey(state, ctx.info),
+    incident_id: ctx.incidentId ?? null,
   })
   await logEvent(ctx, channel.id, event, 'sent', 'thread_opened')
   return { outcome: 'opened' }

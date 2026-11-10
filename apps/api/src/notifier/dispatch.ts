@@ -12,6 +12,7 @@ import { decryptBotToken, type DeliverableChannel } from '../db/queries/channels
 import { getOpenThreads } from '../db/queries/incident-threads.js'
 import { RESEND_API_KEY, RESEND_FROM } from '../config.js'
 import { logger } from '../logger.js'
+import type { IncidentLink } from '../db/queries/incidents.js'
 import { notifyRequest } from './http.js'
 import { closeOpenIncidents, deliverIncidentEvent, touchOpenIncidents, type IncidentContext } from './incidents.js'
 import {
@@ -31,6 +32,9 @@ export interface NotificationCandidate {
   prev_status: TestStatus | null
   error_message: string | null
   duration_ms: number
+  /** The stored incident this test belongs to after this run, if any. */
+  incident_id?: string | null
+  incident_transition?: IncidentLink['transition'] | null
 }
 
 const log = logger.child({ component: 'notifier' })
@@ -47,6 +51,7 @@ export function triggerNotifications(candidates: NotificationCandidate[]): void 
 type Event = 'fail' | 'warning' | 'recovery'
 
 export async function runNotifications(candidates: NotificationCandidate[]): Promise<void> {
+  for (const c of candidates) incidentOfTest.set(c.test_id, c.incident_id ?? null)
   const actionable = candidates.filter(c => {
     // Warned and failing runs are always evaluated, so a missed threshold crossing can still notify.
     if (!isPassing(c.new_status)) return true
@@ -126,6 +131,7 @@ async function evaluateCandidate(
 
   const ctx: IncidentContext = {
     testId: candidate.test_id,
+    incidentId: candidate.incident_id ?? null,
     consecutiveFailures: consecutive,
     failureThreshold: threshold,
     cooldownMs: cooldown,
@@ -352,8 +358,11 @@ function logSkippedEvent(
 }
 
 function logNotificationEvent(input: NotificationEventInsert): void {
-  queueNotificationEvent(input)
+  queueNotificationEvent({ incident_id: incidentOfTest.get(input.test_id) ?? null, ...input })
 }
+
+/** Incident id of the test currently being notified, for its audit rows. */
+const incidentOfTest = new Map<string, string | null>()
 
 /** Writes the queued audit rows. Never throws: the audit log must not break alerting. */
 export async function flushNotificationEventsSafe(): Promise<void> {

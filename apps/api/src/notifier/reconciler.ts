@@ -1,4 +1,5 @@
 import { getThreadsToReconcile } from '../db/queries/incident-threads.js'
+import { reconcileIncidents } from '../db/queries/incidents.js'
 import { logger } from '../logger.js'
 import { flushNotificationEventsSafe } from './dispatch.js'
 import { closeOpenIncidents } from './incidents.js'
@@ -49,10 +50,23 @@ export async function reconcileThreads(): Promise<number> {
   return closed
 }
 
+/** Resolves open incidents whose tests are all Operational (or paused, or deleted). Never throws. */
+export async function reconcileStoredIncidents(): Promise<number> {
+  try {
+    const resolved = await reconcileIncidents()
+    if (resolved.length > 0) log.info({ event: 'reconciler.incidents_resolved', incident_ids: resolved }, `reconciler: resolved ${resolved.length} incident(s)`)
+    return resolved.length
+  } catch (err) {
+    log.error({ event: 'reconciler.incidents_failed', err }, 'reconciler: incident pass failed')
+    return 0
+  }
+}
+
 export async function reconcileOnce(): Promise<void> {
   if (running) return
   running = true
   try {
+    await reconcileStoredIncidents()
     await reconcileThreads()
   } finally {
     running = false

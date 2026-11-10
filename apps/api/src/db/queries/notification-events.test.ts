@@ -28,7 +28,7 @@ describe('notification event batching', () => {
     expect(mockQuery).not.toHaveBeenCalled()
     await flushNotificationEvents()
     expect(mockQuery).toHaveBeenCalledTimes(3)
-    expect((mockQuery.mock.calls.map((c) => (c[1] as unknown[]).length / 11))).toEqual([100, 100, 30])
+    expect((mockQuery.mock.calls.map((c) => (c[1] as unknown[]).length / 12))).toEqual([100, 100, 30])
     expect(queuedNotificationEventCount()).toBe(0)
   })
 

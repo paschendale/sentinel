@@ -28,6 +28,7 @@ export interface NotificationEventInsert {
   cooldown_ms: number
   http_status?: number | null
   error_message?: string | null
+  incident_id?: string | null
 }
 
 /**
@@ -37,7 +38,7 @@ export interface NotificationEventInsert {
  */
 const queue: NotificationEventInsert[] = []
 const BATCH_SIZE = 100
-const COLUMNS_PER_ROW = 11
+const COLUMNS_PER_ROW = 12
 
 export function queueNotificationEvent(input: NotificationEventInsert): void {
   queue.push(input)
@@ -66,13 +67,14 @@ export async function flushNotificationEvents(): Promise<void> {
         e.cooldown_ms,
         e.http_status ?? null,
         e.error_message ?? null,
+        e.incident_id ?? null,
       )
       return `(${Array.from({ length: COLUMNS_PER_ROW }, (_, k) => `$${b + k + 1}`).join(', ')})`
     })
     await pool.query(
       `INSERT INTO notification_events
         (id, test_id, channel_id, event, phase, reason, consecutive_failures,
-         failure_threshold, cooldown_ms, http_status, error_message)
+         failure_threshold, cooldown_ms, http_status, error_message, incident_id)
        VALUES ${placeholders.join(', ')}`,
       values,
     )
