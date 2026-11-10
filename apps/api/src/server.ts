@@ -12,6 +12,7 @@ import { secretsRoutes } from './routes/secrets.js'
 import { healthRoutes } from './routes/health.js'
 import { mcpRoutes } from './routes/mcp.js'
 import { verifyJwt } from './auth/jwt.js'
+import { registerErrorHandling } from './routes/errors.js'
 
 const PUBLIC_ROUTES: Array<{ method: string; prefix: string }> = [
   { method: 'POST', prefix: '/auth/login' },
@@ -33,6 +34,8 @@ export async function buildServer() {
     loggerInstance: logger,
     disableRequestLogging: true,
   })
+
+  registerErrorHandling(app)
 
   app.addHook('onResponse', async (request, reply) => {
     if (reply.statusCode < 400) return

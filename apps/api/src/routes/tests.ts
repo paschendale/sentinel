@@ -8,6 +8,7 @@ import { testEvents } from '../events.js'
 import { getAssignedChannels, getEffectiveChannelsForTest, addAssignment, removeAssignment } from '../db/queries/assignments.js'
 import { normalizeTags } from '../tags/normalize.js'
 import { buildIncidentsFromRuns } from './incident-policy.js'
+import { sendValidationError } from './errors.js'
 
 function isCheckViolation(err: unknown): err is { code: string; constraint?: string } {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23514'
@@ -18,7 +19,7 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>('/', async (req, reply) => {
     const parsed = CreateTestSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
     }
     const d = parsed.data
     const syntax = compileError(d.code)
@@ -68,7 +69,8 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
       }
     }
     if (Object.keys(errors).length > 0) {
-      return reply.status(400).send({ error: 'validation failed', errors })
+      // `errors` is kept for existing clients; `details` carries the same map in the shared shape.
+      return reply.status(400).send({ error: 'validation failed', details: errors, errors })
     }
     const client = await pool.connect()
     const created: Test[] = []
@@ -175,7 +177,7 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
   app.patch<{ Params: { id: string }; Body: unknown }>('/:id', async (req, reply) => {
     const parsed = UpdateTestSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
     }
     if (parsed.data.code !== undefined) {
       const syntax = compileError(parsed.data.code)
@@ -252,7 +254,7 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     )
     if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
     const parsed = CreateAssignmentSchema.safeParse(req.body)
-    if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() })
+    if (!parsed.success) return sendValidationError(reply, parsed.error)
     const { rows: chExists } = await pool.query<{ id: string }>(
       'SELECT id FROM notification_channels WHERE id = $1',
       [parsed.data.channel_id]
