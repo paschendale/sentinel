@@ -11,17 +11,18 @@ vi.mock('../db/pool.js', () => ({
 }))
 
 vi.mock('../db/queries/notification-events.js', () => ({
-  insertNotificationEvent: vi.fn().mockResolvedValue(undefined),
+  queueNotificationEvent: vi.fn(),
+  flushNotificationEvents: vi.fn().mockResolvedValue(undefined),
 }))
 
 import { pool } from '../db/pool.js'
 import { request } from 'undici'
-import { insertNotificationEvent } from '../db/queries/notification-events.js'
+import { queueNotificationEvent } from '../db/queries/notification-events.js'
 import { triggerNotifications } from './dispatch.js'
 
 const mockQuery = vi.mocked(pool.query)
 const mockRequest = vi.mocked(request)
-const mockInsertNotificationEvent = vi.mocked(insertNotificationEvent)
+const mockInsertNotificationEvent = vi.mocked(queueNotificationEvent)
 
 describe('triggerNotifications', () => {
   beforeEach(() => {
@@ -159,7 +160,7 @@ describe('triggerNotifications', () => {
     expect(mockRequest.mock.calls[1]?.[0]).toBe('https://example.com/webhook')
   })
 
-  it('logs skipped event when below threshold', async () => {
+  it('writes no audit row for a failing run under the threshold', async () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{
         test_id: 'test-1',
@@ -182,12 +183,11 @@ describe('triggerNotifications', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const skipped = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'skipped')
-    expect(skipped?.[0].reason).toBe('below_threshold')
+    expect(mockInsertNotificationEvent).not.toHaveBeenCalled()
     expect(mockRequest).not.toHaveBeenCalled()
   })
 
-  it('logs skipped event when cooldown is active', async () => {
+  it('writes no audit row for a repeat failure inside the cooldown', async () => {
     const now = Date.now()
     mockQuery.mockResolvedValueOnce({
       rows: [{
@@ -211,8 +211,7 @@ describe('triggerNotifications', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const skipped = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'skipped')
-    expect(skipped?.[0].reason).toBe('cooldown_active')
+    expect(mockInsertNotificationEvent).not.toHaveBeenCalled()
     expect(mockRequest).not.toHaveBeenCalled()
   })
 
@@ -276,9 +275,10 @@ describe('triggerNotifications', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const attempted = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'attempted')
+    const phases = mockInsertNotificationEvent.mock.calls.map(c => c[0].phase)
     const failed = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'failed' && c[0].reason === 'http_non_2xx')
-    expect(attempted).toBeDefined()
+    // one row per delivery outcome; no 'evaluated' or 'attempted' rows
+    expect(phases).toEqual(['failed'])
     expect(failed?.[0].http_status).toBe(500)
   })
 

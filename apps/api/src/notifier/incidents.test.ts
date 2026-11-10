@@ -9,19 +9,20 @@ vi.mock('../db/pool.js', () => ({
 }))
 
 vi.mock('../db/queries/notification-events.js', () => ({
-  insertNotificationEvent: vi.fn().mockResolvedValue(undefined),
+  queueNotificationEvent: vi.fn(),
+  flushNotificationEvents: vi.fn().mockResolvedValue(undefined),
 }))
 
 import { request } from 'undici'
 import type { IncidentThread } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
-import { insertNotificationEvent } from '../db/queries/notification-events.js'
+import { queueNotificationEvent } from '../db/queries/notification-events.js'
 import type { DeliverableChannel } from '../db/queries/channels.js'
 import { closeOpenIncidents, deliverIncidentEvent, touchOpenIncidents, type IncidentContext } from './incidents.js'
 
 const mockRequest = vi.mocked(request)
 const mockQuery = vi.mocked(pool.query)
-const mockInsertEvent = vi.mocked(insertNotificationEvent)
+const mockInsertEvent = vi.mocked(queueNotificationEvent)
 
 function slackOk(extra: Record<string, unknown> = {}) {
   return { statusCode: 200, body: { text: async () => JSON.stringify({ ok: true, ...extra }) } } as never

@@ -2,7 +2,7 @@ import type { IncidentThread, IncidentThreadState, NotificationEventType } from 
 import { INCIDENT_THREAD_HEARTBEAT_MS } from '../config.js'
 import { getDeliverableChannel, type DeliverableChannel } from '../db/queries/channels.js'
 import { closeThread, openThread, recordThreadUpdate } from '../db/queries/incident-threads.js'
-import { insertNotificationEvent, type NotificationEventReason } from '../db/queries/notification-events.js'
+import { queueNotificationEvent, type NotificationEventReason } from '../db/queries/notification-events.js'
 import { logger } from '../logger.js'
 import {
   discordMessage,
@@ -72,7 +72,7 @@ async function logEvent(
   httpStatus?: number | null,
 ): Promise<void> {
   try {
-    await insertNotificationEvent({
+    queueNotificationEvent({
       test_id: ctx.testId,
       channel_id: channelId,
       event,

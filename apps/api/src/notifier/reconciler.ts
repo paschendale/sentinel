@@ -1,5 +1,6 @@
 import { getThreadsToReconcile } from '../db/queries/incident-threads.js'
 import { logger } from '../logger.js'
+import { flushNotificationEventsSafe } from './dispatch.js'
 import { closeOpenIncidents } from './incidents.js'
 
 const log = logger.child({ component: 'reconciler' })
@@ -42,6 +43,8 @@ export async function reconcileThreads(): Promise<number> {
     if (closed > 0) log.info({ event: 'reconciler.threads_closed', count: closed }, `reconciler: retried closing ${closed} thread(s)`)
   } catch (err) {
     log.error({ event: 'reconciler.failed', err }, 'reconciler: thread pass failed')
+  } finally {
+    await flushNotificationEventsSafe()
   }
   return closed
 }

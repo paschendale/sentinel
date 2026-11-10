@@ -2,7 +2,9 @@ import pLimit from 'p-limit'
 import { isBotChannelType, isPassing, type IncidentThread, type NotificationChannelType, type TestStatus } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import {
-  insertNotificationEvent,
+  flushNotificationEvents,
+  queueNotificationEvent,
+  type NotificationEventInsert,
   type NotificationEventReason,
 } from '../db/queries/notification-events.js'
 import { CHANNEL_SCOPE_MATCH_SQL } from '../db/queries/assignments.js'
@@ -84,13 +86,17 @@ export async function runNotifications(candidates: NotificationCandidate[]): Pro
 
   // One hung endpoint must not hold back the other tests' alerts.
   const limit = pLimit(TEST_CONCURRENCY)
-  await Promise.all(actionable.map((candidate) => limit(async () => {
-    try {
-      await evaluateCandidate(candidate, stateMap.get(candidate.test_id), threadsByTest.get(candidate.test_id) ?? [])
-    } catch (err) {
-      log.error({ event: 'notifier.candidate_failed', test_id: candidate.test_id, err }, `notifier: evaluating test ${candidate.test_id} failed`)
-    }
-  })))
+  try {
+    await Promise.all(actionable.map((candidate) => limit(async () => {
+      try {
+        await evaluateCandidate(candidate, stateMap.get(candidate.test_id), threadsByTest.get(candidate.test_id) ?? [])
+      } catch (err) {
+        log.error({ event: 'notifier.candidate_failed', test_id: candidate.test_id, err }, `notifier: evaluating test ${candidate.test_id} failed`)
+      }
+    })))
+  } finally {
+    await flushNotificationEventsSafe()
+  }
 }
 
 interface CandidateState {
@@ -132,19 +138,9 @@ async function evaluateCandidate(
     },
   }
 
-  await logNotificationEventSafe({
-    test_id: candidate.test_id,
-    event: eventType,
-    phase: 'evaluated',
-    consecutive_failures: consecutive,
-    failure_threshold: threshold,
-    cooldown_ms: cooldown,
-  })
-
   if (eventType === 'warning') {
     // warning: no threshold check; uses last_warning_at for cooldown (independent of fail cooldown)
     if (lastWarningAt !== null && Date.now() - lastWarningAt.getTime() < cooldown) {
-      await logSkippedEvent(candidate.test_id, 'warning', consecutive, threshold, cooldown, 'cooldown_active')
       await touchOpenIncidents('warning', ctx, threads)
       return
     }
@@ -152,12 +148,10 @@ async function evaluateCandidate(
   } else if (eventType === 'fail') {
     // fail/timeout: check per-test threshold and cooldown (last_notification_at only — not affected by warnings)
     if (consecutive < threshold) {
-      await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'below_threshold')
       await touchOpenIncidents('fail', ctx, threads)
       return
     }
     if (lastNotifiedAt !== null && Date.now() - lastNotifiedAt.getTime() < cooldown) {
-      await logSkippedEvent(candidate.test_id, 'fail', consecutive, threshold, cooldown, 'cooldown_active')
       await touchOpenIncidents('fail', ctx, threads)
       return
     }
@@ -168,7 +162,7 @@ async function evaluateCandidate(
     // if a fail or warning was previously sent.
     await closeOpenIncidents(ctx, threads)
     if (lastNotifiedAt === null && lastWarningAt === null) {
-      await logSkippedEvent(candidate.test_id, 'recovery', consecutive, threshold, cooldown, 'no_prior_notification')
+      logSkippedEvent(candidate.test_id, 'recovery', consecutive, threshold, cooldown, 'no_prior_notification')
       return
     }
     const downtimeFrom = lastNotifiedAt ?? lastWarningAt
@@ -232,7 +226,7 @@ async function dispatchForTest(
   }
 
   if (rows.length === 0) {
-    await logSkippedEvent(testId, event, consecutiveFailures, failureThreshold, cooldownMs, 'no_channels')
+    logSkippedEvent(testId, event, consecutiveFailures, failureThreshold, cooldownMs, 'no_channels')
     return
   }
 
@@ -249,16 +243,6 @@ async function deliverToChannel(
   const { testId, consecutiveFailures, failureThreshold, cooldownMs } = ctx
   // A bot channel is closed by closeOpenIncidents() on recovery; nothing else to send.
   if (event === 'recovery' && isBotChannelType(row.type)) return
-
-  await logNotificationEventSafe({
-    test_id: testId,
-    channel_id: row.id,
-    event,
-    phase: 'attempted',
-    consecutive_failures: consecutiveFailures,
-    failure_threshold: failureThreshold,
-    cooldown_ms: cooldownMs,
-  })
 
   try {
     if (isBotChannelType(row.type)) {
@@ -278,7 +262,7 @@ async function deliverToChannel(
 
     const statusCode = await sendOneShot(row, event, testId, info)
     if (statusCode < 200 || statusCode >= 300) {
-      await logNotificationEventSafe({
+      logNotificationEvent({
         test_id: testId,
         channel_id: row.id,
         event,
@@ -293,7 +277,7 @@ async function deliverToChannel(
       return
     }
 
-    await logNotificationEventSafe({
+    logNotificationEvent({
       test_id: testId,
       channel_id: row.id,
       event,
@@ -305,7 +289,7 @@ async function deliverToChannel(
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
-    await logNotificationEventSafe({
+    logNotificationEvent({
       test_id: testId,
       channel_id: row.id,
       event,
@@ -348,15 +332,15 @@ export async function sendOneShot(
   return response.statusCode
 }
 
-async function logSkippedEvent(
+function logSkippedEvent(
   testId: string,
   event: Event,
   consecutiveFailures: number,
   threshold: number,
   cooldownMs: number,
   reason: NotificationEventReason,
-): Promise<void> {
-  await logNotificationEventSafe({
+): void {
+  logNotificationEvent({
     test_id: testId,
     event,
     phase: 'skipped',
@@ -367,12 +351,15 @@ async function logSkippedEvent(
   })
 }
 
-async function logNotificationEventSafe(
-  input: Parameters<typeof insertNotificationEvent>[0],
-): Promise<void> {
+function logNotificationEvent(input: NotificationEventInsert): void {
+  queueNotificationEvent(input)
+}
+
+/** Writes the queued audit rows. Never throws: the audit log must not break alerting. */
+export async function flushNotificationEventsSafe(): Promise<void> {
   try {
-    await insertNotificationEvent(input)
+    await flushNotificationEvents()
   } catch (err: unknown) {
-    log.error({ event: 'notifier.event_log_failed', err }, 'notifier: failed to write notification event')
+    log.error({ event: 'notifier.event_log_failed', err }, 'notifier: failed to write notification events')
   }
 }
