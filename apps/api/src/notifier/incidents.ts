@@ -7,7 +7,6 @@ import { logger } from '../logger.js'
 import {
   discordMessage,
   slackMessage,
-  stateForEvent,
   threadName,
   threadReply,
   type EventInfo,
@@ -207,4 +206,3 @@ export async function postStandalone(channel: DeliverableChannel, message: Recor
   await transportFor(channel.type).post(credentialsOf(channel), message)
 }
 
-export { stateForEvent }

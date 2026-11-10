@@ -166,7 +166,6 @@ pnpm workspaces manage the monorepo.
 | `undici` | Outbound HTTP with connection pooling |
 | `pg` | PostgreSQL client |
 | `p-limit` | Concurrency control |
-| `p-timeout` | Promise timeout enforcement |
 | `pino` | Structured logging |
 | `pino-pretty` | `devDependency` — readable terminal output when `LOG_PRETTY` is on |
 | `prom-client` | Prometheus metrics |

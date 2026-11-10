@@ -4,8 +4,6 @@ export type TestStatus = 'success' | 'warn' | 'fail' | 'timeout'
 export type NotificationChannelType = 'discord' | 'slack' | 'webhook' | 'email' | 'discord_bot' | 'slack_bot'
 
 /** Channel types that post through a bot token and keep one thread per incident. */
-export const BOT_CHANNEL_TYPES: readonly NotificationChannelType[] = ['discord_bot', 'slack_bot']
-
 export function isBotChannelType(type: NotificationChannelType): type is 'discord_bot' | 'slack_bot' {
   return type === 'discord_bot' || type === 'slack_bot'
 }

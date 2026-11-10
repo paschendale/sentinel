@@ -159,7 +159,6 @@ type AssertionCapture = Omit<AssertionResult, 'id' | 'test_run_id'>
 
 interface CtxBundle {
   ctx: TestContext
-  getLogs: () => string[]
   getAssertions: () => AssertionCapture[]
   getWarnings: () => string[]
   /** ctx I/O calls still pending, described with elapsed time and progress — used in the run's timeout message. */
@@ -1295,7 +1294,6 @@ async function doFtpGet(
 }
 
 export function buildCtx(options?: BuildCtxOptions): CtxBundle {
-  const logs: string[] = []
   const assertions: AssertionCapture[] = []
   const warnings: string[] = []
   const onHttpComplete = options?.onHttpComplete
@@ -1381,7 +1379,6 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
       options?.onLog?.(`[WARN] ${message}`)
     },
     log(message) {
-      logs.push(message)
       options?.onLog?.(message)
     },
     now() {
@@ -1392,7 +1389,6 @@ export function buildCtx(options?: BuildCtxOptions): CtxBundle {
 
   return {
     ctx,
-    getLogs: () => logs,
     getAssertions: () => assertions,
     getWarnings: () => warnings,
     getInFlight: () => {
