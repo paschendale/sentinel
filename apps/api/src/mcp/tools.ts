@@ -2,10 +2,8 @@ import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { Test } from '@sentinel/shared'
 import { TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
-import { runTest } from '../executor/run.js'
-import { enqueue } from '../db/result-buffer.js'
+import { RUN_NOW_ERRORS, runNow } from '../executor/run-now.js'
 
 type ToolResult = CallToolResult
 
@@ -17,6 +15,10 @@ function textResult(text: string, isError = false): ToolResult {
 // route it forwards to, so refined schemas (CreateTestSchema, CreateNotificationChannelSchema)
 // are represented here by their unrefined field shapes.
 const channelFieldsShape = NotificationChannelFieldsShape
+
+// uses_browser is accepted by the API for compatibility but does nothing; agents never see it.
+const { uses_browser: _createUsesBrowser, ...createTestShape } = TestFieldsSchema.shape
+const { uses_browser: _updateUsesBrowser, ...updateTestShape } = UpdateTestSchema.shape
 
 const assignmentShape = {
   channel_id: z.string().min(1),
@@ -85,7 +87,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
         'retries (0–5) re-runs a failed or timed-out scheduled run and records only the last attempt. ' +
         'Use tags to group related ' +
         'tests — tags drive both the dashboard summary and notification-channel routing.',
-      inputSchema: TestFieldsSchema.shape,
+      inputSchema: createTestShape,
     },
     async (input) => forward('POST', '/tests', input)
   )
@@ -97,7 +99,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
         'Update fields of a monitoring test (partial update; set enabled to pause/resume scheduling). ' +
         'Same ctx and timeout semantics as create_test: per-request `timeout` on ctx.http/ctx.s3, ' +
         'retries re-run failed or timed-out scheduled runs.',
-      inputSchema: { id: z.string(), ...UpdateTestSchema.shape },
+      inputSchema: { id: z.string(), ...updateTestShape },
     },
     async ({ id, ...fields }) => forward('PATCH', `/tests/${encodeURIComponent(id)}`, fields)
   )
@@ -111,22 +113,14 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
   server.registerTool(
     'run_test_now',
     {
-      description: 'Execute a test immediately and return the run result, including buffered ctx.log output.',
+      description: 'Execute a test immediately (one attempt, no retries) and return the run result, including buffered ctx.log output. Refused while another run of the same test is in progress.',
       inputSchema: { id: z.string() },
     },
     async ({ id }) => {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/tests/${encodeURIComponent(id)}`,
-        headers: { authorization },
-      })
-      if (res.statusCode !== 200) return textResult(res.body, true)
-      const test = JSON.parse(res.body) as Test
-      if (!test.enabled) return textResult(JSON.stringify({ error: 'test is disabled' }), true)
       const logs: string[] = []
-      const result = await runTest(test, { trigger: 'mcp', onLog: (m) => logs.push(m) })
-      enqueue(result)
-      return textResult(JSON.stringify({ ...result, logs }))
+      const outcome = await runNow(id, { trigger: 'mcp', onLog: (m) => logs.push(m) })
+      if (outcome.kind !== 'ok') return textResult(JSON.stringify({ error: RUN_NOW_ERRORS[outcome.kind].error }), true)
+      return textResult(JSON.stringify({ ...outcome.result, logs }))
     }
   )
 
