@@ -2,7 +2,7 @@
  * Per-test overlap guard shared by the scheduler and run-now: at most one run of a test is in
  * flight at a time, whoever started it. The scheduler's concurrency limit only caps runs across
  * all tests; it does nothing to stop one slow test from piling up on itself (see the
- * timeout/schedule margin in docs/DOMAINS.md).
+ * timeout/schedule margin in docs/dev/DOMAINS.md).
  */
 const running = new Set<string>()
 
