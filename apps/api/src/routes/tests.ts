@@ -116,7 +116,7 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
     const { rows } = await pool.query<TestRun>(
       `SELECT id, test_id, started_at, finished_at, status, duration_ms, error_message
-       FROM test_runs WHERE test_id = $1 ORDER BY finished_at DESC LIMIT 20`,
+       FROM test_runs WHERE test_id = $1 ORDER BY started_at DESC LIMIT 20`,
       [req.params.id]
     )
     const runIds = rows.map(r => r.id)
@@ -151,10 +151,10 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
          SELECT started_at, finished_at, status
          FROM test_runs
          WHERE test_id = $1
-         ORDER BY finished_at DESC
+         ORDER BY started_at DESC
          LIMIT 500
        ) AS recent_runs
-       ORDER BY finished_at ASC`,
+       ORDER BY started_at ASC`,
       [req.params.id],
     )
     const incidents: Incident[] = buildIncidentsFromRuns(rows, failureThreshold)

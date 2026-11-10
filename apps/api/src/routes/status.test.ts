@@ -9,6 +9,7 @@ vi.mock('../db/pool.js', () => ({
 
 import { pool } from '../db/pool.js'
 import { buildServer } from '../server.js'
+import { clearPublicCache } from './public-cache.js'
 
 const mockQuery = vi.mocked(pool.query)
 
@@ -51,6 +52,7 @@ function makeStateRow(overrides: Partial<{ test_id: string; public_status: strin
 
 describe('GET /status', () => {
   beforeEach(() => {
+    clearPublicCache()
     mockQuery.mockClear()
   })
 
@@ -207,6 +209,7 @@ describe('GET /status', () => {
 
 describe('GET /status/test/:id/events', () => {
   beforeEach(() => {
+    clearPublicCache()
     mockQuery.mockClear()
   })
 
@@ -283,6 +286,7 @@ describe('GET /status/test/:id/events', () => {
 
 describe('GET /status sections', () => {
   beforeEach(() => {
+    clearPublicCache()
     mockQuery.mockClear()
   })
 
@@ -306,5 +310,57 @@ describe('GET /status sections', () => {
     expect(body[1]).toMatchObject({ problem_ended_at: recent.toISOString(), problem_worst: 'degraded' })
     expect(body[2]).toMatchObject({ problem_started_at: null, last_problem_at: null, problem_worst: null })
     expect(mockQuery.mock.calls[2]![0]).toContain('problem_started_at, problem_ended_at, problem_worst, last_problem_at')
+  })
+})
+
+describe('public route cache and validation', () => {
+  beforeEach(() => {
+    clearPublicCache()
+    mockQuery.mockReset()
+  })
+
+  it('serves a repeat request from the cache without querying again', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [makeTestRow()] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never)
+    const app = await buildServer()
+    const first = await app.inject({ method: 'GET', url: '/status' })
+    const calls = mockQuery.mock.calls.length
+    const second = await app.inject({ method: 'GET', url: '/status' })
+    expect(second.statusCode).toBe(200)
+    expect(second.json()).toEqual(first.json())
+    expect(mockQuery.mock.calls.length).toBe(calls)
+  })
+
+  it('caches a 404 too', async () => {
+    mockQuery.mockResolvedValue({ rows: [] } as never)
+    const app = await buildServer()
+    expect((await app.inject({ method: 'GET', url: '/status/test/nope' })).statusCode).toBe(404)
+    const calls = mockQuery.mock.calls.length
+    expect((await app.inject({ method: 'GET', url: '/status/test/nope' })).statusCode).toBe(404)
+    expect(mockQuery.mock.calls.length).toBe(calls)
+  })
+
+  it('rejects a bad after/before with 400 instead of a database error', async () => {
+    const app = await buildServer()
+    const res = await app.inject({ method: 'GET', url: '/status/test/t-1/events?after=yesterday' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'after and before must be ISO 8601 timestamps' })
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-numeric limit and an unknown period', async () => {
+    const app = await buildServer()
+    expect((await app.inject({ method: 'GET', url: '/status/test/t-1/events?limit=abc' })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'GET', url: '/status/buckets?period=1y' })).statusCode).toBe(400)
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('bounds the bucket query to a fixed number of tests', async () => {
+    mockQuery.mockResolvedValue({ rows: [] } as never)
+    const app = await buildServer()
+    await app.inject({ method: 'GET', url: '/status/buckets?period=24h' })
+    expect(String(mockQuery.mock.calls[0]![0])).toMatch(/LIMIT 500/)
   })
 })
