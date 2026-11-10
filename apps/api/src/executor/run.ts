@@ -13,6 +13,9 @@ export interface RunTestOptions {
   onLog?: (message: string) => void
 }
 
+/** error_message of a run whose test function returned exactly `false`. */
+export const RETURNED_FALSE_MESSAGE = 'returned false'
+
 export interface RunResult {
   id: string
   test_id: string
@@ -127,10 +130,15 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   })
 
   try {
-    await Promise.race([
+    const returned: unknown = await Promise.race([
       Promise.resolve(fn(ctx)),
       timeoutPromise,
     ])
+    // The return contract: exactly `false` fails the run; true, undefined and anything else pass.
+    if (returned === false) {
+      status = 'fail'
+      errorMessage = RETURNED_FALSE_MESSAGE
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.startsWith('Timed out after')) {

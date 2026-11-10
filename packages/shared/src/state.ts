@@ -61,6 +61,13 @@ export function worseStatus<T extends PublicStatusOutcome>(a: T, b: T): T {
   return SEVERITY[b] > SEVERITY[a] ? b : a
 }
 
+/**
+ * The pass/fail contract of a test function, stated once for the MCP text, the editor hint and
+ * the docs. Enforced in apps/api/src/executor/run.ts.
+ */
+export const TEST_RESULT_CONTRACT =
+  'Throw, fail a ctx.assert, or return false to fail the run; returning true, nothing or any other value passes. ctx.warn marks a passing run as Warned.'
+
 // --- Words people read -------------------------------------------------------------------
 // Wire values never change; these maps are the only place they turn into words.
 

@@ -73,7 +73,8 @@ function NotificationPicker({ options, onSelect, disabled }: PickerProps) {
   )
 }
 
-const DEFAULT_CODE = `const res = await ctx.http.get('https://example.com')
+const DEFAULT_CODE = `// Return false or throw to fail. A failed ctx.assert throws.
+const res = await ctx.http.get('https://example.com')
 ctx.assert('status ok', res.status === 200)
 `
 

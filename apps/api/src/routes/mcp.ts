@@ -14,7 +14,8 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
       {
         instructions:
           'Sentinel is a synthetic testing & uptime monitoring platform. Tests are JavaScript ' +
-          'functions receiving a `ctx` object with four protocols — ctx.http (HTTP via undici), ' +
+          'functions receiving a `ctx` object (return false or throw to fail; a failed ctx.assert throws; ' +
+          'any other return value passes) with four protocols — ctx.http (HTTP via undici), ' +
           'ctx.ftp (ctx.ftp.ls/get via basic-ftp), and ctx.s3 (ctx.s3.get/head/list, SigV4-signed, works ' +
           'against any S3-compatible endpoint; list takes the bucket URL plus prefix/delimiter/all and ' +
           'returns objects with key, size and lastModified), and ctx.k8s (ctx.k8s.list/read/get: bearer-token ' +

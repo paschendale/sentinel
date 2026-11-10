@@ -64,7 +64,7 @@ pnpm workspaces manage the monorepo.
 - `ctx.k8s.get`/`list`/`read` are bearer-token GETs against a Kubernetes API server, optionally pinning the server CA through a cached undici `Agent`; `list`/`read` build the resource path from `{ group, version, resource, namespace, name }` and throw on non-2xx with the API server's `reason`, so cluster checks (CronJob/Job completion, custom resources such as Argo Workflows, Deployment readiness) need no in-cluster component and no write permission
 - `ctx.s3.get`/`ctx.s3.head`/`ctx.s3.list` sign requests with AWS Signature Version 4, hand-rolled via `node:crypto` — no AWS SDK dependency, works against any S3-compatible endpoint since signing only depends on the request URL. `list` is ListObjectsV2 with the XML parsed by regex (no XML dependency), one page per call unless `all: true`, which follows continuation tokens up to a 10 000-key cap
 - No filesystem access from user code — `ctx.ftp.get` and `ctx.s3.get` both download to the same server-managed temp file mechanism internally (same directory, same size cap, same periodic sweep), but user code only ever sees the returned string body, never a path
-- Tests must return a boolean (`true` = pass, `false`/throw = fail)
+- A test fails when it throws (a failed `ctx.assert` throws) or returns exactly `false`; returning `true`, nothing or any other value passes
 
 ### Secret Store
 - Global, write-only key-value store for credentials referenced in test code as `ctx.secrets.NAME` — keeps API keys out of `tests.code` and the Monaco editor history

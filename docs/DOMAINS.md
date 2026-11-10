@@ -9,7 +9,7 @@ The central entity. Represents a user-defined monitoring check.
 |-------|------|-------------|
 | `id` | `string` (nanoid) | Unique identifier |
 | `name` | `string` | Human-readable label |
-| `code` | `string` | JavaScript function body — must return boolean |
+| `code` | `string` | JavaScript function body — return `false` or throw to fail |
 | `schedule_ms` | `number` | Run interval in milliseconds (minimum: 30,000) |
 | `timeout_ms` | `number` | Max execution time per run (minimum: 1,000; must be ≤ 80% of `schedule_ms`) |
 | `retries` | `number` | Extra attempts (0–5) for a scheduled run that fails or times out. One run is recorded — the last attempt's. A retry only starts if a full `timeout_ms` attempt still fits within 80% of `schedule_ms`, measured from the first attempt. Manual runs (run-now, SSE, MCP `run_test_now`) make a single attempt |
@@ -22,7 +22,7 @@ The central entity. Represents a user-defined monitoring check.
 - `schedule_ms >= 30000` — minimum 30-second interval
 - `timeout_ms >= 1000` and `timeout_ms <= schedule_ms * 0.8` — no flat cap, but a run's timeout budget may never approach its own interval, so the scheduler can't end up with two overlapping runs of the same test (enforced in the Zod schema on create, and as a Postgres `CHECK` constraint on both create and update — see `apps/api/src/scheduler/index.ts` for the runtime overlap guard that backs this up)
 - `code` must compile without error before saving
-- `code` must be a function body that returns a boolean
+- `code` must be a function body that compiles (checked on save). It fails the run by throwing or returning exactly `false`; any other return value (including none) passes
 
 ---
 

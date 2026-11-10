@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
+import { TEST_RESULT_CONTRACT, TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
 import { RUN_NOW_ERRORS, runNow } from '../executor/run-now.js'
 
 type ToolResult = CallToolResult
@@ -66,8 +66,8 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'create_test',
     {
       description:
-        'Create a monitoring test. code is a JavaScript function body receiving ctx and must return a ' +
-        'boolean. ctx supports four protocols — ctx.http (HTTP/undici), ctx.ftp.ls/get (FTP), ' +
+        'Create a monitoring test. code is a JavaScript function body (top-level await allowed) receiving ctx. ' +
+        TEST_RESULT_CONTRACT + ' Code that does not compile is rejected with 400. ctx supports four protocols — ctx.http (HTTP/undici), ctx.ftp.ls/get (FTP), ' +
         'ctx.k8s.list/read/get (Kubernetes API reads with a bearer token and optional CA: list(server, ' +
         '{token, ca, group, version, resource, namespace, labelSelector, fieldSelector, limit}) returns ' +
         '{items, continue}, read(server, {..., name}) returns the object, both throw K8S_API_ERROR with ' +

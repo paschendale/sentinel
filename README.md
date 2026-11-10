@@ -177,7 +177,7 @@ claude mcp add sentinel --transport http http://localhost:3001/mcp \
 
 ## Writing Tests
 
-Tests are JavaScript functions that receive a `ctx` object. Return a truthy value or throw to indicate pass/fail.
+Tests are JavaScript functions that receive a `ctx` object. Return `false` or throw to fail (a failed `ctx.assert` throws); returning `true`, nothing or any other value passes.
 
 ### The `ctx` API
 

@@ -168,3 +168,44 @@ describe('stored code that does not compile', () => {
     expect(result.test_id).toBe('bad-syntax')
   })
 })
+
+describe('return value contract', () => {
+  const run = (code: string) => runTest({ id: 'contract', code, timeout_ms: 1_000 }, { trigger: 'api-post' })
+
+  it('fails a test that returns exactly false', async () => {
+    const result = await run('return false')
+    expect(result.status).toBe('fail')
+    expect(result.error_message).toBe('returned false')
+  })
+
+  it('passes a test that returns true', async () => {
+    expect((await run('return true')).status).toBe('success')
+  })
+
+  it('passes a test that returns nothing', async () => {
+    expect((await run('const x = 1')).status).toBe('success')
+  })
+
+  it('passes other falsy values: only false itself fails', async () => {
+    expect((await run('return 0')).status).toBe('success')
+    expect((await run('return null')).status).toBe('success')
+    expect((await run("return ''")).status).toBe('success')
+  })
+
+  it('fails a test whose promise rejects', async () => {
+    const result = await run("await Promise.reject(new Error('backend said no'))")
+    expect(result.status).toBe('fail')
+    expect(result.error_message).toBe('backend said no')
+  })
+
+  it('fails on return false even when the run also warned', async () => {
+    const result = await run("ctx.warn('slow'); return false")
+    expect(result.status).toBe('fail')
+    expect(result.error_message).toBe('returned false')
+  })
+
+  it('fails on an awaited expression that resolves to false', async () => {
+    const result = await run('return await Promise.resolve(1 === 2)')
+    expect(result.status).toBe('fail')
+  })
+})
