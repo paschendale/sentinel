@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { FastifyInstance } from 'fastify'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { TEST_RESULT_CONTRACT, TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
+import { BulkTestFieldsShape, TEST_RESULT_CONTRACT, TestFieldsSchema, UpdateTestSchema, NotificationEventTypeSchema, NotificationChannelFieldsShape } from '@sentinel/shared'
 import { RUN_NOW_ERRORS, runNow } from '../executor/run-now.js'
 
 type ToolResult = CallToolResult
@@ -108,6 +108,19 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'delete_test',
     { description: 'Delete a monitoring test and its run history.', inputSchema: { id: z.string() } },
     async ({ id }) => forward('DELETE', `/tests/${encodeURIComponent(id)}`)
+  )
+
+  server.registerTool(
+    'bulk_update_tests',
+    {
+      description:
+        'Apply one action to many tests at once (up to 200 ids): enable, disable (pause scheduling), run (start one ' +
+        'run of each; results arrive in each test\'s run history), delete, add_tag or remove_tag (tag required). ' +
+        'Changes are made in one transaction. Returns one result per id: ok, or an error such as "not found", ' +
+        '"test is disabled" or "a run of this test is already in progress". Use list_tests with a tag to collect ids.',
+      inputSchema: BulkTestFieldsShape,
+    },
+    async (input) => forward('POST', '/tests/bulk', input)
   )
 
   server.registerTool(

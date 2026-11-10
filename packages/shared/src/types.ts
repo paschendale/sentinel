@@ -137,6 +137,16 @@ export interface TestSummary extends ProblemWindow {
   section: StatusSection
 }
 
+/** One test's outcome in a POST /tests/bulk response. `run` reports `started`; the run itself is recorded as usual. */
+export interface BulkTestResult {
+  id: string
+  ok: boolean
+  /** Why this test was not changed: not found, disabled, a run already in progress. */
+  error?: string
+  /** For `run`: the run was started and will appear in the test's history. */
+  started?: boolean
+}
+
 export interface Incident {
   started_at: string
   ended_at: string

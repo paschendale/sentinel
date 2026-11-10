@@ -102,6 +102,26 @@ export const RotateSecretSchema = z.object({
   value: z.string().min(1),
 })
 
+export const BULK_TEST_ACTIONS = ['enable', 'disable', 'run', 'delete', 'add_tag', 'remove_tag'] as const
+export type BulkTestAction = (typeof BULK_TEST_ACTIONS)[number]
+/** Most tests one bulk request may touch. */
+export const BULK_MAX_IDS = 200
+
+export const BulkTestFieldsShape = {
+  ids: z.array(z.string().min(1).max(255)).min(1).max(BULK_MAX_IDS),
+  action: z.enum(BULK_TEST_ACTIONS),
+  /** Required for add_tag and remove_tag. */
+  tag: z.string().min(1).max(50).optional(),
+}
+
+export const BulkTestSchema = z.object(BulkTestFieldsShape).superRefine((d, ctx) => {
+  if ((d.action === 'add_tag' || d.action === 'remove_tag') && (d.tag === undefined || d.tag.trim() === '')) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tag'], message: `tag is required for ${d.action}` })
+  }
+})
+
+export type BulkTestInput = z.infer<typeof BulkTestSchema>
+
 export type CreateTestInput = z.infer<typeof CreateTestSchema>
 export type UpdateTestInput = z.infer<typeof UpdateTestSchema>
 export type CreateNotificationChannelInput = z.infer<typeof CreateNotificationChannelSchema>

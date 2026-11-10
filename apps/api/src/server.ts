@@ -2,6 +2,7 @@ import Fastify from 'fastify'
 import { logger } from './logger.js'
 import { testsRoutes } from './routes/tests.js'
 import { runRoutes } from './routes/run.js'
+import { testsBulkRoutes } from './routes/tests-bulk.js'
 import { metricsRoutes } from './routes/metrics.js'
 import { dashboardRoutes } from './routes/dashboard.js'
 import { statusRoutes } from './routes/status.js'
@@ -76,6 +77,7 @@ export async function buildServer() {
   await app.register(authRoutes, { prefix: '/auth' })
   await app.register(testsRoutes, { prefix: '/tests' })
   await app.register(runRoutes, { prefix: '/tests' })
+  await app.register(testsBulkRoutes, { prefix: '/tests' })
   await app.register(metricsRoutes)
   await app.register(dashboardRoutes, { prefix: '/dashboard' })
   await app.register(statusRoutes, { prefix: '/status' })
