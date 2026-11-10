@@ -187,7 +187,7 @@ describe('incident threads on bot channels', () => {
     expect(mockInsertEvent.mock.calls.find((c) => c[0].reason === 'thread_heartbeat')).toBeDefined()
   })
 
-  it('closes a Discord incident: edits the root to UP, posts the closing reply, archives the thread', async () => {
+  it('closes a Discord incident: edits the root to Recovered, posts the closing reply, archives the thread', async () => {
     const plaintextToken = Buffer.concat([Buffer.from([0x00]), Buffer.from('discord-token', 'utf8')])
     mockQuery
       .mockResolvedValueOnce({ rows: [{ id: 'ch-discord', type: 'discord_bot', webhook_url: null, email_to: null, channel_ref: '999', bot_token_blob: plaintextToken }] } as never)
@@ -203,7 +203,7 @@ describe('incident threads on bot channels', () => {
     expect((mockRequest.mock.calls[0]?.[1] as { method?: string }).method).toBe('PATCH')
     expect(JSON.stringify(requestBody(0))).toContain('Recovered')
     expect(requestUrl(1)).toMatch(/\/channels\/thread-1\/messages$/)
-    expect(String(requestBody(1)['content'])).toContain('resolved')
+    expect(String(requestBody(1)['content'])).toContain('Recovered after')
     expect(requestUrl(2)).toMatch(/\/channels\/thread-1$/)
     expect(requestBody(2)['archived']).toBe(true)
     const close = mockQuery.mock.calls[1]
