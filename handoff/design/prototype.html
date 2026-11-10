@@ -1,0 +1,465 @@
+<title>Sentinel Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+:root{--bg:#18181b;--surface:#1f1f23;--surface-raised:#27272a;--overlay:rgba(255,255,255,0.05);--scrim:rgba(0,0,0,0.6);--border:#333333;--border-strong:#71717a;--fg:#f4f4f5;--fg-muted:#a1a1aa;--fg-subtle:#8e8e98;--primary:#f4f4f5;--on-primary:#18181b;--accent:#10b981;--operational:#34d399;--operational-solid:#10b981;--operational-tint:#022c22;--degraded:#fbbf24;--degraded-solid:#f59e0b;--degraded-tint:#451a03;--outage:#f87171;--outage-solid:#ef4444;--outage-tint:#450a0a;--unknown-solid:#71717a;--strip-empty:#333333;--shadow-popover:0 20px 25px -5px rgba(0,0,0,0.5);--space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-6:24px;--space-8:32px;--space-12:48px;--radius-xs:1px;--radius-sm:2px;--radius-md:8px;--radius-full:9999px;--page-max:1180px;--form-max:672px;--prose-max:68ch;--font-mono:Inconsolata, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;--font-sans:Inter, system-ui, -apple-system, "Segoe UI", sans-serif;color-scheme:dark}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#ffffff;--surface:#fafafa;--surface-raised:#f4f4f5;--overlay:rgba(24,24,27,0.05);--scrim:rgba(24,24,27,0.45);--border:#e4e4e7;--border-strong:#71717a;--fg:#18181b;--fg-muted:#52525b;--fg-subtle:#6b6b76;--primary:#18181b;--on-primary:#ffffff;--accent:#059669;--operational:#047857;--operational-solid:#059669;--operational-tint:#d1fae5;--degraded:#92400e;--degraded-solid:#d97706;--degraded-tint:#fef3c7;--outage:#b91c1c;--outage-solid:#dc2626;--outage-tint:#fee2e2;--unknown-solid:#8e8e98;--strip-empty:#e4e4e7;--shadow-popover:0 10px 24px -6px rgba(24,24,27,0.18);color-scheme:light}}
+:root[data-theme="light"]{--bg:#ffffff;--surface:#fafafa;--surface-raised:#f4f4f5;--overlay:rgba(24,24,27,0.05);--scrim:rgba(24,24,27,0.45);--border:#e4e4e7;--border-strong:#71717a;--fg:#18181b;--fg-muted:#52525b;--fg-subtle:#6b6b76;--primary:#18181b;--on-primary:#ffffff;--accent:#059669;--operational:#047857;--operational-solid:#059669;--operational-tint:#d1fae5;--degraded:#92400e;--degraded-solid:#d97706;--degraded-tint:#fef3c7;--outage:#b91c1c;--outage-solid:#dc2626;--outage-tint:#fee2e2;--unknown-solid:#8e8e98;--strip-empty:#e4e4e7;--shadow-popover:0 10px 24px -6px rgba(24,24,27,0.18);color-scheme:light}
+/* Sentinel components. Every colour, size and radius is a token from tokens.css. */
+.sn-preview{margin:0;padding:24px;background:var(--bg);color:var(--fg);font:400 14px/20px var(--font-mono)}
+.sn-preview *,.sn *{box-sizing:border-box}
+.sn{color:var(--fg);font:400 14px/20px var(--font-mono)}
+:where(.sn) a{color:inherit}
+.sn-stack{display:flex;flex-direction:column;gap:var(--space-4)}
+.sn-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3)}
+.sn-muted{color:var(--fg-muted)}
+.sn-subtle{color:var(--fg-subtle)}
+.sn-label{font:500 11px/16px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-subtle)}
+.sn-num{font-variant-numeric:tabular-nums}
+.sn-prose{font:400 15px/24px var(--font-sans);max-width:var(--prose-max);color:var(--fg)}
+.sn-prose h3{font:600 18px/28px var(--font-sans);margin:var(--space-6) 0 var(--space-2)}
+.sn-prose p{margin:0 0 var(--space-3)}
+.sn :focus-visible,.sn-preview :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Button */
+.sn-btn{display:inline-flex;align-items:center;gap:var(--space-2);font:400 14px/20px var(--font-mono);padding:7px 16px;border:1px solid transparent;border-radius:var(--radius-sm);background:none;color:var(--fg);cursor:pointer;text-decoration:none;white-space:nowrap}
+.sn-btn:disabled,.sn-btn[aria-disabled="true"]{opacity:.5;cursor:not-allowed}
+.sn-btn--primary{background:var(--primary);color:var(--on-primary)}
+.sn-btn--secondary{border-color:var(--border-strong)}
+.sn-btn--secondary:hover,.sn-btn--ghost:hover{background:var(--overlay)}
+.sn-btn--ghost{color:var(--fg-muted)}
+.sn-btn--ghost:hover{color:var(--fg)}
+.sn-btn--danger{color:var(--outage);border-color:var(--outage)}
+.sn-btn--danger:hover{background:var(--outage-tint)}
+.sn-btn--sm{font-size:12px;line-height:16px;padding:3px 10px}
+
+/* Segmented control */
+.sn-seg{display:inline-flex;gap:var(--space-1)}
+.sn-seg button{font:400 12px/16px var(--font-mono);padding:4px 12px;border:0;border-radius:var(--radius-sm);background:var(--surface-raised);color:var(--fg-muted);cursor:pointer}
+.sn-seg button:hover{color:var(--fg)}
+.sn-seg button[aria-pressed="true"]{background:var(--primary);color:var(--on-primary)}
+
+/* Tag */
+.sn-tag{display:inline-block;font:400 12px/16px var(--font-mono);padding:2px 6px;border-radius:var(--radius-sm);background:var(--surface-raised);color:var(--fg);text-decoration:none;white-space:nowrap}
+.sn-tag i{font-style:normal;color:var(--fg-subtle)}
+a.sn-tag:hover{background:var(--overlay)}
+.sn-tag[aria-current="true"]{background:var(--primary);color:var(--on-primary)}
+.sn-tag[aria-current="true"] i{color:inherit;opacity:.7}
+.sn-tags{display:flex;flex-wrap:wrap;gap:var(--space-1)}
+
+/* Status indicator: a shape and a word, never colour alone */
+.sn-status{display:inline-flex;align-items:center;gap:6px;font:400 13px/16px var(--font-mono);white-space:nowrap;color:var(--fg-subtle)}
+.sn-mark{flex:none;width:9px;height:9px;background:var(--unknown-solid)}
+.sn-status--operational{color:var(--operational)}
+.sn-status--operational .sn-mark,.sn-mark--operational{background:var(--operational-solid);border-radius:var(--radius-full)}
+.sn-status--degraded{color:var(--degraded)}
+.sn-status--degraded .sn-mark,.sn-mark--degraded{background:var(--degraded-solid);width:11px;height:10px;clip-path:polygon(50% 0,100% 100%,0 100%)}
+.sn-status--outage{color:var(--outage)}
+.sn-status--outage .sn-mark,.sn-mark--outage{background:var(--outage-solid)}
+.sn-status--recovered{color:var(--operational)}
+.sn-status--recovered .sn-mark,.sn-mark--recovered{background:none;border:2px solid var(--operational-solid);border-radius:var(--radius-full)}
+.sn-status--unknown .sn-mark,.sn-mark--unknown{background:none;border:2px solid var(--unknown-solid);border-radius:var(--radius-full)}
+.sn-status--paused .sn-mark,.sn-mark--paused{height:3px;background:var(--unknown-solid)}
+.sn-status--chip{padding:3px 8px;border-radius:var(--radius-sm);background:var(--surface-raised)}
+.sn-status--chip.sn-status--operational,.sn-status--chip.sn-status--recovered{background:var(--operational-tint)}
+.sn-status--chip.sn-status--degraded{background:var(--degraded-tint)}
+.sn-status--chip.sn-status--outage{background:var(--outage-tint)}
+
+/* Status banner */
+.sn-banner{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3) var(--space-4);padding:var(--space-4) var(--space-6);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface)}
+.sn-banner .sn-mark{width:14px;height:14px}
+.sn-banner__title{font:600 18px/28px var(--font-mono);margin:0}
+.sn-banner__meta{margin-left:auto;font:400 12px/16px var(--font-mono);color:var(--fg-muted)}
+.sn-banner--operational{background:var(--operational-tint);border-color:var(--operational-solid)}
+.sn-banner--operational .sn-banner__title{color:var(--operational)}
+.sn-banner--degraded{background:var(--degraded-tint);border-color:var(--degraded-solid)}
+.sn-banner--degraded .sn-banner__title{color:var(--degraded)}
+.sn-banner--degraded .sn-mark{width:16px;height:14px}
+.sn-banner--outage{background:var(--outage-tint);border-color:var(--outage-solid)}
+.sn-banner--outage .sn-banner__title{color:var(--outage)}
+
+/* History strip */
+.sn-strip{display:flex;gap:2px;width:100%;height:28px}
+.sn-strip--compact{height:14px;gap:1px}
+.sn-strip__cell{flex:1 1 0;min-width:0;border-radius:var(--radius-xs);background:var(--strip-empty)}
+.sn-strip__cell--operational{background:var(--operational-solid)}
+.sn-strip__cell--degraded{background:var(--degraded-solid)}
+.sn-strip__cell--outage{background:var(--outage-solid)}
+.sn-strip__axis{display:flex;justify-content:space-between;margin-top:var(--space-1);font:400 12px/16px var(--font-mono);color:var(--fg-subtle)}
+
+/* Section header and summary chips */
+.sn-section__head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-3);padding-bottom:10px;border-bottom:1px solid var(--border)}
+.sn-section__title{font:600 12px/16px var(--font-mono);letter-spacing:.12em;text-transform:uppercase;margin:0;color:var(--fg)}
+.sn-section__count{font:400 12px/16px var(--font-mono);color:var(--fg-muted);font-variant-numeric:tabular-nums}
+.sn-section__desc{margin-left:auto;font:400 13px/20px var(--font-sans);color:var(--fg-subtle)}
+.sn-section--outage .sn-section__title{color:var(--outage)}
+.sn-section--degraded .sn-section__title{color:var(--degraded)}
+.sn-section--recovered .sn-section__title{color:var(--operational)}
+.sn-chips{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.sn-chip{display:inline-flex;align-items:center;gap:var(--space-2);padding:5px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);font:400 12px/16px var(--font-mono);color:var(--fg-muted);text-decoration:none}
+.sn-chip:hover{border-color:var(--border-strong)}
+.sn-chip b{font-weight:600;color:var(--fg);font-variant-numeric:tabular-nums}
+
+/* Table */
+.sn-table-wrap{overflow-x:auto}
+.sn-table{width:100%;border-collapse:collapse;font:400 14px/20px var(--font-mono)}
+.sn-table th{text-align:left;padding:var(--space-2) var(--space-3);font:500 11px/16px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-subtle);white-space:nowrap}
+.sn-table td{padding:var(--space-3);border-top:1px solid var(--border);color:var(--fg-muted);vertical-align:middle}
+.sn-table tbody tr:hover{background:var(--overlay)}
+.sn-table__name{color:var(--fg);text-decoration:none}
+.sn-table__name:hover{text-decoration:underline}
+.sn-table__sub{display:block;font-size:12px;line-height:16px;color:var(--fg-subtle)}
+.sn-table td.sn-num,.sn-table th.sn-num{text-align:right}
+.sn-check{width:16px;height:16px;margin:0;accent-color:var(--primary)}
+
+/* Status card */
+.sn-card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:inherit;text-decoration:none;min-width:0}
+a.sn-card:hover{border-color:var(--border-strong)}
+.sn-card__name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
+.sn-card__state{display:flex;flex-wrap:wrap;align-items:center;gap:2px var(--space-2);font:400 12px/16px var(--font-mono);color:var(--fg-subtle);min-height:16px}
+.sn-card__metric{font:600 24px/28px var(--font-mono);letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.sn-card__metric small{font:400 12px/16px var(--font-mono);color:var(--fg-subtle);margin-left:6px;letter-spacing:0}
+.sn-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--space-3)}
+
+/* Definition grid */
+.sn-defs{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:var(--space-4) var(--space-8);margin:0}
+.sn-defs dt{font:500 11px/16px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-subtle);margin-bottom:var(--space-1)}
+.sn-defs dd{margin:0;color:var(--fg)}
+
+/* Code block and kbd */
+.sn-code{margin:0;padding:var(--space-4);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);font:400 13px/20px var(--font-mono);color:var(--fg);overflow:auto;white-space:pre}
+.sn-code .c{color:var(--fg-subtle)}
+.sn-kbd{display:inline-block;min-width:18px;padding:0 5px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font:400 12px/16px var(--font-mono);color:var(--fg-muted);text-align:center}
+
+/* App header (signed-in pages) */
+.sn-appbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3) var(--space-6);padding:var(--space-3) 0;border-bottom:1px solid var(--border)}
+.sn-brand{display:inline-flex;align-items:center;gap:10px;font:600 20px/24px var(--font-mono);color:var(--fg);text-decoration:none}
+.sn-brand img,.sn-brand svg{height:28px;width:auto;display:block}
+.sn-nav{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-6);margin-right:auto}
+.sn-nav a{padding:6px 0;color:var(--fg-muted);text-decoration:none;border-bottom:2px solid transparent}
+.sn-nav a:hover{color:var(--fg)}
+.sn-nav a[aria-current="page"]{color:var(--fg);border-bottom-color:var(--accent)}
+.sn-nav__count{margin-left:6px;padding:0 6px;border-radius:var(--radius-sm);background:var(--outage-tint);color:var(--outage);font-size:12px}
+
+/* Public header and footer */
+.sn-pubbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-3);padding-bottom:var(--space-4);border-bottom:1px solid var(--border)}
+.sn-pubbar__title{font:600 24px/32px var(--font-mono);letter-spacing:-.01em;margin:0}
+.sn-pubfoot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2);padding-top:var(--space-4);border-top:1px solid var(--border);font:400 12px/16px var(--font-mono);color:var(--fg-subtle)}
+.sn-pubfoot a{color:var(--fg-muted)}
+
+/* Page header */
+.sn-back{display:inline-block;font:400 12px/16px var(--font-mono);color:var(--fg-muted);text-decoration:none;margin-bottom:var(--space-4)}
+.sn-back:hover{color:var(--fg)}
+.sn-pagehead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-3) var(--space-4);padding-bottom:var(--space-6);border-bottom:1px solid var(--border)}
+.sn-pagehead h1{font:600 24px/32px var(--font-mono);letter-spacing:-.01em;margin:0;min-width:0}
+.sn-pagehead__meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);margin-top:var(--space-2);font:400 12px/16px var(--font-mono);color:var(--fg-muted)}
+
+/* Fields */
+.sn-field{display:flex;flex-direction:column;gap:6px;max-width:var(--form-max)}
+.sn-input,.sn-select,.sn-textarea{width:100%;font:400 14px/20px var(--font-mono);padding:7px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg);color:var(--fg)}
+.sn-input::placeholder{color:var(--fg-subtle)}
+.sn-input[aria-invalid="true"]{border-color:var(--outage)}
+.sn-field__hint{font:400 13px/20px var(--font-sans);color:var(--fg-subtle)}
+.sn-field__error{font:400 13px/20px var(--font-sans);color:var(--outage)}
+.sn-option{display:inline-flex;align-items:center;gap:var(--space-2);color:var(--fg)}
+.sn-switch{appearance:none;width:32px;height:18px;margin:0;border:1px solid var(--border-strong);border-radius:var(--radius-full);background:var(--bg);position:relative;cursor:pointer}
+.sn-switch::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:var(--radius-full);background:var(--border-strong)}
+.sn-switch:checked{background:var(--primary);border-color:var(--primary)}
+.sn-switch:checked::after{left:16px;background:var(--on-primary)}
+
+/* Search and bulk actions */
+.sn-search{position:relative;display:flex;align-items:center;flex:1 1 280px;max-width:420px}
+.sn-search .sn-input{padding-right:36px}
+.sn-search .sn-kbd{position:absolute;right:8px}
+.sn-bulk{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);padding:var(--space-2) var(--space-3);border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface-raised);box-shadow:var(--shadow-popover)}
+.sn-bulk__count{margin-right:auto;color:var(--fg)}
+
+/* Dialog */
+.sn-scrim{display:grid;place-items:center;padding:var(--space-6);background:var(--scrim)}
+.sn-dialog{width:100%;max-width:440px;padding:var(--space-6);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-raised);box-shadow:var(--shadow-popover)}
+.sn-dialog h2{font:600 18px/28px var(--font-mono);margin:0 0 var(--space-2)}
+.sn-dialog p{font:400 15px/24px var(--font-sans);color:var(--fg-muted);margin:0 0 var(--space-6)}
+.sn-dialog__actions{display:flex;justify-content:flex-end;gap:var(--space-2)}
+
+/* Callout */
+.sn-callout{display:flex;gap:var(--space-3);align-items:flex-start;padding:var(--space-3) var(--space-4);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);font:400 13px/20px var(--font-sans);color:var(--fg)}
+.sn-callout .sn-mark{margin-top:5px}
+.sn-callout b{font:600 13px/20px var(--font-mono)}
+.sn-callout--degraded{background:var(--degraded-tint);border-color:var(--degraded-solid)}
+.sn-callout--outage{background:var(--outage-tint);border-color:var(--outage-solid)}
+
+/* Empty state */
+.sn-empty{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-2);padding:var(--space-8) var(--space-6);border:1px dashed var(--border-strong);border-radius:var(--radius-md)}
+.sn-empty h3{font:600 14px/20px var(--font-mono);margin:0}
+.sn-empty p{font:400 15px/24px var(--font-sans);color:var(--fg-muted);margin:0 0 var(--space-2);max-width:52ch}
+
+/* Incidents */
+.sn-incident{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-4) var(--space-6);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:inherit;text-decoration:none}
+.sn-incident--outage{background:var(--outage-tint);border-color:var(--outage-solid)}
+.sn-incident--degraded{background:var(--degraded-tint);border-color:var(--degraded-solid)}
+.sn-incident__title{font:600 18px/28px var(--font-mono);margin:0}
+.sn-incident__meta{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-4);font:400 12px/16px var(--font-mono);color:var(--fg-muted)}
+.sn-incident__update{font:400 15px/24px var(--font-sans);margin:0;max-width:var(--prose-max)}
+.sn-steps{display:flex;flex-wrap:wrap;gap:var(--space-1);list-style:none;margin:0;padding:0}
+.sn-steps li{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font:400 12px/16px var(--font-mono);color:var(--fg-subtle)}
+.sn-steps li::before{content:"";width:7px;height:7px;border:1.5px solid var(--unknown-solid)}
+.sn-steps li[data-done]{color:var(--fg-muted)}
+.sn-steps li[data-done]::before{background:var(--unknown-solid)}
+.sn-steps li[aria-current="step"]{color:var(--on-primary);background:var(--primary);border-color:var(--primary)}
+.sn-steps li[aria-current="step"]::before{background:var(--on-primary);border-color:var(--on-primary)}
+.sn-timeline{list-style:none;margin:0;padding:0}
+.sn-timeline li{display:grid;grid-template-columns:104px 1fr;gap:var(--space-4);padding:var(--space-3) 0;border-top:1px solid var(--border)}
+.sn-timeline li:first-child{border-top:0}
+.sn-timeline time{font:400 12px/24px var(--font-mono);color:var(--fg-subtle);font-variant-numeric:tabular-nums}
+.sn-timeline p{font:400 15px/24px var(--font-sans);margin:0}
+.sn-timeline__by{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:2px;font:400 12px/16px var(--font-mono);color:var(--fg-subtle)}
+.sn-timeline li[data-kind="system"] p{font:400 14px/24px var(--font-mono);color:var(--fg-muted)}
+.sn-vis{padding:1px 6px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font:400 11px/16px var(--font-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--fg-muted)}
+.sn-vis--published{border-color:var(--primary);color:var(--fg)}
+
+/* Channel routing */
+.sn-channel{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);padding:var(--space-3) 0;border-top:1px solid var(--border)}
+.sn-channel__name{margin-right:auto;color:var(--fg)}
+.sn-evts{display:inline-flex;gap:var(--space-1)}
+.sn-evt{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:none;font:400 12px/16px var(--font-mono);color:var(--fg-subtle);cursor:pointer}
+.sn-evt .sn-mark{opacity:.45}
+.sn-evt[aria-pressed="true"]{color:var(--fg);background:var(--surface-raised)}
+.sn-evt[aria-pressed="true"] .sn-mark{opacity:1}
+
+/* Chart */
+.sn-chart{width:100%;height:auto;display:block}
+.sn-chart .grid{stroke:var(--border);stroke-width:1}
+.sn-chart .line{fill:none;stroke:var(--fg-muted);stroke-width:1.5}
+.sn-chart .area{fill:var(--overlay)}
+.sn-chart .end{fill:var(--fg)}
+.sn-chart .tick{font:400 11px var(--font-mono);fill:var(--fg-subtle)}
+.sn-chart .evt-outage{fill:var(--outage-solid)}
+.sn-chart .evt-degraded{fill:var(--degraded-solid)}
+
+@media (max-width:560px){.sn-section__desc{margin-left:0;flex-basis:100%}.sn-timeline li{grid-template-columns:1fr;gap:0}.sn-banner__meta{margin-left:0;flex-basis:100%}}
+
+/* Logo (inline, themed by tokens) */
+.sn-logo{display:block;fill:none;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round}
+.sn-logo .ink{stroke:var(--fg)}
+.sn-logo .sig{stroke:var(--accent)}
+.sn-logo .sig2{stroke:var(--accent);opacity:.55}
+.sn-logo .dot{fill:var(--accent);stroke:none}
+.sn-logo-option{display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-4);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface);flex:1 1 220px;min-width:0}
+.sn-logo-option p{font:400 13px/20px var(--font-sans);color:var(--fg-muted);margin:0}
+
+/* Prototype scaffolding: one centred column per page; a fake address bar on top shows the real route each screen maps to. */
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:400 14px/20px var(--font-mono)}
+*{box-sizing:border-box}
+.px-bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding-block:8px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));background:var(--surface-raised);border-bottom:1px solid var(--border);font:400 12px/16px var(--font-mono)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--surface-raised)}
+.px-url{flex:1 1 240px;min-width:0;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--fg-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.px-url b{font-weight:400;color:var(--fg-subtle)}
+.px-switch{display:inline-flex;gap:4px}
+.px-switch a{padding:4px 12px;border-radius:var(--radius-sm);background:var(--bg);color:var(--fg-muted);text-decoration:none}
+.px-switch a[aria-current="true"]{background:var(--primary);color:var(--on-primary)}
+.px-page{display:flex;flex-direction:column;gap:var(--space-8);max-width:var(--page-max);margin:0 auto;padding-block:var(--space-6) var(--space-12);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));min-width:0}
+.px-page>*{min-width:0}
+.px-public{padding-block:var(--space-12)}
+.px-page section{min-width:0}
+.px-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3) var(--space-4)}
+.px-h{margin:0 0 var(--space-3);color:var(--fg-subtle)}
+.px-emptyline{margin:var(--space-3) 0 0;font:400 13px/20px var(--font-sans);color:var(--fg-subtle)}
+.px-secbody{padding-top:var(--space-3)}
+.px-show{margin-top:var(--space-3)}
+.px-inline{display:inline-flex;margin-left:6px;vertical-align:middle}
+.px-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-8)}
+.px-two--form{grid-template-columns:minmax(0,5fr) minmax(0,6fr)}
+.px-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-4);align-items:start}
+.px-code{font:400 13px/20px var(--font-mono);min-height:280px;resize:vertical}
+.px-narrow{max-width:var(--form-max);width:100%}
+.px-route{margin-bottom:var(--space-6)}
+.px-composer{margin-top:var(--space-4)}
+.px-click{cursor:pointer}
+.px-list{max-width:var(--form-max)}
+.px-rowcard{padding:var(--space-4);gap:var(--space-3)}
+.px-metric{font:600 36px/40px var(--font-mono);letter-spacing:-.02em}
+.px-metric small{display:block;font:400 12px/16px var(--font-mono);letter-spacing:0;color:var(--fg-subtle)}
+.px-login{display:flex;flex-direction:column;gap:var(--space-8);width:100%;max-width:360px;margin:12vh auto 0}
+.px-bulkwrap{position:sticky;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:10}
+.px-scrim{position:fixed;inset:0;z-index:40}
+.px-toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:50;max-width:min(520px,calc(100% - 32px));padding:10px 16px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface-raised);box-shadow:var(--shadow-popover);font:400 13px/20px var(--font-sans);color:var(--fg)}
+code{font:400 13px/20px var(--font-mono)}
+:where(a){color:inherit}
+@media (max-width:760px){.px-two,.px-two--form,.px-grid3{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:no-preference){.sn-btn,.sn-tag,.sn-card,.sn-chip,.sn-seg button{transition:background-color .15s,border-color .15s,color .15s}}
+</style>
+<div id="app"></div>
+<script>
+const BEACON='<path class="ink" d="M6 46 32 34 58 46 32 58Z"/><path class="ink" d="M32 46V22"/><circle class="dot" cx="32" cy="18" r="3.2"/><path class="sig" d="M38.36 11.64A9 9 0 0 1 38.36 24.36M25.64 11.64A9 9 0 0 0 25.64 24.36"/><path class="sig2" d="M42.61 7.39A15 15 0 0 1 42.61 28.61M21.39 7.39A15 15 0 0 0 21.39 28.61"/>';
+const logo=(h=28)=>`<svg class="sn-logo" viewBox="0 0 64 64" height="${h}" width="${h}" aria-hidden="true">${BEACON}</svg>`;
+const WORD={operational:'Operational',degraded:'Degraded',outage:'Outage',recovered:'Recovered',unknown:'No data',paused:'Paused'};
+const st=(k,chip,w)=>`<span class="sn-status sn-status--${k}${chip?' sn-status--chip':''}"><span class="sn-mark"></span>${w||WORD[k]}</span>`;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tagHtml=(t,act,cur)=>{const i=t.indexOf(':');const inner=i>0?`<i>${t.slice(0,i+1)}</i>${t.slice(i+1)}`:t;return `<a class="sn-tag" href="#" data-act="${act}" data-v="${t}"${cur?' aria-current="true"':''}>${inner}</a>`};
+const strip=(h,compact,n=30)=>`<div class="sn-strip${compact?' sn-strip--compact':''}" role="img" aria-label="Status history">${Array.from({length:n},(_,i)=>`<span class="sn-strip__cell sn-strip__cell--${h[i]||'operational'}"></span>`).join('')}</div>`;
+const O='outage',G='degraded',N='none';
+const T=[
+ {id:'radar-fresh',name:'Tiles · Radar Freshness',tags:['layer:pipelines','tier:critical','ui:maps'],state:'outage',since:'failing for 2 h 27 min',sub:'since 18:43 UTC',last:'3 min ago',lat:null,up:'96.4',h:{26:G,27:O,28:O,29:O},inc:'radar'},
+ {id:'radar-stale',name:'Tiles · Radar Staleness',tags:['layer:edge','tier:warning','ui:maps'],state:'degraded',since:'frame is 47 min old',sub:'warning since 20:24 UTC',last:'1 min ago',lat:210,up:'98.9',h:{28:G,29:G},inc:'radar'},
+ {id:'catalog',name:'API · Forecast Catalog',tags:['layer:services','tier:warning'],state:'degraded',since:'1 of 3 failures',sub:'threshold 3',last:'40 s ago',lat:1240,up:'99.7',h:{29:G}},
+ {id:'model-run',name:'Storage · Model Run Presence',tags:['layer:storage','tier:critical'],state:'recovered',since:'recovered 5 h ago',sub:'was in Outage for 25 min',last:'2 min ago',lat:310,up:'99.4',h:{20:O,21:G}},
+ {id:'nightly',name:'CronJob · nightly-export',tags:['layer:pipelines'],state:'recovered',since:'recovered 11 h ago',sub:'was Degraded for 1 h 10 min',last:'11 h ago',lat:95,up:'99.1',h:{14:G,15:G}},
+ {id:'geocoder',name:'API · Geocoder Health',tags:['layer:services','tier:critical','ui:maps'],state:'operational',last:'20 s ago',lat:182,up:'100',h:{}},
+ {id:'auth',name:'API · Auth Token Exchange',tags:['layer:services','tier:critical'],state:'operational',last:'35 s ago',lat:96,up:'100',h:{}},
+ {id:'gateway',name:'Kubernetes · api/gateway Ready',tags:['layer:services'],state:'operational',last:'1 min ago',lat:41,up:'100',h:{}},
+ {id:'tiler',name:'Kubernetes · workers/tiler Ready',tags:['layer:pipelines'],state:'operational',last:'1 min ago',lat:38,up:'99.9',h:{6:G}},
+ {id:'cache',name:'Storage · Tile Cache Reachable',tags:['layer:storage','ui:maps'],state:'operational',last:'50 s ago',lat:120,up:'100',h:{}},
+ {id:'cdn',name:'Edge · Maps CDN',tags:['layer:edge','tier:critical','ui:maps'],state:'operational',last:'15 s ago',lat:64,up:'100',h:{}},
+ {id:'landing',name:'Edge · Landing Page',tags:['layer:edge'],state:'operational',last:'25 s ago',lat:210,up:'100',h:{}},
+ {id:'ftp',name:'FTP · Upstream Observations',tags:['layer:upstreams','tier:warning'],state:'operational',last:'4 min ago',lat:890,up:'99.8',h:{9:G}},
+ {id:'sat',name:'Pipeline · Satellite Tiles',tags:['layer:pipelines','tier:critical','ui:maps'],state:'operational',last:'2 min ago',lat:310,up:'98.2',h:{2:O,3:O,4:G}},
+ {id:'legacy',name:'CronJob · legacy-import',tags:['layer:pipelines'],state:'paused',last:'12 d ago',lat:null,up:'—',h:Object.fromEntries(Array.from({length:30},(_,i)=>[i,N]))},
+ {id:'sandbox',name:'API · Sandbox Health',tags:['layer:services'],state:'paused',last:'3 d ago',lat:null,up:'—',h:Object.fromEntries(Array.from({length:30},(_,i)=>[i<27?99:i,N]))},
+];
+const INC={radar:{id:'radar',title:'Radar map frozen at 18:20 UTC',sev:'outage',state:'Identified',published:false,report:'draft',started:'18:43 UTC',dur:'2 h 27 min',tests:['radar-fresh','radar-stale'],
+  notes:[{t:'18:43 UTC',sys:1,text:'Tiles · Radar Freshness entered Outage'},{t:'20:24 UTC',sys:1,text:'Tiles · Radar Staleness entered Degraded'},{t:'21:02 UTC',by:'agent · mcp',pub:false,text:'The workflow controller logs only go back to 20:16, so the reason the run stayed stuck is not confirmed.'},{t:'21:04 UTC',by:'victor',pub:true,text:'A radar processing run stalled and is blocking the runs behind it. We are clearing it; missed frames will be backfilled.'}]},
+ sat:{id:'sat',title:'Satellite tiles stale',sev:'outage',state:'Resolved',published:true,report:'published',started:'8 Nov, 03:12 UTC',dur:'25 h 27 min',tests:['sat'],notes:[{t:'8 Nov 03:12',sys:1,text:'Pipeline · Satellite Tiles entered Outage'},{t:'8 Nov 09:40',by:'victor',pub:true,text:'The upstream provider changed its file format. A fix for the ingestion step is being tested.'},{t:'9 Nov 04:39',sys:1,text:'Pipeline · Satellite Tiles recovered · incident resolved after 25 h 27 min'}]}};
+const STATES=['Investigating','Identified','Monitoring','Resolved'];
+const CH=[{name:'#ops-alerts',type:'slack bot',on:true,ev:{Outage:1,Degraded:1,Recovered:1},via:'tier:critical'},{name:'#ops-noise',type:'discord bot',on:true,ev:{Outage:1,Degraded:1,Recovered:0},via:'tier:warning'},{name:'On-call email',type:'email',on:true,ev:{Outage:1,Degraded:0,Recovered:0},via:'tier:critical'},{name:'Legacy webhook',type:'webhook',on:false,ev:{Outage:1,Degraded:1,Recovered:1},via:null}];
+const SEC=[['TILES_URL','12 Sep 2026',3],['CATALOG_API_KEY','2 Jul 2026',2],['S3_ACCESS_KEY','2 Jul 2026',2],['S3_SECRET_KEY','2 Jul 2026',2],['K8S_TOKEN','6 Nov 2026',2]];
+const S={signedIn:false,q:'',sel:new Set(),period:'24 h',tag:null,ptag:null,view:'Grid',tz:'UTC',open:{},dialog:null,ver:'Public',token:null,toast:'',draft:'',draftPub:false};
+const ORDER=['outage','degraded','recovered','operational','paused'];
+const SEC_META={outage:['Outage','Failing for at least the failure threshold. Newest first.','Nothing is failing.'],degraded:['Degraded','A warning now, or failing but under the failure threshold.','Nothing is degraded.'],recovered:['Recovered in the last 24 hours','Operational now. Most recent first.','No recoveries in the last 24 hours.'],operational:['Operational','Every run in the last 24 h passed.',null],paused:['Paused','Not scheduled.',null]};
+const route=()=>{const h=(location.hash||'#status').slice(1).split('-');return{page:h[0],arg:h.slice(1).join('-')}};
+const PATH={status:()=>S.ptag?'/status/'+S.ptag:'/',check:a=>'/status/tests/'+a,pubincident:a=>'/status/incidents/'+a,admin:()=>'/admin',tests:()=>'/admin/tests',test:a=>'/admin/tests/'+a,edit:a=>'/admin/tests/'+(a||'new')+(a?'/edit':''),incidents:()=>'/admin/incidents',incident:a=>'/admin/incidents/'+a,notifications:()=>'/admin/notifications',secrets:()=>'/admin/secrets',tokens:()=>'/admin/tokens'};
+const isPublic=p=>['status','check','pubincident'].includes(p);
+const seg=(label,opts,cur,act)=>`<div class="sn-seg" role="group" aria-label="${label}">${opts.map(o=>`<button data-act="${act}" data-v="${o}" aria-pressed="${o===cur}">${o}</button>`).join('')}</div>`;
+const tm=t=>S.tz==='UTC'?t:t.replace(/(\d\d):(\d\d) UTC/,(m,h,mi)=>`${String((+h+11)%24).padStart(2,'0')}:${mi} local`).replace(' UTC','');
+
+function chrome(r){const pub=isPublic(r.page);return `<div class="px-bar"><span class="px-url"><b>sentinel.example</b>${esc(PATH[r.page]?PATH[r.page](r.arg):'/')}</span><span class="px-switch"><a href="#status" aria-current="${pub}">Public site</a><a href="${S.signedIn?'#tests':'#admin'}" aria-current="${!pub}">Admin</a></span></div>`}
+function appbar(cur){const open=Object.values(INC).filter(i=>i.state!=='Resolved').length;const l=(h,t,x='')=>`<a href="#${h}"${cur===h?' aria-current="page"':''}>${t}${x}</a>`;
+ return `<header class="sn-appbar"><a class="sn-brand" href="#tests">${logo()}sentinel</a><nav class="sn-nav" aria-label="Main">${l('tests','Tests')}${l('incidents','Incidents',open?`<span class="sn-nav__count">${open}</span>`:'')}${l('notifications','Notifications')}${l('secrets','Secrets')}${l('tokens','API tokens')}<a href="#status">Status page ↗</a></nav><button class="sn-btn sn-btn--ghost sn-btn--sm" data-act="signout">Sign out</button><a class="sn-btn sn-btn--primary" href="#edit">New test</a></header>`}
+function chips(groups,pfx){return `<nav class="sn-chips" aria-label="Sections">${ORDER.filter(s=>SEC_META[s][2]!==null||groups[s].length).map(s=>`<a class="sn-chip" href="#" data-act="jump" data-v="${pfx}${s}"><span class="sn-mark sn-mark--${s}"></span>${s==='recovered'?'Recovered in 24 h':WORD[s]} <b>${groups[s].length}</b></a>`).join('')}</nav>`}
+function group(list){const g={};ORDER.forEach(s=>g[s]=[]);list.forEach(t=>g[t.state].push(t));return g}
+function section(s,count,pfx,body,collapsible){const m=SEC_META[s];const key=pfx+s;const open=!collapsible||S.open[key];
+ return `<section class="sn-section sn-section--${s}" id="${key}"><div class="sn-section__head"><span class="sn-mark sn-mark--${s}"></span><h2 class="sn-section__title">${m[0]}</h2><span class="sn-section__count">${count}</span><span class="sn-section__desc">${m[1]}</span></div>${count===0?`<p class="px-emptyline">${m[2]}</p>`:open?`<div class="px-secbody">${body()}</div>${collapsible?`<button class="sn-btn sn-btn--ghost sn-btn--sm" data-act="toggle" data-v="${key}">Hide</button>`:''}`:`<button class="sn-btn sn-btn--secondary sn-btn--sm px-show" data-act="toggle" data-v="${key}">Show all ${count}</button>`}</section>`}
+const sinceCell=t=>t.since?`<span style="color:var(--${t.state==='recovered'?'operational':t.state})">${t.since}</span><span class="sn-table__sub">${t.sub||''}</span>`:`<span class="sn-subtle">${t.state==='paused'?'paused':'no problems in 24 h'}</span>`;
+
+function pageTests(){const q=S.q.toLowerCase();const list=T.filter(t=>(!S.tag||t.tags.includes(S.tag))&&(!q||t.name.toLowerCase().includes(q)||t.tags.some(x=>x.includes(q))));const g=group(list);const tags=[...new Set(T.flatMap(t=>t.tags))].sort();
+ const table=rows=>`<div class="sn-table-wrap"><table class="sn-table" style="min-width:960px"><thead><tr><th style="width:28px"></th><th>Name</th><th style="width:130px">Status</th><th style="width:210px">Since</th><th style="width:100px">Last run</th><th class="sn-num" style="width:120px">Avg response</th><th style="width:200px">History · ${S.period}</th></tr></thead><tbody>${rows.map(t=>`<tr><td><input class="sn-check" type="checkbox" data-act="sel" data-v="${t.id}" aria-label="Select ${esc(t.name)}"${S.sel.has(t.id)?' checked':''}></td><td><a class="sn-table__name" href="#test-${t.id}">${esc(t.name)}</a>${t.inc&&INC[t.inc].state!=='Resolved'?` <a class="sn-vis" href="#incident-${t.inc}">incident</a>`:''} <span class="sn-tags px-inline">${t.tags.map(x=>tagHtml(x,'tag')).join('')}</span></td><td>${st(t.state)}</td><td>${sinceCell(t)}</td><td>${t.last}</td><td class="sn-num">${t.lat?t.lat.toLocaleString()+' ms':'—'}</td><td>${strip(t.h,true)}</td></tr>`).join('')}</tbody></table></div>`;
+ return appbar('tests')+`<div class="px-toolbar"><label class="sn-search"><input class="sn-input" id="q" type="search" placeholder="Search tests and tags" value="${esc(S.q)}" aria-label="Search tests"><span class="sn-kbd">/</span></label><span class="sn-muted">${list.length===T.length?T.length+' tests':list.length+' of '+T.length+' tests'}</span><span style="margin-left:auto">${seg('Period',['1 h','24 h','7 d','30 d'],S.period,'period')}</span></div>
+ <div class="sn-tags">${`<a class="sn-tag" href="#" data-act="tag" data-v=""${!S.tag?' aria-current="true"':''}>all</a>`}${tags.map(t=>tagHtml(t,'tag',S.tag===t)).join('')}</div>
+ ${list.length?chips(g,'a-')+ORDER.filter(s=>SEC_META[s][2]!==null||g[s].length).map(s=>section(s,g[s].length,'a-',()=>table(g[s]),(s==='operational'||s==='paused')&&!q)).join(''):`<p class="px-emptyline">No tests match “${esc(S.q||S.tag)}”. <a href="#" data-act="clearq">Clear</a></p>`}
+ ${S.sel.size?`<div class="px-bulkwrap"><div class="sn-bulk" role="toolbar" aria-label="Bulk actions"><span class="sn-bulk__count">${S.sel.size} selected</span><button class="sn-btn sn-btn--secondary sn-btn--sm" data-act="bulk" data-v="run">Run now</button><button class="sn-btn sn-btn--secondary sn-btn--sm" data-act="bulk" data-v="pause">Pause</button><button class="sn-btn sn-btn--secondary sn-btn--sm" data-act="bulk" data-v="resume">Resume</button><button class="sn-btn sn-btn--danger sn-btn--sm" data-act="ask" data-v="bulkdelete">Delete…</button><button class="sn-btn sn-btn--ghost sn-btn--sm" data-act="bulk" data-v="clear">Clear</button></div></div>`:''}`}
+
+const chart=`<svg class="sn-chart" viewBox="0 0 720 170" role="img" aria-label="Response time over the last 24 hours"><line class="grid" x1="48" x2="712" y1="20" y2="20"/><line class="grid" x1="48" x2="712" y1="75" y2="75"/><line class="grid" x1="48" x2="712" y1="130" y2="130"/><text class="tick" x="40" y="24" text-anchor="end">1,200</text><text class="tick" x="40" y="79" text-anchor="end">600</text><text class="tick" x="40" y="134" text-anchor="end">0 ms</text><path class="area" d="M48 112 110 110 172 113 234 109 296 111 358 108 420 96 482 60 544 22 606 70 668 104 712 106V130H48Z"/><path class="line" d="M48 112 110 110 172 113 234 109 296 111 358 108 420 96 482 60 544 22 606 70 668 104 712 106"/><rect class="evt-degraded" x="476" y="136" width="62" height="5"/><rect class="evt-outage" x="538" y="136" width="40" height="5"/><circle class="end" cx="712" cy="106" r="3.5"/><text class="tick" x="48" y="160">24 h ago</text><text class="tick" x="712" y="160" text-anchor="end">now</text></svg>`;
+const CODE=`<span class="c">// Fails when the newest radar frame is older than 15 minutes</span>
+const res = await ctx.http.get(ctx.secrets.TILES_URL + '/radar/latest.json', { timeout: 8000 })
+ctx.assert(res.status === 200, 'catalog reachable')
+const age = (ctx.now() - Date.parse(res.json.time)) / 60000
+return age &lt; 15`;
+function pageTest(id){const t=T.find(x=>x.id===id)||T[0];const inc=t.inc&&INC[t.inc];const bad=t.state==='outage';
+ return appbar('tests')+`<div><a class="sn-back" href="#tests">← Tests</a><div class="sn-pagehead"><div style="min-width:0"><h1>${esc(t.name)}</h1><div class="sn-pagehead__meta">${st(t.state,1)}${t.since?`<span>${t.since}</span>`:''}<span class="sn-tags">${t.tags.map(x=>tagHtml(x,'tagnav')).join('')}</span></div></div><div class="sn-row"><a class="sn-btn sn-btn--ghost" href="#edit-${t.id}">Edit</a><button class="sn-btn sn-btn--danger" data-act="ask" data-v="delete">Delete</button><button class="sn-btn sn-btn--primary" data-act="toast" data-v="Run queued. The result appears in Recent runs.">Run now</button></div></div></div>
+ ${inc&&inc.state!=='Resolved'?`<div class="sn-callout sn-callout--${inc.sev}"><span class="sn-mark sn-mark--${inc.sev}"></span><div><b>Part of an open incident.</b> <a href="#incident-${inc.id}">${esc(inc.title)}</a> · ${inc.state} · ${inc.published?'Published':'Internal'}</div></div>`:''}
+ <section><h2 class="sn-section__title px-h">Configuration</h2><dl class="sn-defs"><div><dt>Interval</dt><dd>5 min</dd></div><div><dt>Timeout</dt><dd>30 s</dd></div><div><dt>Retries</dt><dd>1</dd></div><div><dt>Failure threshold</dt><dd>3 runs</dd></div><div><dt>Alert cooldown</dt><dd>24 h</dd></div><div><dt>Schedule</dt><dd>${t.state==='paused'?'Paused':'Active'}</dd></div><div><dt>Uptime · 30 d</dt><dd>${t.up}${t.up==='—'?'':'%'}</dd></div></dl></section>
+ <section><h2 class="sn-section__title px-h">Notifications</h2>${CH.filter(c=>c.via&&t.tags.includes(c.via)).map(c=>`<div class="sn-channel"><span class="sn-channel__name">${c.name}</span><span class="sn-tag">${c.type}</span><span class="sn-subtle">via tag ${c.via}</span><span class="sn-evts">${Object.entries(c.ev).filter(e=>e[1]).map(e=>st(e[0].toLowerCase(),1,e[0])).join('')}</span></div>`).join('')||'<p class="px-emptyline">No channel receives alerts for this test. <a href="#notifications">Set up routing</a></p>'}</section>
+ <div class="px-two"><section><h2 class="sn-section__title px-h">Code</h2><pre class="sn-code">${CODE}</pre></section><section><h2 class="sn-section__title px-h">Response time · 24 h</h2>${chart}</section></div>
+ <section><h2 class="sn-section__title px-h">Recent runs</h2><div class="sn-table-wrap"><table class="sn-table" style="min-width:640px"><thead><tr><th style="width:150px">Finished</th><th style="width:120px">Result</th><th class="sn-num" style="width:100px">Duration</th><th>Detail</th></tr></thead><tbody>${[['21:07 UTC',bad?'outage':'operational',bad?'Failed':'Passed','412 ms',bad?'returned false: frame is 167 min old':'2 assertions passed'],['21:02 UTC',bad?'outage':'operational',bad?'Failed':'Passed','398 ms',bad?'returned false: frame is 162 min old':'2 assertions passed'],['20:57 UTC',bad?'outage':'operational',bad?'Timed out':'Passed','30.0 s',bad?'in flight: GET /radar/latest.json (30 s, headers received)':'2 assertions passed'],['20:52 UTC','operational','Passed','377 ms','2 assertions passed']].map(r=>`<tr><td>${r[0]}</td><td>${st(r[1],0,r[2])}</td><td class="sn-num">${r[3]}</td><td>${r[4]}</td></tr>`).join('')}</tbody></table></div></section>
+ <section><h2 class="sn-section__title px-h">Incidents</h2>${incTable(Object.values(INC).filter(i=>i.tests.includes(t.id)))||'<p class="px-emptyline">No incidents recorded for this test.</p>'}</section>`}
+
+function pageEdit(id){const t=T.find(x=>x.id===id);const f=(l,v,h,x='')=>`<div class="sn-field"><label class="sn-label" for="f-${l}">${l}</label><input class="sn-input" id="f-${l}" value="${esc(v)}"${x}>${h?`<span class="sn-field__hint">${h}</span>`:''}</div>`;
+ return appbar('tests')+`<div><a class="sn-back" href="#${t?'test-'+t.id:'tests'}">← ${t?esc(t.name):'Tests'}</a><div class="sn-pagehead"><h1>${t?'Edit test':'New test'}</h1></div></div>
+ <div class="px-two px-two--form"><div class="sn-stack">${f('Name',t?t.name:'','Use “Area · What it checks”. It appears on the status page as written.')}
+ <div class="px-grid3">${f('Interval (seconds)','300')}${f('Timeout (seconds)','30')}${f('Retries','1')}</div>
+ <div class="px-grid3">${f('Failure threshold','3','Failed runs in a row before Outage.')}${f('Alert cooldown (hours)','24')}</div>
+ ${f('Tags',t?t.tags.join(', '):'layer:services','Comma separated. Tags drive status pages and alert routing.')}
+ <label class="sn-option"><input class="sn-switch" type="checkbox" ${!t||t.state!=='paused'?'checked':''}> Scheduled</label>
+ <div class="sn-row"><button class="sn-btn sn-btn--primary" data-act="save" data-v="${t?t.id:''}">Save test</button><a class="sn-btn sn-btn--ghost" href="#${t?'test-'+t.id:'tests'}">Cancel</a><button class="sn-btn sn-btn--secondary" data-act="toast" data-v="Dry run passed in 412 ms. Nothing was saved.">Try it</button></div></div>
+ <div class="sn-stack"><div class="sn-field" style="max-width:none"><label class="sn-label" for="code">Code</label><textarea class="sn-textarea px-code" id="code" spellcheck="false" rows="12">// Return true to pass, false to fail. Throwing also fails.
+const res = await ctx.http.get(ctx.secrets.TILES_URL + '/radar/latest.json', { timeout: 8000 })
+ctx.assert(res.status === 200, 'catalog reachable')
+const age = (ctx.now() - Date.parse(res.json.time)) / 60000
+return age < 15</textarea><span class="sn-field__hint">The function receives <code>ctx</code>: http, s3, ftp, k8s, assert, warn, log, now, secrets. The code is compiled when you save; a syntax error is reported here.</span></div></div></div>`}
+
+function incTable(list,pub){if(!list.length)return '';return `<div class="sn-table-wrap"><table class="sn-table" style="min-width:720px"><thead><tr><th>Incident</th><th style="width:120px">Severity</th><th style="width:130px">State</th><th style="width:170px">Started</th><th style="width:110px">Duration</th><th style="width:150px">Visibility</th></tr></thead><tbody>${list.map(i=>`<tr><td><a class="sn-table__name" href="#${pub?'pubincident':'incident'}-${i.id}">${esc(i.title)}</a><span class="sn-table__sub">${i.tests.length} test${i.tests.length>1?'s':''}</span></td><td>${st(i.state==='Resolved'?'recovered':i.sev,1,i.state==='Resolved'?'Resolved':WORD[i.sev])}</td><td>${i.state}</td><td>${i.started}</td><td>${i.dur}</td><td><span class="sn-vis${i.published?' sn-vis--published':''}">${i.published?'Published':'Internal'}</span> ${i.report==='published'?'<span class="sn-vis sn-vis--published">Report</span>':i.report==='draft'?'<span class="sn-vis">Draft report</span>':''}</td></tr>`).join('')}</tbody></table></div>`}
+function pageIncidents(){const all=Object.values(INC),open=all.filter(i=>i.state!=='Resolved'),done=all.filter(i=>i.state==='Resolved');
+ const sec=(k,title,desc,list,empty)=>`<section class="sn-section sn-section--${k}"><div class="sn-section__head"><span class="sn-mark sn-mark--${k}"></span><h2 class="sn-section__title">${title}</h2><span class="sn-section__count">${list.length}</span><span class="sn-section__desc">${desc}</span></div>${incTable(list)||`<p class="px-emptyline">${empty}</p>`}</section>`;
+ return appbar('incidents')+`<div class="sn-pagehead"><div><h1>Incidents</h1><div class="sn-pagehead__meta"><span>Sentinel opens an incident when a test reaches Outage. Nothing is public until you publish it.</span></div></div></div>`+sec('outage','Open','Newest first.',open,'No open incidents.')+sec('recovered','Resolved in the last 30 days','Most recent first.',done,'Nothing resolved in the last 30 days.')}
+function timeline(i,pub){return `<ol class="sn-timeline">${i.notes.filter(n=>!pub||n.sys||n.pub).map(n=>`<li${n.sys?' data-kind="system"':''}><time>${tm(n.t)}</time><div><p>${esc(n.text)}</p>${n.sys||pub?'':`<div class="sn-timeline__by"><span>${n.by}</span><span class="sn-vis${n.pub?' sn-vis--published':''}">${n.pub?'Published':'Internal'}</span></div>`}</div></li>`).join('')}</ol>`}
+const REPORT={Internal:[['Summary','The radar layer stopped updating for 2 h 27 min. Run radar-9f2c stalled at its last step and blocked every later run.'],['Impact','Radar map stale from 18:20 to 21:10 UTC. No other layer affected. 32 frames backfilled.'],['Root cause','The cluster API dropped at 18:28:40 while Argo was creating the final step pod of run radar-9f2c. The pod was never created and the controller stopped reconciling the run. Controller logs before 20:16 are gone, so the stuck state is not explained.'],['Follow-ups','Alert on runs with no pod for 10 min. Ask the provider about the etcd timeouts.']],
+ Public:[['Summary','On 9 November the radar layer stopped updating for 2 hours 27 minutes. It showed the 18:20 UTC frame until 21:10 UTC.'],['Impact','The radar map was stale. Forecasts, warnings and all other layers were not affected. No data was lost; every missed frame was backfilled.'],['Root cause','A brief interruption in the cluster’s control plane left one processing run stuck, and that run blocked the ones queued behind it.'],['Follow-ups','We are adding a check that clears a stuck run automatically.']]};
+function report(i,ver){return `<article class="sn-prose">${REPORT[ver].map(s=>`<h3>${s[0]}</h3><p>${s[1]}</p>`).join('')}</article>`}
+function pageIncident(id){const i=INC[id]||INC.radar;const cur=STATES.indexOf(i.state);
+ return appbar('incidents')+`<div><a class="sn-back" href="#incidents">← Incidents</a><div class="sn-pagehead"><div style="min-width:0"><h1>${esc(i.title)}</h1><div class="sn-pagehead__meta">${st(i.state==='Resolved'?'recovered':i.sev,1,i.state==='Resolved'?'Resolved':WORD[i.sev])}<span>${i.started} · ${i.dur}</span><span class="sn-vis${i.published?' sn-vis--published':''}">${i.published?'Published':'Internal'}</span></div></div><div class="sn-row">${i.published?`<a class="sn-btn sn-btn--secondary" href="#pubincident-${i.id}">View public page ↗</a><button class="sn-btn sn-btn--ghost" data-act="unpublish" data-v="${i.id}">Unpublish</button>`:`<button class="sn-btn sn-btn--primary" data-act="ask" data-v="publish">Publish incident</button>`}</div></div></div>
+ ${i.published?'':`<div class="sn-callout"><span class="sn-mark sn-mark--unknown"></span><div><b>Internal.</b> The status page shows the affected checks in their sections and nothing about this incident. Publishing adds the banner, the published notes and, later, the report.</div></div>`}
+ <section><h2 class="sn-section__title px-h">State</h2><ol class="sn-steps" aria-label="Incident state">${STATES.map((s,n)=>`<li data-act="istate" data-v="${s}" class="px-click"${n<cur?' data-done':''}${n===cur?' aria-current="step"':''}>${s}</li>`).join('')}</ol></section>
+ <section><h2 class="sn-section__title px-h">Affected tests</h2>${i.tests.map(tid=>{const t=T.find(x=>x.id===tid);return `<div class="sn-channel"><a class="sn-channel__name" href="#test-${t.id}">${esc(t.name)}</a>${st(t.state)}<span class="sn-subtle">${t.since||''}</span></div>`}).join('')}</section>
+ <div class="px-two"><section><h2 class="sn-section__title px-h">Timeline</h2>${timeline(i)}<div class="sn-stack px-composer"><textarea class="sn-textarea" id="note" rows="3" placeholder="Add a note">${esc(S.draft)}</textarea><div class="sn-row"><label class="sn-option"><input class="sn-check" id="notepub" type="checkbox"${S.draftPub?' checked':''}> Show on status page</label><button class="sn-btn sn-btn--secondary" data-act="addnote" data-v="${i.id}" style="margin-left:auto">Add note</button></div></div></section>
+ <section><div class="sn-row" style="justify-content:space-between;margin-bottom:12px"><h2 class="sn-section__title">Report</h2><span class="sn-row"><span class="sn-vis${i.report==='published'?' sn-vis--published':''}">${i.report==='published'?'Report published':'Draft report'}</span>${seg('Version',['Internal','Public'],S.ver,'ver')}</span></div>${report(i,S.ver)}<div class="sn-row" style="margin-top:16px"><button class="sn-btn sn-btn--secondary" data-act="toast" data-v="The editor opens each section as markdown. Not part of this prototype.">Edit report</button>${i.report==='published'?'':`<button class="sn-btn sn-btn--primary" data-act="ask" data-v="report">Publish report</button>`}</div></section></div>`}
+
+function pageNotifications(){return appbar('notifications')+`<div class="sn-pagehead"><div><h1>Notifications</h1><div class="sn-pagehead__meta"><span>Channels are where alerts go. Routing decides which tags reach which channel.</span></div></div><button class="sn-btn sn-btn--primary" data-act="toast" data-v="The channel form asks for a name, a type and its webhook URL or bot token.">Add channel</button></div>
+ <section class="px-narrow"><h2 class="sn-section__title px-h">Channels</h2>${CH.map((c,n)=>`<div class="sn-channel"><span class="sn-channel__name">${c.name}</span><span class="sn-tag">${c.type}</span><label class="sn-option"><input class="sn-switch" type="checkbox" data-act="chon" data-v="${n}"${c.on?' checked':''}> ${c.on?'On':'Off'}</label><button class="sn-btn sn-btn--ghost sn-btn--sm" data-act="toast" data-v="Test message sent to ${c.name}.">Send test message</button><button class="sn-btn sn-btn--ghost sn-btn--sm" data-act="ask" data-v="delchannel">Delete</button></div>`).join('')}</section>
+ <section class="px-narrow"><h2 class="sn-section__title px-h">Routing by tag</h2>${['tier:critical','tier:warning'].map(tg=>`<div class="px-route"><div class="sn-row">${tagHtml(tg,'noop')}<span class="sn-subtle">${T.filter(t=>t.tags.includes(tg)).length} tests</span></div>${CH.map((c,n)=>c.via===tg?`<div class="sn-channel"><span class="sn-channel__name">${c.name}</span><span class="sn-tag">${c.type}</span><span class="sn-evts">${Object.keys(c.ev).map(e=>`<button class="sn-evt" data-act="evt" data-v="${n}|${e}" aria-pressed="${!!c.ev[e]}"><span class="sn-mark sn-mark--${e.toLowerCase()}"></span>${e}</button>`).join('')}</span></div>`:'').join('')}</div>`).join('')}</section>`}
+function pageSecrets(){return appbar('secrets')+`<div class="sn-pagehead"><div><h1>Secrets</h1><div class="sn-pagehead__meta"><span>Values are encrypted and write-only. Test code reads them as ctx.secrets.NAME.</span></div></div><button class="sn-btn sn-btn--primary" data-act="toast" data-v="The form asks for a NAME in capitals and a value. The value is never shown again.">Add secret</button></div>
+ <section class="px-narrow"><div class="sn-table-wrap"><table class="sn-table"><thead><tr><th>Name</th><th>Created</th><th class="sn-num">Used by</th><th></th></tr></thead><tbody>${SEC.map(s=>`<tr><td style="color:var(--fg)">${s[0]}</td><td>${s[1]}</td><td class="sn-num">${s[2]} tests</td><td style="text-align:right;white-space:nowrap"><button class="sn-btn sn-btn--ghost sn-btn--sm" data-act="toast" data-v="Enter the new value for ${s[0]}. Tests pick it up on their next run.">Rotate</button><button class="sn-btn sn-btn--ghost sn-btn--sm" data-act="ask" data-v="delsecret">Delete</button></td></tr>`).join('')}</tbody></table></div></section>`}
+function pageTokens(){return appbar('tokens')+`<div class="sn-pagehead"><div><h1>API tokens</h1><div class="sn-pagehead__meta"><span>A token lets an agent or script manage this instance through the MCP server or the REST API.</span></div></div></div>
+ <section class="px-narrow sn-stack"><div class="sn-prose"><p>Sentinel is built to be operated by agents. Connect Claude Code or any MCP client and it can create tests, route alerts, add notes to incidents and draft reports. Publishing stays with you.</p></div>
+ ${S.token?`<div class="sn-callout sn-callout--degraded"><span class="sn-mark sn-mark--degraded"></span><div><b>Copy this token now.</b> It is shown once.</div></div><pre class="sn-code">claude mcp add --transport http sentinel https://sentinel.example/mcp \\
+  --header "Authorization: Bearer ${S.token}"</pre>`:''}
+ <div class="sn-row"><button class="sn-btn sn-btn--primary" data-act="gentoken">Generate token</button></div></section>`}
+function pageAdmin(){return `<div class="px-login"><div class="sn-brand">${logo(36)}sentinel</div><form class="sn-stack" data-act="signin"><div class="sn-field"><label class="sn-label" for="u">Username</label><input class="sn-input" id="u" value="admin" autocomplete="username"></div><div class="sn-field"><label class="sn-label" for="p">Password</label><input class="sn-input" id="p" type="password" value="prototype" autocomplete="current-password"></div><button class="sn-btn sn-btn--primary" type="submit" style="justify-content:center">Sign in</button></form><a class="sn-back" href="#status" style="margin:0">← Status page</a></div>`}
+
+function pubHead(title,tags){const all=[...new Set(T.flatMap(t=>t.tags))].sort();return `<header class="sn-pubbar"><div><h1 class="sn-pubbar__title">${title}</h1>${tags?`<div class="sn-tags" style="margin-top:8px"><a class="sn-tag" href="#" data-act="ptag" data-v=""${!S.ptag?' aria-current="true"':''}>all</a>${all.map(t=>tagHtml(t,'ptag',S.ptag===t)).join('')}</div>`:''}</div><div class="sn-row">${seg('Times',['UTC','Local'],S.tz,'tz')}${seg('Theme',['Light','Dark','System'],S.theme||'System','theme')}</div></header>`}
+const pubFoot=()=>`<footer class="sn-pubfoot"><span>Times in ${S.tz==='UTC'?'UTC':'your local time'} · refreshes every 60 s</span><span>Powered by <a href="#status">sentinel</a>, open source from territorial.dev</span></footer>`;
+function incBanner(i){const last=[...i.notes].reverse().find(n=>n.pub);const open=i.state!=='Resolved';return `<a class="sn-incident${open?' sn-incident--'+i.sev:''}" href="#pubincident-${i.id}"><div class="sn-row">${st(open?i.sev:'recovered',1,open?WORD[i.sev]:'Resolved')}<span class="sn-vis sn-vis--published">${i.state}</span></div><h2 class="sn-incident__title">${esc(i.title)}</h2>${open&&last?`<p class="sn-incident__update">${esc(last.text)}</p>`:''}<div class="sn-incident__meta"><span>${open?'Started '+tm(i.started)+' · '+i.dur:i.started.split(',')[0]+' · lasted '+i.dur}</span><span>${i.tests.length} check${i.tests.length>1?'s':''} affected</span>${i.report==='published'?'<span>Report published</span>':''}</div></a>`}
+function pageStatus(){const list=T.filter(t=>t.state!=='paused'&&(!S.ptag||t.tags.includes(S.ptag)));const g=group(list);const o=g.outage.length,d=g.degraded.length;const kind=o?'outage':d?'degraded':'operational';
+ const title=o?`Outage on ${o} check${o>1?'s':''}${d?`, ${d} degraded`:''}`:d?`${d} check${d>1?'s':''} degraded`:'All systems operational';
+ const pubInc=Object.values(INC).filter(i=>i.published);const openInc=pubInc.filter(i=>i.state!=='Resolved'),past=pubInc.filter(i=>i.state==='Resolved');
+ const pst=t=>t.state==='recovered'?'operational':t.state;
+ const card=t=>`<a class="sn-card" href="#check-${t.id}"><span class="sn-card__name" title="${esc(t.name)}">${esc(t.name)}</span><div class="sn-card__metric sn-num">${t.up}%<small>${S.period}</small></div><div class="sn-card__state">${st(pst(t))}<span>${t.since||'no problems in '+S.period}</span></div>${strip(t.h,true)}</a>`;
+ const row=t=>`<a class="sn-card px-rowcard" href="#check-${t.id}"><div class="sn-row" style="justify-content:space-between"><span class="sn-card__name">${esc(t.name)}</span><span class="sn-card__state">${st(pst(t))}<span class="sn-num">${t.up}% in ${S.period}</span></span></div>${strip(t.h)}</a>`;
+ return pubHead(S.ptag?`Maps platform status · ${S.ptag}`:'Maps platform status',true)+`<div class="sn-banner sn-banner--${kind}"><span class="sn-mark sn-mark--${kind}"></span><h2 class="sn-banner__title">${title}</h2><span class="sn-banner__meta">${list.length} checks · updated 40 s ago</span></div>
+ ${openInc.map(incBanner).join('')}
+ <div class="px-toolbar">${chips(g,'p-')}<span style="margin-left:auto" class="sn-row">${seg('Period',['24 h','7 d','30 d'],S.period==='1 h'?'24 h':S.period,'period')}${seg('View',['Grid','List'],S.view,'view')}</span></div>
+ ${ORDER.slice(0,4).filter(s=>SEC_META[s][2]!==null||g[s].length).map(s=>section(s,g[s].length,'p-',()=>S.view==='Grid'?`<div class="sn-cards">${g[s].map(card).join('')}</div>`:`<div class="sn-stack px-list">${g[s].map(row).join('')}</div>`,false)).join('')}
+ <section><h2 class="sn-section__title px-h">Incidents in the last 30 days</h2>${past.length?`<div class="sn-stack">${past.map(incBanner).join('')}</div>`:'<p class="px-emptyline">No incidents were published in the last 30 days.</p>'}</section>`+pubFoot()}
+function pageCheck(id){const t=T.find(x=>x.id===id)||T[0];const s=t.state==='recovered'?'operational':t.state;const incs=Object.values(INC).filter(i=>i.published&&i.tests.includes(t.id));
+ return pubHead(esc(t.name),false).replace('<header class="sn-pubbar">','<a class="sn-back" href="#status">← Status</a><header class="sn-pubbar">')+`<div class="sn-row">${st(s,1)}${t.since?`<span class="sn-muted">${t.since}</span>`:''}</div>
+ <section><div class="sn-row" style="justify-content:space-between;align-items:flex-end;margin-bottom:12px"><div class="px-metric sn-num">${t.up}%<small>uptime in 30 days</small></div>${seg('Period',['24 h','7 d','30 d'],S.period==='1 h'?'24 h':S.period,'period')}</div>${strip(t.h)}<div class="sn-strip__axis"><span>30 days ago</span><span>today</span></div></section>
+ <section><h2 class="sn-section__title px-h">Response time · 24 h</h2>${chart}</section>
+ <section><h2 class="sn-section__title px-h">Incidents</h2>${incs.length?`<div class="sn-stack">${incs.map(incBanner).join('')}</div>`:'<p class="px-emptyline">No incidents were published for this check.</p>'}</section>`+pubFoot()}
+function pagePubIncident(id){const i=INC[id];if(!i||!i.published)return pubHead('Incident not found',false)+`<div class="sn-empty"><h3>Nothing is published here</h3><p>This incident does not exist or has not been published.</p><a class="sn-btn sn-btn--secondary" href="#status">Back to status</a></div>`+pubFoot();
+ const open=i.state!=='Resolved';return `<a class="sn-back" href="#status">← Status</a>`+pubHead(esc(i.title),false)+`<div class="sn-row">${st(open?i.sev:'recovered',1,open?WORD[i.sev]:'Resolved')}<span class="sn-vis sn-vis--published">${i.state}</span><span class="sn-muted">${tm(i.started)} · ${i.dur}</span></div>
+ <section><h2 class="sn-section__title px-h">Affected checks</h2>${i.tests.map(tid=>{const t=T.find(x=>x.id===tid);return `<div class="sn-channel"><a class="sn-channel__name" href="#check-${t.id}">${esc(t.name)}</a>${st(t.state==='recovered'?'operational':t.state)}</div>`}).join('')}</section>
+ <div class="px-two"><section><h2 class="sn-section__title px-h">Updates</h2>${timeline(i,true)}</section><section><h2 class="sn-section__title px-h">Report</h2>${i.report==='published'?report(i,'Public'):'<p class="px-emptyline">A report will be published here after the incident is resolved.</p>'}</section></div>`+pubFoot()}
+
+const DIALOGS={publish:['Publish this incident?','The status page will show a banner with the title, state, start time, affected checks and the notes marked “Show on status page”. Internal notes stay private.','Publish incident',0],report:['Publish this report?','The public version of the summary, impact, root cause and follow-ups will appear on the incident’s public page. The internal version stays private.','Publish report',0],delete:['Delete this test?','Its run history and uptime figures are deleted with it. Incidents it was part of are kept.','Delete test',1],bulkdelete:['Delete the selected tests?','Their run history and uptime figures are deleted with them. This cannot be undone.','Delete tests',1],delchannel:['Delete this channel?','Tags and tests routed to it stop sending alerts there.','Delete channel',1],delsecret:['Delete this secret?','Tests that read it will fail on their next run.','Delete secret',1]};
+function dialog(){if(!S.dialog)return '';const d=DIALOGS[S.dialog];return `<div class="sn-scrim px-scrim"><div class="sn-dialog" role="alertdialog" aria-labelledby="dt"><h2 id="dt">${d[0]}</h2><p>${d[1]}</p><div class="sn-dialog__actions"><button class="sn-btn sn-btn--ghost" data-act="cancel">Cancel</button><button class="sn-btn ${d[3]?'sn-btn--danger':'sn-btn--primary'}" data-act="confirm">${d[2]}</button></div></div></div>`}
+const PAGES={status:pageStatus,check:pageCheck,pubincident:pagePubIncident,admin:pageAdmin,tests:pageTests,test:pageTest,edit:pageEdit,incidents:pageIncidents,incident:pageIncident,notifications:pageNotifications,secrets:pageSecrets,tokens:pageTokens};
+function render(){let r=route();if(!PAGES[r.page])r={page:'status',arg:''};if(!isPublic(r.page)&&r.page!=='admin'&&!S.signedIn){r={page:'admin',arg:''}}if(r.page==='admin'&&S.signedIn){r={page:'tests',arg:''}}
+ const a=document.activeElement,fid=a&&a.id,pos=a&&a.selectionStart;
+ document.getElementById('app').innerHTML=chrome(r)+`<main class="px-page sn ${isPublic(r.page)?'px-public':''}">${PAGES[r.page](r.arg)}</main>${dialog()}${S.toast?`<div class="px-toast" role="status">${esc(S.toast)}</div>`:''}`;
+ if(fid){const el=document.getElementById(fid);if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(e){}}}}
+let toastT;function toast(m){S.toast=m;clearTimeout(toastT);toastT=setTimeout(()=>{S.toast='';render()},3200)}
+const curInc=()=>INC[route().arg]||INC.radar;
+function act(a,v,el,ev){switch(a){
+ case 'period':S.period=v;break;case 'view':S.view=v;break;case 'tz':S.tz=v;break;case 'ver':S.ver=v;break;
+ case 'theme':S.theme=v;if(v==='System')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v.toLowerCase());break;
+ case 'tag':S.tag=v||null;break;case 'tagnav':S.tag=v;location.hash='#tests';break;case 'ptag':S.ptag=v||null;break;case 'clearq':S.q='';S.tag=null;break;
+ case 'toggle':S.open[v]=!S.open[v];break;case 'jump':S.open[v]=true;render();{const e=document.getElementById(v);if(e)e.scrollIntoView({behavior:'smooth',block:'start'})}return;
+ case 'sel':S.sel.has(v)?S.sel.delete(v):S.sel.add(v);break;
+ case 'bulk':if(v==='pause'||v==='resume'){T.forEach(t=>{if(S.sel.has(t.id)){if(v==='pause'){t.state='paused';t.since=''}else if(t.state==='paused'){t.state='operational'}}});toast(`${S.sel.size} test${S.sel.size>1?'s':''} ${v==='pause'?'paused':'resumed'}.`);S.sel.clear()}else if(v==='run'){toast(`Queued ${S.sel.size} run${S.sel.size>1?'s':''}.`)}else S.sel.clear();break;
+ case 'ask':S.dialog=v;break;case 'cancel':S.dialog=null;break;
+ case 'confirm':{const d=S.dialog;S.dialog=null;const i=curInc();if(d==='publish'){i.published=true;i.notes.push({t:'21:12 UTC',sys:1,text:'Incident published to the status page'});toast('Published. The status page now shows this incident.')}else if(d==='report'){i.report='published';i.published=true;toast('Report published.')}else if(d==='bulkdelete'){for(const id of S.sel){const n=T.findIndex(t=>t.id===id);if(n>=0)T.splice(n,1)}S.sel.clear();toast('Tests deleted.')}else if(d==='delete'){const n=T.findIndex(t=>t.id===route().arg);if(n>=0)T.splice(n,1);location.hash='#tests';toast('Test deleted.')}else toast('Deleted.');break}
+ case 'unpublish':INC[v].published=false;toast('Unpublished. The status page no longer shows this incident.');break;
+ case 'istate':{const i=curInc();if(i.state!==v){i.state=v;i.notes.push({t:'21:12 UTC',sys:1,text:'State changed to '+v});if(v==='Resolved')i.tests.forEach(id=>{const t=T.find(x=>x.id===id);if(t){t.state='recovered';t.since='recovered just now';t.sub='was in '+(t.id==='radar-fresh'?'Outage for 2 h 27 min':'Degraded for 46 min')}})}break}
+ case 'addnote':{const txt=document.getElementById('note').value.trim();if(!txt){toast('Write the note first.');break}INC[v].notes.push({t:'21:12 UTC',by:'victor',pub:document.getElementById('notepub').checked,text:txt});S.draft='';S.draftPub=false;break}
+ case 'evt':{const [n,e]=v.split('|');CH[n].ev[e]=CH[n].ev[e]?0:1;break}case 'chon':CH[v].on=!CH[v].on;break;
+ case 'gentoken':S.token='snt_'+Math.random().toString(36).slice(2,12)+Math.random().toString(36).slice(2,12);break;
+ case 'signout':S.signedIn=false;location.hash='#status';break;
+ case 'save':toast('Saved. Code compiled without errors.');location.hash=v?'#test-'+v:'#tests';break;
+ case 'toast':toast(v);break;case 'noop':break;default:return}render()}
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el||el.tagName==='FORM'||el.matches('input[type=checkbox]'))return;if(el.tagName==='A'||el.tagName==='BUTTON'||el.tagName==='LI')e.preventDefault();act(el.dataset.act,el.dataset.v,el,e)});
+document.addEventListener('change',e=>{const el=e.target;if(el.matches('input[type=checkbox][data-act]'))act(el.dataset.act,el.dataset.v,el,e);if(el.id==='notepub')S.draftPub=el.checked});
+document.addEventListener('input',e=>{if(e.target.id==='q'){S.q=e.target.value;render()}if(e.target.id==='note')S.draft=e.target.value});
+document.addEventListener('submit',e=>{e.preventDefault();S.signedIn=true;location.hash='#tests';render()});
+document.addEventListener('keydown',e=>{if(e.key==='/'&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName)){const q=document.getElementById('q');if(q){e.preventDefault();q.focus()}}if(e.key==='Escape'){if(S.dialog){S.dialog=null;render()}else if(document.activeElement.id==='q'){S.q='';render()}}});
+window.addEventListener('hashchange',()=>{S.sel.clear();render();window.scrollTo(0,0)});
+render();
+</script>
