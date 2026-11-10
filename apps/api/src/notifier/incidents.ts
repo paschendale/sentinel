@@ -21,7 +21,7 @@ import { TransportError, type BotCredentials, type IncidentHandles, type Inciden
  *
  * A webhook channel gets one message per event. A bot channel gets one message per
  * incident: the root is posted when the incident opens, edited whenever the state
- * changes, and edited to "back UP" when it ends; everything in between goes into the
+ * changes, and edited to "Recovered" when it ends; everything in between goes into the
  * thread under it. One open thread exists per (test, channel); it is the row in
  * `notification_threads` with `closed_at IS NULL`.
  */
@@ -177,7 +177,7 @@ async function updateIncident(
 }
 
 /**
- * Ends every open incident of a test: edits each root to "back UP", posts the closing
+ * Ends every open incident of a test: edits each root to "Recovered", posts the closing
  * reply and archives the thread. Runs on recovery regardless of the channel's event-type
  * filter, because an open incident must always be closed where it was opened. Never throws.
  */

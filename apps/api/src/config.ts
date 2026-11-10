@@ -79,7 +79,7 @@ if (SECRETS_ENCRYPTION_KEY && Buffer.from(SECRETS_ENCRYPTION_KEY, 'base64').leng
   throw new Error('SECRETS_ENCRYPTION_KEY must decode to exactly 32 bytes (base64-encoded)')
 }
 
-/** How often an open incident thread on a bot channel gets a "still down" reply while
+/** How often an open incident thread on a bot channel gets a "Still in outage" reply while
  *  nothing about the failure changes. Default 1 hour. */
 export const INCIDENT_THREAD_HEARTBEAT_MS = parseIntEnvInRange(
   'INCIDENT_THREAD_HEARTBEAT_MS',

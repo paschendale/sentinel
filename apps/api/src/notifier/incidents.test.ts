@@ -101,7 +101,7 @@ describe('incident threads on bot channels', () => {
     expect(requestUrl(0)).toMatch(/\/chat\.postMessage$/)
     const body = requestBody(0)
     expect(body['channel']).toBe('C123')
-    expect(body['text']).toContain('API Prod Check is DOWN')
+    expect(body['text']).toContain('Outage: API Prod Check')
     const insert = mockQuery.mock.calls[0]
     expect(insert?.[0]).toContain('INSERT INTO notification_threads')
     expect(insert?.[1]).toEqual(expect.arrayContaining(['test-1', 'ch-slack', 'down', '1700000000.000100', '1700000000.000100']))
@@ -151,7 +151,7 @@ describe('incident threads on bot channels', () => {
     await deliverIncidentEvent(slackChannel, 'warning', ctx, openThreadRow({ state: 'down' }))
 
     expect(requestUrl(0)).toMatch(/\/chat\.update$/)
-    expect(String(requestBody(0)['text'])).toContain('DEGRADED')
+    expect(String(requestBody(0)['text'])).toContain('Degraded')
     expect(requestUrl(1)).toMatch(/\/chat\.postMessage$/)
   })
 
@@ -183,7 +183,7 @@ describe('incident threads on bot channels', () => {
 
     await touchOpenIncidents('fail', ctx, [openThreadRow({ last_update_at: new Date(Date.now() - 2 * 3_600_000) })])
 
-    expect(String(requestBody(0)['text'])).toContain('still down')
+    expect(String(requestBody(0)['text'])).toContain('Still in outage')
     expect(mockInsertEvent.mock.calls.find((c) => c[0].reason === 'thread_heartbeat')).toBeDefined()
   })
 
@@ -201,7 +201,7 @@ describe('incident threads on bot channels', () => {
 
     expect(requestUrl(0)).toMatch(/\/channels\/999\/messages\/msg-1$/)
     expect((mockRequest.mock.calls[0]?.[1] as { method?: string }).method).toBe('PATCH')
-    expect(JSON.stringify(requestBody(0))).toContain('back UP')
+    expect(JSON.stringify(requestBody(0))).toContain('Recovered')
     expect(requestUrl(1)).toMatch(/\/channels\/thread-1\/messages$/)
     expect(String(requestBody(1)['content'])).toContain('resolved')
     expect(requestUrl(2)).toMatch(/\/channels\/thread-1$/)

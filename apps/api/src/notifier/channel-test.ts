@@ -4,7 +4,7 @@ import { RESEND_API_URL } from './payloads.js'
 import type { DeliverableChannel } from '../db/queries/channels.js'
 import { notifyRequest } from './http.js'
 import { postStandalone } from './incidents.js'
-import { escapeHtml, testMessage } from './payloads.js'
+import { CHANNEL_TEST_BODY, CHANNEL_TEST_TITLE, escapeHtml, testMessage } from './payloads.js'
 import { TransportError } from './transports/types.js'
 
 /**
@@ -19,7 +19,7 @@ export async function sendChannelTest(channel: DeliverableChannel): Promise<{ ht
 
   if (channel.type === 'email') {
     if (!RESEND_API_KEY) throw new TransportError('RESEND_API_KEY not configured')
-    const subject = '🔔 Sentinel · channel test'
+    const subject = CHANNEL_TEST_TITLE
     const response = await notifyRequest(RESEND_API_URL, {
       method: 'POST',
       headers: { authorization: `Bearer ${RESEND_API_KEY}` },
@@ -27,7 +27,7 @@ export async function sendChannelTest(channel: DeliverableChannel): Promise<{ ht
         from: RESEND_FROM,
         to: channel.email_to ?? [],
         subject,
-        html: `<p>${escapeHtml(subject)}</p><p>This channel is wired correctly. Alerts for assigned tests will arrive here.</p>`,
+        html: `<p>${escapeHtml(subject)}</p><p>${escapeHtml(CHANNEL_TEST_BODY)}</p>`,
       },
     })
     return checked(response.statusCode)
