@@ -1,10 +1,10 @@
 import { SENTINEL_INSTANCE } from './config.js'
 
-const PRODUCT_URL = 'https://github.com/paschendale/sentinel'
+export const USER_AGENT_URL = 'https://github.com/paschendale/sentinel'
 
 export const SENTINEL_USER_AGENT = SENTINEL_INSTANCE
-  ? `Sentinel (+${PRODUCT_URL}; instance=${SENTINEL_INSTANCE})`
-  : `Sentinel (+${PRODUCT_URL})`
+  ? `Sentinel (+${USER_AGENT_URL}; instance=${SENTINEL_INSTANCE})`
+  : `Sentinel (+${USER_AGENT_URL})`
 
 /** Headers that identify Sentinel (and, if configured, which instance) on every outbound request. */
 const SENTINEL_HEADERS: Readonly<Record<string, string>> = Object.freeze({

@@ -16,6 +16,7 @@ COPY packages/shared packages/shared
 COPY apps/api apps/api
 RUN pnpm --filter @sentinel/api build
 RUN pnpm --filter @sentinel/api deploy --prod /api-prod
+RUN node -p "require('./package.json').version" > /app/VERSION
 
 # ---- Runner ----
 FROM node:20-alpine AS runner
@@ -23,6 +24,7 @@ WORKDIR /app
 
 COPY --from=build /api-prod/node_modules /app/node_modules
 COPY --from=build /app/apps/api/dist /app/dist
+COPY --from=build /app/VERSION /app/VERSION
 
 ENV NODE_ENV=production
 

@@ -52,13 +52,13 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
 
   server.registerTool(
     'list_tests',
-    { description: 'List all monitoring tests, optionally filtered by tag.', inputSchema: { tag: z.string().optional() } },
+    { description: 'List all tests, optionally filtered by tag.', inputSchema: { tag: z.string().optional() } },
     async ({ tag }) => forward('GET', tag ? `/tests?tag=${encodeURIComponent(tag)}` : '/tests')
   )
 
   server.registerTool(
     'get_test',
-    { description: 'Get a single monitoring test by id, including its JS code.', inputSchema: { id: z.string() } },
+    { description: 'Get one test by id, including its JavaScript code.', inputSchema: { id: z.string() } },
     async ({ id }) => forward('GET', `/tests/${encodeURIComponent(id)}`)
   )
 
@@ -66,7 +66,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'create_test',
     {
       description:
-        'Create a monitoring test. code is a JavaScript function body (top-level await allowed) receiving ctx. ' +
+        'Create a test. code is a JavaScript function body (top-level await allowed) receiving ctx. ' +
         TEST_RESULT_CONTRACT + ' Code that does not compile is rejected with 400. ctx supports four protocols — ctx.http (HTTP/undici), ctx.ftp.ls/get (FTP), ' +
         'ctx.k8s.list/read/get (Kubernetes API reads with a bearer token and optional CA: list(server, ' +
         '{token, ca, group, version, resource, namespace, labelSelector, fieldSelector, limit}) returns ' +
@@ -76,8 +76,8 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
         'ctx.s3.get/head/list (S3-compatible object storage, SigV4-signed; list(bucketUrl, {prefix, ' +
         'delimiter, maxKeys, startAfter, all}) returns {objects:[{key,size,lastModified,etag}], prefixes, ' +
         'truncated} for presence/freshness checks on a prefix) — not just HTTP checks. Also ' +
-        'available: ctx.assert(name, value, message?) for named assertions, ctx.warn(message) for a ' +
-        'non-fatal warning status, ctx.log(message), ctx.now(), and ctx.secrets.NAME for values created ' +
+        'available: ctx.assert(name, value, message?) for named assertions (throws when value is falsy), ' +
+        'ctx.warn(message) to mark the run Warned and the test Degraded without failing, ctx.log(message), ctx.now(), and ctx.secrets.NAME for values created ' +
         'via create_secret. timeout_ms must be at most 80% of schedule_ms. ctx.http/ctx.s3 accept a ' +
         'per-request `timeout` (ms, headers + full body; without it timeout_ms bounds the request) and ' +
         'throw HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR when it is exceeded — set one below timeout_ms on ' +
@@ -86,7 +86,8 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
         'location); pass your own User-Agent header to override it. ' +
         'retries (0–5) re-runs a failed or timed-out scheduled run and records only the last attempt. ' +
         'Use tags to group related ' +
-        'tests — tags drive both the dashboard summary and notification-channel routing.',
+        'tests: tags drive the dashboard summary, the status page and channel routing. An incident:<group> tag makes ' +
+        'tests share one incident.',
       inputSchema: createTestShape,
     },
     async (input) => forward('POST', '/tests', input)
@@ -96,7 +97,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'update_test',
     {
       description:
-        'Update fields of a monitoring test (partial update; set enabled to pause/resume scheduling). ' +
+        'Update fields of a test (partial update; set enabled false to pause it, true to resume). ' +
         'Same ctx and timeout semantics as create_test: per-request `timeout` on ctx.http/ctx.s3, ' +
         'retries re-run failed or timed-out scheduled runs.',
       inputSchema: { id: z.string(), ...updateTestShape },
@@ -106,7 +107,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
 
   server.registerTool(
     'delete_test',
-    { description: 'Delete a monitoring test and its run history.', inputSchema: { id: z.string() } },
+    { description: 'Delete a test and its run history.', inputSchema: { id: z.string() } },
     async ({ id }) => forward('DELETE', `/tests/${encodeURIComponent(id)}`)
   )
 
@@ -114,7 +115,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'bulk_update_tests',
     {
       description:
-        'Apply one action to many tests at once (up to 200 ids): enable, disable (pause scheduling), run (start one ' +
+        'Apply one action to many tests at once (up to 200 ids): enable, disable (pause), run (start one ' +
         'run of each; results arrive in each test\'s run history), delete, add_tag or remove_tag (tag required). ' +
         'Changes are made in one transaction. Returns one result per id: ok, or an error such as "not found", ' +
         '"test is disabled" or "a run of this test is already in progress". Use list_tests with a tag to collect ids.',
@@ -139,7 +140,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
 
   server.registerTool(
     'get_test_runs',
-    { description: 'Get the last 20 runs of a test, with per-run assertion results.', inputSchema: { id: z.string() } },
+    { description: 'Get the last 20 runs of a test, with per-run assertion results. status is success (Passed), warn (Warned), fail (Failed) or timeout (Timed out).', inputSchema: { id: z.string() } },
     async ({ id }) => forward('GET', `/tests/${encodeURIComponent(id)}/runs`)
   )
 
@@ -147,8 +148,8 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'get_test_incidents',
     {
       description:
-        'Get one test\'s incident history as time windows (start, end, duration, failure count, ongoing): failure ' +
-        'streaks that crossed its threshold, from stored incidents and the retained runs. For the incidents themselves ' +
+        'Get one test\'s incident history as time windows (start, end, duration, failed runs, ongoing): the periods ' +
+        'it was in Outage, from stored incidents and the retained runs. For the incidents themselves ' +
         '(timeline, report, other affected tests) use list_incidents / get_incident.',
       inputSchema: { id: z.string() },
     },
@@ -163,8 +164,8 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
       description:
         'List stored incidents, open first, then newest. Sentinel opens an incident (state investigating) when a test ' +
         'reaches Outage; tests sharing an incident:<group> tag join the same incident (a Degraded test joins an open one ' +
-        'but never opens one); it resolves when every linked test is Operational. Each item has severity (down/degraded), ' +
-        'state, times, affected tests, published_at (null = internal) and report_state (none/draft/published).',
+        'but never opens one); it resolves when every linked test is Operational. Each item has severity (down = Outage, degraded = Degraded), ' +
+        'state, times, affected tests, published_at (null = Internal) and report_state (none/draft/published).',
       inputSchema: { state: z.enum(['open', 'resolved', 'all']).optional() },
     },
     async ({ state }) => forward('GET', state ? `/incidents?state=${state}` : '/incidents')
@@ -230,9 +231,10 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'get_dashboard_summary',
     {
       description:
-        'Get the dashboard summary for all tests (last status, 7-day pass rate, avg latency), ordered by ' +
-        'section: critical (down past its failure threshold), warning (a warning, or failing under the ' +
-        'threshold), recovered (passing, but a run in the last 24 h did not pass), clean, disabled. Each ' +
+        'Get the dashboard summary for all tests (last run result, 7-day pass rate, average latency), ordered by ' +
+        'section: critical (Outage: failing past its failure threshold), warning (Degraded: it warned, or it is failing ' +
+        'under the threshold), recovered (Recovered: Operational, but a run in the last 24 h did not pass), clean ' +
+        '(Operational), disabled (Paused). Each ' +
         'test carries its section, problem_started_at / problem_ended_at / problem_worst for the current or ' +
         'last problem, and last_problem_at. Optionally filter by tag and by sections (e.g. ' +
         '["critical","warning"] for what needs attention now).',
@@ -252,7 +254,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
 
   server.registerTool(
     'get_status',
-    { description: 'Get the aggregated 30-day public uptime status for all tests.', inputSchema: {} },
+    { description: 'Get what the public status page shows for all tests: state (up = Operational, degraded = Degraded, down = Outage, unknown = No data) and 30-day uptime from daily aggregates, with each test\'s section.', inputSchema: {} },
     async () => forward('GET', '/status')
   )
 
@@ -266,7 +268,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
 
   server.registerTool(
     'list_channels',
-    { description: 'List all notification channels (Discord, Slack, webhook, email).', inputSchema: {} },
+    { description: 'List all notification channels (discord, slack, webhook, email, discord_bot, slack_bot) Bot tokens are never returned; has_bot_token says whether one is stored.', inputSchema: {} },
     async () => forward('GET', '/channels')
   )
 
@@ -315,7 +317,7 @@ export function registerMcpTools(server: McpServer, app: FastifyInstance, author
     'assign_channel',
     {
       description:
-        'Assign a notification channel to a test (scope_type "test", scope_value = test id) or to a tag (scope_type "tag"), optionally narrowed to specific event types (fail, warning, recovery).',
+        'Assign a notification channel to a test (scope_type "test", scope_value = test id) or to a tag (scope_type "tag"), optionally narrowed to event types: fail (Outage), warning (Degraded), recovery (Recovered). Default is all three.',
       inputSchema: {
         ...assignmentShape,
         event_types: z.array(NotificationEventTypeSchema).min(1).max(3).optional(),
