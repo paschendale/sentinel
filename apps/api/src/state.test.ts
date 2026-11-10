@@ -55,6 +55,13 @@ describe('one definition of a run result', () => {
     expect(uptimePct(1, 0, 3)).toBe(25)
   })
 
+  it('rounds uptime to the requested decimals and never shows 100 with a failure', () => {
+    expect(uptimePct(964, 0, 36, 1)).toBe(96.4)
+    expect(uptimePct(999, 0, 1)).toBe(99)
+    expect(uptimePct(9999, 0, 1, 1)).toBe(99.9)
+    expect(uptimePct(10, 0, 0, 1)).toBe(100)
+  })
+
   it('orders states by severity', () => {
     expect(worseStatus('degraded', 'down')).toBe('down')
     expect(worseStatus('down', 'degraded')).toBe('down')

@@ -48,10 +48,17 @@ export function periodOutcome(success: number, warn: number, failure: number): P
   return 'unknown'
 }
 
-/** Share of runs that did not fail, rounded to a whole percent; null without runs. Warned runs count as available. */
-export function uptimePct(success: number, warn: number, failure: number): number | null {
+/**
+ * Share of runs that did not fail, in percent rounded to `digits` decimals (whole percent by
+ * default); null without runs. Warned runs count as available. Never rounds up to 100 while a
+ * run failed, so "100%" always means no failures.
+ */
+export function uptimePct(success: number, warn: number, failure: number, digits = 0): number | null {
   const total = success + warn + failure
-  return total === 0 ? null : Math.round((100 * (success + warn)) / total)
+  if (total === 0) return null
+  const f = 10 ** digits
+  const pct = Math.round((100 * f * (success + warn)) / total) / f
+  return failure > 0 && pct >= 100 ? 100 - 1 / f : pct
 }
 
 /** Severity order of states, worst last. */
