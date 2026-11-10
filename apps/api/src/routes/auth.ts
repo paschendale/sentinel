@@ -35,7 +35,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (typeof hours !== 'number' || !Number.isInteger(hours) || hours < 1 || hours > 87_600) {
       return reply.status(400).send({ error: 'expires_in_hours must be an integer between 1 and 87600' })
     }
-    const token = signJwt({ sub: 'mcp' }, hours)
+    const label = body['label']
+    if (label !== undefined && (typeof label !== 'string' || !/^[A-Za-z0-9 ._-]{1,50}$/.test(label))) {
+      return reply.status(400).send({ error: 'label must be 1–50 letters, digits, spaces, ".", "_" or "-"' })
+    }
+    // sub 'mcp' marks an agent token: it can read and write incidents but never publish.
+    const token = signJwt(label === undefined ? { sub: 'mcp' } : { sub: 'mcp', label }, hours)
     return reply.send({ token, expires_at: new Date(Date.now() + hours * 3_600_000).toISOString() })
   })
 }

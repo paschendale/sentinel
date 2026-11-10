@@ -13,6 +13,34 @@ interface OpenIncident {
   failure_count: number
 }
 
+/**
+ * GET /tests/:id/incidents keeps its response shape. Incidents derived from the retained runs
+ * stay as they are (they carry exact failure counts); stored incidents that no derived one
+ * overlaps, typically older than run retention, are added from the stored links. Newest first.
+ */
+export function mergeStoredIncidents(
+  derived: Incident[],
+  stored: Array<{ started_at: Date; ended_at: Date | null; failed_runs: number | null }>,
+  now: Date = new Date(),
+): Incident[] {
+  const overlaps = (start: number, end: number): boolean =>
+    derived.some((d) => new Date(d.started_at).getTime() <= end && new Date(d.ended_at).getTime() >= start)
+  const extra: Incident[] = []
+  for (const s of stored) {
+    const start = s.started_at.getTime()
+    const end = (s.ended_at ?? now).getTime()
+    if (overlaps(start, end)) continue
+    extra.push({
+      started_at: s.started_at.toISOString(),
+      ended_at: new Date(end).toISOString(),
+      duration_ms: Math.max(0, end - start),
+      failure_count: s.failed_runs ?? 0,
+      ongoing: s.ended_at === null,
+    })
+  }
+  return [...derived, ...extra].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+}
+
 export function buildIncidentsFromRuns(
   runs: IncidentRun[],
   failureThreshold: number,

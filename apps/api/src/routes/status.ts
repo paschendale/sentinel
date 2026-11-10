@@ -13,6 +13,7 @@ import { FAILURE_STATUSES, periodOutcome, statusSection, toIso, uptimePct } from
 import { pool } from '../db/pool.js'
 import { getDistinctTags } from '../db/queries/assignments.js'
 import { cachedReply, parseInstant, type CachedReply } from './public-cache.js'
+import { getPublicIncident, listPublicIncidents } from '../db/queries/incidents.js'
 
 type TestRow = { id: string; name: string; enabled: boolean; tags: string[] }
 
@@ -200,6 +201,24 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     if (tooLong(tag, testId)) return reply.status(400).send({ error: 'tag or testId is too long' })
 
     return send(reply, `buckets:${period}:${testId ?? ''}:${tag ?? ''}`, async () => ok(await loadBuckets(period, tag, testId)))
+  })
+
+  // GET /status/incidents?tag= — published incidents, open or started in the last 30 days.
+  // Only public text: titles, states, times, affected check names, public notes, the public report.
+  app.get<{ Querystring: { tag?: string } }>('/incidents', async (req, reply) => {
+    const tag = req.query.tag || undefined
+    if (tooLong(tag)) return reply.status(400).send({ error: 'tag is too long' })
+    return send(reply, `incidents:${tag ?? ''}`, async () => ok(await listPublicIncidents(tag ?? null)))
+  })
+
+  // GET /status/incidents/:id — 404 unless published.
+  app.get<{ Params: { id: string } }>('/incidents/:id', async (req, reply) => {
+    const { id } = req.params
+    if (tooLong(id)) return reply.status(404).send({ error: 'not found' })
+    return send(reply, `incident:${id}`, async () => {
+      const incident = await getPublicIncident(id)
+      return incident === null ? notFound() : ok(incident)
+    })
   })
 
   // GET /status/test/:id/events — recent checks with assertion details, for the

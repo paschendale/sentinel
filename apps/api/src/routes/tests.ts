@@ -7,7 +7,8 @@ import { compileError, invalidateCache } from '../executor/compile.js'
 import { testEvents } from '../events.js'
 import { getAssignedChannels, getEffectiveChannelsForTest, addAssignment, removeAssignment } from '../db/queries/assignments.js'
 import { normalizeTags } from '../tags/normalize.js'
-import { buildIncidentsFromRuns } from './incident-policy.js'
+import { buildIncidentsFromRuns, mergeStoredIncidents } from './incident-policy.js'
+import { storedIncidentsForTest } from '../db/queries/incidents.js'
 import { sendValidationError } from './errors.js'
 
 function isCheckViolation(err: unknown): err is { code: string; constraint?: string } {
@@ -159,8 +160,9 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
        ORDER BY started_at ASC`,
       [req.params.id],
     )
-    const incidents: Incident[] = buildIncidentsFromRuns(rows, failureThreshold)
-    return reply.send(incidents)
+    const derived: Incident[] = buildIncidentsFromRuns(rows, failureThreshold)
+    const stored = await storedIncidentsForTest(req.params.id)
+    return reply.send(mergeStoredIncidents(derived, stored))
   })
 
   // GET /tests/:id

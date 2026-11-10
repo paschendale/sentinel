@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildIncidentsFromRuns } from './incident-policy.js'
+import { buildIncidentsFromRuns, mergeStoredIncidents } from './incident-policy.js'
 
 function mkRun(ts: string, status: 'success' | 'fail' | 'timeout') {
   const startedAt = new Date(ts)
@@ -56,5 +56,26 @@ describe('buildIncidentsFromRuns', () => {
       failure_count: 3,
       ongoing: true,
     })
+  })
+})
+
+describe('mergeStoredIncidents', () => {
+  const at = (h: number) => new Date(Date.UTC(2026, 0, 1, h))
+  const derived = [{ started_at: at(10).toISOString(), ended_at: at(11).toISOString(), duration_ms: 3_600_000, failure_count: 4, ongoing: false }]
+
+  it('keeps derived incidents and adds stored ones older than the retained runs, newest first', () => {
+    const merged = mergeStoredIncidents(derived, [
+      { started_at: at(10), ended_at: at(11), failed_runs: 9 }, // same window: derived wins
+      { started_at: at(1), ended_at: at(2), failed_runs: 6 },
+    ])
+    expect(merged).toEqual([
+      derived[0],
+      { started_at: at(1).toISOString(), ended_at: at(2).toISOString(), duration_ms: 3_600_000, failure_count: 6, ongoing: false },
+    ])
+  })
+
+  it('marks a stored incident without an end as ongoing', () => {
+    const [only] = mergeStoredIncidents([], [{ started_at: at(1), ended_at: null, failed_runs: null }], at(3))
+    expect(only).toMatchObject({ ongoing: true, duration_ms: 2 * 3_600_000, failure_count: 0 })
   })
 })

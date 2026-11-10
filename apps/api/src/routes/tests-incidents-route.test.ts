@@ -48,6 +48,8 @@ describe('GET /tests/:id/incidents', () => {
           },
         ],
       } as never)
+      // stored incident links (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
     const res = await app.inject({

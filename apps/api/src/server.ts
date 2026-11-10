@@ -13,6 +13,8 @@ import { secretsRoutes } from './routes/secrets.js'
 import { healthRoutes } from './routes/health.js'
 import { mcpRoutes } from './routes/mcp.js'
 import { verifyJwt } from './auth/jwt.js'
+import { principalFromClaims } from './auth/principal.js'
+import { incidentsRoutes } from './routes/incidents.js'
 import { registerErrorHandling } from './routes/errors.js'
 
 const PUBLIC_ROUTES: Array<{ method: string; prefix: string }> = [
@@ -37,6 +39,7 @@ export async function buildServer() {
   })
 
   registerErrorHandling(app)
+  app.decorateRequest('principal', null)
 
   app.addHook('onResponse', async (request, reply) => {
     if (reply.statusCode < 400) return
@@ -55,7 +58,7 @@ export async function buildServer() {
 
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Access-Control-Allow-Origin', '*')
-    reply.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
     reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
     if (request.method === 'OPTIONS') {
       return reply.status(204).send()
@@ -69,9 +72,11 @@ export async function buildServer() {
     const queryToken = (request.query as Record<string, string | undefined>)['token']
     const raw = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : queryToken
 
-    if (!raw || !verifyJwt(raw)) {
+    const claims = raw ? verifyJwt(raw) : null
+    if (!claims) {
       return reply.status(401).send({ error: 'unauthorized' })
     }
+    request.principal = principalFromClaims(claims)
   })
 
   await app.register(authRoutes, { prefix: '/auth' })
@@ -85,6 +90,7 @@ export async function buildServer() {
   await app.register(tagsRoutes, { prefix: '/tags' })
   await app.register(secretsRoutes, { prefix: '/secrets' })
   await app.register(healthRoutes, { prefix: '/health' })
+  await app.register(incidentsRoutes, { prefix: '/incidents' })
   await app.register(mcpRoutes, { prefix: '/mcp' })
   return app
 }
