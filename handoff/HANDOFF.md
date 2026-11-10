@@ -195,8 +195,8 @@ Tick when done; add one line of notes if the next session needs to know somethin
 - [x] A2 reliability (1–10)
 - [x] A3 return value
 - [x] A4 bulk
-- [ ] A5 incidents
-- [ ] A6 tests green
+- [x] A5 incidents
+- [x] A6 tests green
 - [ ] B1 foundations
 - [ ] B2 routes
 - [ ] B3 pages
@@ -209,10 +209,16 @@ Tick when done; add one line of notes if the next session needs to know somethin
 
 ### Notes between sessions
 
-Session A, part 1 (stopped at the usage limit; A5 and A6 still to do, by Session A again before B):
+Session A (done; last run 36 test files, 300 tests green, typecheck clean):
 - Tests: never run vitest on the Mac (`src/test/global-setup.ts` loads `apps/api/.env`). On disbelief: `~/work/sentinel-revamp` (rsync the tree there, no `.env`), Postgres container `sentinel-revamp-pg` (user/db `sentinel`/`sentinel_test`, matches `vitest.config.ts`, so integration tests run instead of skipping), runner script `~/work/sentinel-revamp-test.sh` runs typecheck + migrations + tests in `node:22-bookworm` sharing the PG network. Remove the container, the `sentinel-revamp-pnpm` volume and `sentinel-revamp-net` network when the PR is done. Last run: 35 files, 291 tests green.
 - A1: `packages/shared/src/state.ts` holds isFailure/publicStatusFor/periodOutcome/uptimePct, label maps (STATE/RUN_RESULT/SECTION/EVENT/INCIDENT_STATE), formatDuration ("2 h 27 min"), toIso, TEST_RESULT_CONTRACT. A warned run is neither success nor failure: migration `022_uptime_warn_count.sql` adds `uptime_daily.warn_count`; buckets now return `warn_count` and `failure_count` excludes warns. B must colour buckets/days from warn_count too and use the label maps for every state word.
 - A2: result buffer rewritten (chunked transactions; `upsertTestState` already returns per-test transitions with prev_public_status → public_status, ready for A5 incident open/close in the same transaction in `writeChunk`). Reconciler in `notifier/reconciler.ts` (threads only so far; A5 adds incidents). Error shape helper `routes/errors.ts`. `runNow()` in `executor/run-now.ts` (409 when busy). Public /status cache in `routes/public-cache.ts` (reuse for /status/incidents). CORS allow-methods in server.ts lacks PUT: add it with `PUT /incidents/:id/report`.
 - A3: no `BREAKING CHANGE` footer on purpose (merge commits would make semantic-release cut 2.0.0); the upgrade note belongs in the PR description.
 - A4: `POST /tests/bulk` → `{ action, results: [{ id, ok, error?, started? }] }`; MCP tool count is 23.
-- Auth for A5: login tokens carry `sub: 'admin'`, MCP tokens `sub: 'mcp'` (routes/auth.ts), so they are distinguishable without a new claim; the global hook in server.ts does not yet expose claims to routes.
+- A5 auth: login tokens carry `sub: 'admin'`, MCP tokens `sub: 'mcp'` (now with an optional `label` in `POST /auth/mcp-token`), so no new claim was needed. `auth/principal.ts` puts `request.principal` (`person` | `token`, author `user:<ADMIN_USERNAME>` / `token:<label>`) on every authed request; tokens without `sub: 'mcp'` are a person. Publish, unpublish, report publish and `public: true` notes return 403 to tokens.
+- A5 API for B (all signed in unless noted): `GET /incidents?state=open|resolved|all` (default all) → `IncidentListItem[]` with `tests` and `report_state`; `GET /incidents/:id` → `IncidentDetail` (tests, updates, report with `sections[summary|impact|root_cause|resolution|follow_ups].internal/public`); `PATCH /incidents/:id {title?, state?}`; `POST /incidents/:id/tests {test_id}`; `POST /incidents/:id/updates {body, public}`; `PUT /incidents/:id/report` (partial, per section and version); `POST /incidents/:id/publish|unpublish`; `POST /incidents/:id/report/publish` (400 when no public text). Public, no auth, cached 30 s: `GET /status/incidents?tag=` and `GET /status/incidents/:id` → `PublicIncident` (404 unless published). Types and zod schemas in `packages/shared/src/incidents.ts`; `REPORT_SECTION_LABELS`, `INCIDENT_STATE_LABELS`, `incidentGroupOf()`.
+- Incident chip on dashboard rows (B3): not in `GET /dashboard` yet; fetch `GET /incidents?state=open` and match `tests[].test_id`.
+- Migrations in this PR: `021_incidents.sql` and `022_uptime_warn_count.sql` (C: mention both in the PR description).
+- For the PR description (C5), the A3 pre-upgrade check: `curl -s -H "Authorization: Bearer $TOKEN" $API/tests/export | jq -r '.tests[] | select(.code | test("return\\s+[^;\\n]*(===|!==|==|!=|<|>|&&|\\|\\||!)")) | .name'` lists tests that return an expression which could be `false`.
+- Error bodies are now always `{ error: string, details? }`; validation errors put the zod breakdown in `details` (the web's channel form already reads `error` as a string).
+- `IMPLEMENTATION_LOG.md` has the Session A entry (C moves the file to `docs/dev/`).

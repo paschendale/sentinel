@@ -1067,3 +1067,25 @@ Design choices: the section is derived from `test_state.public_status`, the same
 API: `GET /dashboard` returns `section`, `public_status`, `consecutive_failures`, `failure_threshold` and the window, ordered by section, and accepts `?section=`. `GET /status`, `/status/tag/:tag` and `/status/test/:id` add `section` and the window (still no error messages on public endpoints). MCP `get_dashboard_summary` documents the sections and takes a `sections` filter.
 
 **Files changed:** `apps/api/src/db/migrations/020_test_state_problem_window.sql`, `apps/api/src/db/result-buffer.ts`, `apps/api/src/routes/dashboard.ts`, `apps/api/src/routes/status.ts`, `apps/api/src/mcp/tools.ts`, `packages/shared/src/sections.ts` (new), `packages/shared/src/types.ts`, `packages/shared/src/index.ts`, `apps/web/app/_components/sections.tsx` (new), `apps/web/app/_components/dashboard-table.tsx`, `apps/web/app/status/_components/status-page-content.tsx`, `apps/web/app/status/_components/status-grid-card.tsx`; tests in `apps/api/src/sections.test.ts` (new), `apps/api/src/routes/dashboard.test.ts` (new), `apps/api/src/routes/status.test.ts`, `apps/api/src/db/result-buffer.test.ts`; `README.md`, `docs/DOMAINS.md`, `docs/ARCHITECTURE.md`.
+
+## 2026-11-10 · Revamp A · Backend: one state model, reliability, return value, bulk, stored incidents
+
+**What was built:** One definition of a run result and a test's state in `@sentinel/shared` (`state.ts`), used by the API and the web; reliability fixes across the result buffer, notifier, executor, scheduler and public routes; the return-value rule (a test returning exactly `false` fails); `POST /tests/bulk`; stored incidents with a timeline, a two-version report, publishing for people only, public incident routes and six MCP tools.
+
+**Files changed:**
+- `packages/shared/src/state.ts`, `incidents.ts` (new); `sections.ts`, `schemas.ts`, `types.ts`
+- `apps/api/src/db/result-buffer.ts` (rewritten), `db/queries/incidents.ts`, `db/queries/tests.ts` (new), `db/migrations/021_incidents.sql`, `022_uptime_warn_count.sql`
+- `apps/api/src/notifier/http.ts`, `reconciler.ts` (new); `dispatch.ts`, `incidents.ts`, transports
+- `apps/api/src/executor/run.ts`, `run-now.ts` (new), `compile.ts`, `ctx.ts`; `scheduler/index.ts`, `run-guard.ts` (new)
+- `apps/api/src/routes/errors.ts`, `public-cache.ts`, `incidents.ts`, `tests-bulk.ts` (new); `status.ts`, `tests.ts`, `run.ts`, `auth.ts`, `mcp.ts`; `auth/principal.ts` (new); `mcp/tools.ts`; `server.ts`, `index.ts`
+
+**Decisions:**
+- A warned run is neither a success nor a failure: it resets the failure streak, makes the test Degraded and counts as available in uptime. `uptime_daily.warn_count` and bucket `warn_count` carry it.
+- Result buffer: chunks of 100 in one transaction each; data errors isolate and drop the bad row; only connection/resource errors requeue; buffer capped at 5000. Incidents open and resolve in the same transaction as the state upsert.
+- Incidents: Outage opens (or joins the `incident:<group>` incident); Degraded only joins; resolution when no linked test is still affected. The reconciler also ends links of paused tests. Per-test incident writes happen only on state changes, so they stay rare.
+- Login tokens (`sub: 'admin'`) and MCP tokens (`sub: 'mcp'`, optional `label`) were already distinguishable; tokens without `sub: 'mcp'` count as a person. Publish routes and public notes return 403 to MCP tokens.
+- Public routes keep reading `test_runs` for 1h/24h/7d buckets and events, behind a 30 s in-process cache with validated, bounded parameters (RULES 10/23 need updating to this, Session C).
+- `notification_events` keeps deliveries and due-but-undelivered alerts only.
+- The A3 commit has no `BREAKING CHANGE` footer so semantic-release does not cut a major; the upgrade check goes in the PR description.
+
+**Deferred:** docs restructure and vocabulary in notification messages (Session C); the web for incidents and bulk (Session B); splitting `ctx.ts` and moving remaining route SQL into `db/queries`.
