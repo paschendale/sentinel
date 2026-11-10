@@ -1,4 +1,5 @@
 import type { NotificationChannelType, NotificationEventType } from '@sentinel/shared'
+import { formatDuration } from '@sentinel/shared'
 
 export type IncidentState = 'down' | 'degraded' | 'up'
 
@@ -13,18 +14,6 @@ export interface EventInfo {
 
 export function stateForEvent(event: NotificationEventType): IncidentState {
   return event === 'fail' ? 'down' : event === 'warning' ? 'degraded' : 'up'
-}
-
-export function formatDuration(ms: number): string {
-  const totalSec = Math.floor(ms / 1000)
-  const days = Math.floor(totalSec / 86_400)
-  const hours = Math.floor((totalSec % 86_400) / 3600)
-  const mins = Math.floor((totalSec % 3600) / 60)
-  const secs = totalSec % 60
-  if (days > 0) return `${days}d ${hours}h ${mins}m`
-  if (hours > 0) return `${hours}h ${mins}m`
-  if (mins > 0) return `${mins}m ${secs}s`
-  return `${secs}s`
 }
 
 export function escapeHtml(s: string): string {

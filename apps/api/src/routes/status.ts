@@ -9,7 +9,7 @@ import type {
   StatusPeriod,
   TestRun,
 } from '@sentinel/shared'
-import { statusSection } from '@sentinel/shared'
+import { FAILURE_STATUSES, periodOutcome, statusSection, toIso, uptimePct } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import { getDistinctTags } from '../db/queries/assignments.js'
 
@@ -19,6 +19,7 @@ type UdRow = {
   test_id: string
   date: string
   success_count: number
+  warn_count: number
   failure_count: number
 }
 
@@ -33,17 +34,7 @@ type StateRow = {
 
 const STATE_COLUMNS = 'test_id, public_status, problem_started_at, problem_ended_at, problem_worst, last_problem_at'
 
-function iso(v: Date | string | null | undefined): string | null {
-  if (v === null || v === undefined) return null
-  return v instanceof Date ? v.toISOString() : String(v)
-}
-
-function dayOutcome(successCount: number, failureCount: number): PublicStatusDay['outcome'] {
-  if (failureCount > 0 && successCount === 0) return 'down'
-  if (failureCount > 0 && successCount > 0) return 'degraded'
-  if (successCount > 0) return 'up'
-  return 'unknown'
-}
+const FAILURE_SQL = FAILURE_STATUSES.map((s) => `'${s}'`).join(',')
 
 /** Last 30 UTC calendar days, oldest first. */
 function utcDayStrings(): string[] {
@@ -59,7 +50,7 @@ function utcDayStrings(): string[] {
 
 function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRow[], now = new Date()): PublicStatusTest[] {
   const dayStrings = utcDayStrings()
-  const udByTest = new Map<string, Map<string, { s: number; f: number }>>()
+  const udByTest = new Map<string, Map<string, { s: number; w: number; f: number }>>()
 
   for (const row of udRows) {
     const d =
@@ -71,7 +62,7 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRo
       m = new Map()
       udByTest.set(row.test_id, m)
     }
-    m.set(d, { s: Number(row.success_count), f: Number(row.failure_count) })
+    m.set(d, { s: Number(row.success_count), w: Number(row.warn_count ?? 0), f: Number(row.failure_count) })
   }
 
   const stateMap = new Map(stateRows.map(s => [s.test_id, s]))
@@ -79,26 +70,28 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRo
   return tests.map((t) => {
     const m = udByTest.get(t.id) ?? new Map()
     let totalS = 0
+    let totalW = 0
     let totalF = 0
     const days: PublicStatusDay[] = dayStrings.map((date) => {
       const cell = m.get(date)
       const s = cell?.s ?? 0
+      const w = cell?.w ?? 0
       const f = cell?.f ?? 0
       totalS += s
+      totalW += w
       totalF += f
-      return { date, outcome: dayOutcome(s, f) }
+      return { date, outcome: periodOutcome(s, w, f) }
     })
 
-    const denom = totalS + totalF
-    const uptime_pct_30d = denom === 0 ? null : Math.round((100 * totalS) / denom)
+    const uptime_pct_30d = uptimePct(totalS, totalW, totalF)
 
     const state = stateMap.get(t.id)
     const current_status = (state?.public_status ?? 'unknown') as PublicStatusTest['current_status']
     const window = {
-      problem_started_at: iso(state?.problem_started_at),
-      problem_ended_at: iso(state?.problem_ended_at),
+      problem_started_at: toIso(state?.problem_started_at),
+      problem_ended_at: toIso(state?.problem_ended_at),
       problem_worst: state?.problem_worst ?? null,
-      last_problem_at: iso(state?.last_problem_at),
+      last_problem_at: toIso(state?.last_problem_at),
     }
 
     return {
@@ -121,7 +114,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       `SELECT id, name, enabled, tags FROM tests ORDER BY created_at DESC`,
     )
     const { rows: udRows } = await pool.query<UdRow>(
-      `SELECT test_id, date::text AS date, success_count, failure_count
+      `SELECT test_id, date::text AS date, success_count, warn_count, failure_count
        FROM uptime_daily
        WHERE date >= (CURRENT_DATE - 29)
          AND date <= CURRENT_DATE`,
@@ -150,7 +143,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     if (tests.length === 0) return reply.status(404).send({ error: 'no tests found for this tag' })
     const testIds = tests.map(t => t.id)
     const { rows: udRows } = await pool.query<UdRow>(
-      `SELECT test_id, date::text AS date, success_count, failure_count
+      `SELECT test_id, date::text AS date, success_count, warn_count, failure_count
        FROM uptime_daily
        WHERE test_id = ANY($1)
          AND date >= (CURRENT_DATE - 29)
@@ -172,7 +165,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     )
     if (tests.length === 0) return reply.status(404).send({ error: 'not found' })
     const { rows: udRows } = await pool.query<UdRow>(
-      `SELECT test_id, date::text AS date, success_count, failure_count
+      `SELECT test_id, date::text AS date, success_count, warn_count, failure_count
        FROM uptime_daily
        WHERE test_id = $1
          AND date >= (CURRENT_DATE - 29)
@@ -224,11 +217,12 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
         test_id: string
         date: string
         success_count: number
+        warn_count: number
         failure_count: number
         avg_latency_ms: number | null
       }
       const { rows } = await pool.query<DayBucketRow>(
-        `SELECT test_id, date::text AS date, success_count, failure_count, avg_latency_ms
+        `SELECT test_id, date::text AS date, success_count, warn_count, failure_count, avg_latency_ms
          FROM uptime_daily
          WHERE test_id = ANY($1)
            AND date >= (CURRENT_DATE - 29)
@@ -246,12 +240,12 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
         dayStrings.push(new Date(t).toISOString().slice(0, 10))
       }
 
-      const byTest = new Map<string, Map<string, { s: number; f: number; avg: number | null }>>()
+      const byTest = new Map<string, Map<string, { s: number; w: number; f: number; avg: number | null }>>()
       for (const r of rows) {
         const d = typeof r.date === 'string' ? r.date.slice(0, 10) : (r.date as unknown as Date).toISOString().slice(0, 10)
         let m = byTest.get(r.test_id)
         if (!m) { m = new Map(); byTest.set(r.test_id, m) }
-        m.set(d, { s: Number(r.success_count), f: Number(r.failure_count), avg: r.avg_latency_ms !== null ? Number(r.avg_latency_ms) : null })
+        m.set(d, { s: Number(r.success_count), w: Number(r.warn_count ?? 0), f: Number(r.failure_count), avg: r.avg_latency_ms !== null ? Number(r.avg_latency_ms) : null })
       }
 
       const result: StatusBucketTest[] = tests.map(t => ({
@@ -267,6 +261,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
             bucket_start: bucketStart,
             bucket_end: bucketEnd,
             success_count: cell?.s ?? 0,
+            warn_count: cell?.w ?? 0,
             failure_count: cell?.f ?? 0,
             avg_latency_ms: cell?.avg ?? null,
           } satisfies StatusBucket
@@ -286,6 +281,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       test_id: string
       idx: number
       success_count: number
+      warn_count: number
       failure_count: number
       avg_latency_ms: number | null
     }
@@ -297,8 +293,9 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
            SELECT
              test_id,
              LEAST(FLOOR(EXTRACT(EPOCH FROM (started_at - $1::timestamptz)) / $2)::INT, 99) AS idx,
-             COUNT(*) FILTER (WHERE status = 'success')  AS success_count,
-             COUNT(*) FILTER (WHERE status != 'success') AS failure_count,
+             COUNT(*) FILTER (WHERE status = 'success')            AS success_count,
+             COUNT(*) FILTER (WHERE status = 'warn')               AS warn_count,
+             COUNT(*) FILTER (WHERE status IN (${FAILURE_SQL}))    AS failure_count,
              AVG(duration_ms)                            AS avg_latency_ms
            FROM test_runs
            WHERE started_at >= $1 AND started_at < $3
@@ -309,6 +306,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
          t.id AS test_id,
          b.idx,
          COALESCE(r.success_count, 0) AS success_count,
+         COALESCE(r.warn_count, 0) AS warn_count,
          COALESCE(r.failure_count, 0) AS failure_count,
          r.avg_latency_ms
        FROM tests t
@@ -329,6 +327,7 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
         bucket_start: new Date(startTime.getTime() + idx * bucketSecs * 1000).toISOString(),
         bucket_end: new Date(startTime.getTime() + (idx + 1) * bucketSecs * 1000).toISOString(),
         success_count: Number(row.success_count),
+        warn_count: Number(row.warn_count ?? 0),
         failure_count: Number(row.failure_count),
         avg_latency_ms: row.avg_latency_ms !== null ? Number(row.avg_latency_ms) : null,
       })

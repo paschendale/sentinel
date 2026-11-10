@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { TIMEOUT_TO_SCHEDULE_MAX_RATIO } from '@sentinel/shared'
+import { RUN_RESULT_LABELS, TIMEOUT_TO_SCHEDULE_MAX_RATIO, isFailure } from '@sentinel/shared'
 import type { TestStatus } from '@sentinel/shared'
 import { logger } from '../logger.js'
 import { getCompiledFn } from './compile.js'
@@ -137,14 +137,7 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   const assertionPassed = assertions.filter((a) => a.passed).length
   const assertionFailed = assertions.length - assertionPassed
 
-  const resultSummary =
-    status === 'success'
-      ? 'passed'
-      : status === 'warn'
-        ? 'warned'
-        : status === 'timeout'
-          ? 'timed out'
-          : 'failed'
+  const resultSummary = RUN_RESULT_LABELS[status].toLowerCase()
 
   runLog.info(
     {
@@ -178,10 +171,6 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
 interface RetryableTestInput extends TestInput {
   retries: number
   schedule_ms: number
-}
-
-function isFailure(status: TestStatus): boolean {
-  return status === 'fail' || status === 'timeout'
 }
 
 /**

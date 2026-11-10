@@ -52,6 +52,8 @@ export interface UptimeDaily {
   test_id: string
   date: string // YYYY-MM-DD
   success_count: number
+  /** Runs that passed with a warning. Neither a success nor a failure. */
+  warn_count: number
   failure_count: number
   avg_latency_ms: number
 }
@@ -121,14 +123,6 @@ export interface ChannelAssignment {
   event_types: NotificationEventType[]
 }
 
-export interface TestState {
-  test_id: string
-  last_status: TestStatus | null
-  consecutive_failures: number
-  last_notification_at: Date | null
-  last_run_at: Date | null
-}
-
 export interface TestSummary extends ProblemWindow {
   id: string
   name: string
@@ -163,6 +157,9 @@ export interface StatusBucket {
   bucket_start: string // ISO timestamp
   bucket_end: string   // ISO timestamp
   success_count: number
+  /** Runs that passed with a warning (status `warn`). Not counted in failure_count. */
+  warn_count: number
+  /** Failed and timed-out runs. */
   failure_count: number
   avg_latency_ms: number | null
 }

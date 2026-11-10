@@ -1,8 +1,12 @@
 import type { TestStatus } from '@sentinel/shared'
+import { FAILURE_STATUSES } from '@sentinel/shared'
 import type { RunResult } from '../executor/run.js'
 import { pool } from './pool.js'
 import { triggerNotifications } from '../notifier/dispatch.js'
 import { recordTestResult } from '../metrics/index.js'
+
+/** SQL list of the statuses that count as failures, e.g. `'fail','timeout'`. */
+const FAILURE_SQL = FAILURE_STATUSES.map((s) => `'${s}'`).join(',')
 
 let buffer: RunResult[] = []
 let flusherTimer: ReturnType<typeof setInterval> | null = null
@@ -121,13 +125,14 @@ async function flushTestState(rows: RunResult[]): Promise<void> {
          v.test_id,
          v.last_status,
          v.last_run_at,
-         CASE WHEN v.last_status = 'success' OR v.last_status = 'warn' THEN 0
-              ELSE COALESCE(ts.consecutive_failures, 0) + 1
+         -- mirrors nextConsecutiveFailures() and publicStatusFor() in packages/shared/src/state.ts
+         CASE WHEN v.last_status IN (${FAILURE_SQL}) THEN COALESCE(ts.consecutive_failures, 0) + 1
+              ELSE 0
          END AS consecutive_failures,
          CASE
            WHEN v.last_status = 'success' THEN 'up'
-           WHEN v.last_status = 'warn' THEN 'degraded'
-           WHEN (COALESCE(ts.consecutive_failures, 0) + 1) >= t.failure_threshold THEN 'down'
+           WHEN v.last_status IN (${FAILURE_SQL})
+                AND (COALESCE(ts.consecutive_failures, 0) + 1) >= GREATEST(t.failure_threshold, 1) THEN 'down'
            ELSE 'degraded'
          END AS public_status,
          COALESCE(ts.public_status, 'unknown') AS prev_public_status,

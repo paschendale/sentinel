@@ -1,5 +1,5 @@
 import { request } from 'undici'
-import { isBotChannelType, type IncidentThread, type NotificationChannelType, type TestStatus } from '@sentinel/shared'
+import { isBotChannelType, isPassing, type IncidentThread, type NotificationChannelType, type TestStatus } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import {
   insertNotificationEvent,
@@ -39,12 +39,10 @@ type Event = 'fail' | 'warning' | 'recovery'
 
 async function runNotifications(candidates: NotificationCandidate[]): Promise<void> {
   const actionable = candidates.filter(c => {
-    const prevNonSuccess = c.prev_status !== null && c.prev_status !== 'success'
-    if (c.new_status === 'warn') return true
-    // Always evaluate failing tests so missed threshold crossings can still notify.
-    if (c.new_status !== 'success') return true
-    // Recovery only matters on actual non-success -> success transition.
-    return prevNonSuccess && c.new_status === 'success'
+    // Warned and failing runs are always evaluated, so a missed threshold crossing can still notify.
+    if (!isPassing(c.new_status)) return true
+    // A passing run only matters right after a run that did not pass (recovery).
+    return c.prev_status !== null && !isPassing(c.prev_status)
   })
   if (actionable.length === 0) return
 
@@ -86,7 +84,7 @@ async function runNotifications(candidates: NotificationCandidate[]): Promise<vo
     const cooldown = state?.cooldown_ms ?? 86_400_000
     const threads = threadsByTest.get(candidate.test_id) ?? []
 
-    const eventType: Event = candidate.new_status === 'success' ? 'recovery'
+    const eventType: Event = isPassing(candidate.new_status) ? 'recovery'
       : candidate.new_status === 'warn' ? 'warning'
       : 'fail'
 

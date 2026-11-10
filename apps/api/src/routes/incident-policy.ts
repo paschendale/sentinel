@@ -1,4 +1,5 @@
 import type { Incident, TestStatus } from '@sentinel/shared'
+import { isFailure } from '@sentinel/shared'
 
 interface IncidentRun {
   started_at: Date
@@ -24,7 +25,15 @@ export function buildIncidentsFromRuns(
   let openIncident: OpenIncident | null = null
 
   for (const run of runs) {
-    if (run.status !== 'success') {
+    // A warned run is not a failure: it resets the streak but does not end an open incident
+    // (the test is Degraded, not Operational).
+    if (run.status === 'warn') {
+      consecutiveFailures = 0
+      streakStart = null
+      if (openIncident !== null) openIncident.ended_at = run.finished_at
+      continue
+    }
+    if (isFailure(run.status)) {
       if (consecutiveFailures === 0) {
         streakStart = run.started_at
       }

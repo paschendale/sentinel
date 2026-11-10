@@ -1,9 +1,11 @@
 import { AGG_RETENTION_DAYS, NOTIFICATION_RETENTION_DAYS, PRUNE_BATCH_SIZE, RAW_RETENTION_DAYS } from '../config.js'
+import { FAILURE_STATUSES } from '@sentinel/shared'
 import { pruneClosedThreads } from './queries/incident-threads.js'
 import { logger } from '../logger.js'
 import { pool } from './pool.js'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+const FAILURE_SQL = FAILURE_STATUSES.map((s) => `'${s}'`).join(',')
 export const FUTURE_PARTITIONS_TO_CREATE = 2
 
 let timeoutHandle: ReturnType<typeof setTimeout> | null = null
@@ -67,12 +69,13 @@ export async function runAggregation(): Promise<void> {
 
   try {
     await pool.query(
-      `INSERT INTO uptime_daily (test_id, date, success_count, failure_count, avg_latency_ms)
+      `INSERT INTO uptime_daily (test_id, date, success_count, warn_count, failure_count, avg_latency_ms)
        SELECT
          test_id,
          started_at::date                                                AS date,
          COUNT(*) FILTER (WHERE status = 'success')                     AS success_count,
-         COUNT(*) FILTER (WHERE status IN ('fail', 'timeout'))          AS failure_count,
+         COUNT(*) FILTER (WHERE status = 'warn')                        AS warn_count,
+         COUNT(*) FILTER (WHERE status IN (${FAILURE_SQL}))             AS failure_count,
          ROUND(AVG(duration_ms)::numeric, 2)                            AS avg_latency_ms
        FROM test_runs
        WHERE started_at >= $1::date
@@ -80,6 +83,7 @@ export async function runAggregation(): Promise<void> {
        GROUP BY test_id, started_at::date
        ON CONFLICT (test_id, date) DO UPDATE SET
          success_count  = EXCLUDED.success_count,
+         warn_count     = EXCLUDED.warn_count,
          failure_count  = EXCLUDED.failure_count,
          avg_latency_ms = EXCLUDED.avg_latency_ms`,
       [yesterdayStr, tomorrowStr],

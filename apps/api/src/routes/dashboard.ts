@@ -1,14 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import type { StatusSection, TestSummary } from '@sentinel/shared'
-import { STATUS_SECTIONS, compareInSection, statusSection } from '@sentinel/shared'
+import { STATUS_SECTIONS, compareInSection, statusSection, toIso } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 
 type SummaryRow = Omit<TestSummary, 'section'>
-
-function iso(v: unknown): string | null {
-  if (v === null || v === undefined) return null
-  return v instanceof Date ? v.toISOString() : String(v)
-}
 
 /** Parses `?section=critical,warning`; null when absent (no filter). */
 export function parseSections(raw: string | undefined): Set<StatusSection> | null | 'invalid' {
@@ -48,9 +43,10 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
          ts.problem_ended_at,
          ts.problem_worst,
          ts.last_problem_at,
+         -- uptimePct(): warned runs count as available
          ROUND(
-           100.0 * SUM(ud.success_count)::numeric /
-           NULLIF(SUM(ud.success_count) + SUM(ud.failure_count), 0)
+           100.0 * (SUM(ud.success_count) + SUM(ud.warn_count))::numeric /
+           NULLIF(SUM(ud.success_count) + SUM(ud.warn_count) + SUM(ud.failure_count), 0)
          )::integer AS pass_rate_7d,
          ROUND(AVG(ud.avg_latency_ms))::integer AS avg_latency_ms
        FROM tests t
@@ -65,10 +61,10 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
     )
     const normalized = rows.map((r) => ({
       ...r,
-      last_run_at: iso(r.last_run_at),
-      problem_started_at: iso(r.problem_started_at),
-      problem_ended_at: iso(r.problem_ended_at),
-      last_problem_at: iso(r.last_problem_at),
+      last_run_at: toIso(r.last_run_at),
+      problem_started_at: toIso(r.problem_started_at),
+      problem_ended_at: toIso(r.problem_ended_at),
+      last_problem_at: toIso(r.last_problem_at),
     }))
     const result = withSections(normalized)
     return reply.send(sections === null ? result : result.filter((r) => sections.has(r.section)))
