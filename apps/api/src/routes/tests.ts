@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid'
 import { CreateTestSchema, UpdateTestSchema, CreateAssignmentSchema } from '@sentinel/shared'
 import type { AssertionResult, Incident, Test, TestRun } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
-import { invalidateCache } from '../executor/compile.js'
+import { compileError, invalidateCache } from '../executor/compile.js'
 import { testEvents } from '../events.js'
 import { getAssignedChannels, getEffectiveChannelsForTest, addAssignment, removeAssignment } from '../db/queries/assignments.js'
 import { normalizeTags } from '../tags/normalize.js'
@@ -21,6 +21,8 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: parsed.error.flatten() })
     }
     const d = parsed.data
+    const syntax = compileError(d.code)
+    if (syntax !== null) return reply.status(400).send({ error: `code does not compile: ${syntax}` })
     const tags = normalizeTags(d.tags)
     const id = nanoid()
     let rows: Test[]
@@ -59,7 +61,11 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     for (let i = 0; i < body.tests.length; i++) {
       const parsed = CreateTestSchema.safeParse(body.tests[i])
       if (!parsed.success) errors[i] = parsed.error.flatten()
-      else valid.push({ ...parsed.data, tags: normalizeTags(parsed.data.tags) })
+      else {
+        const syntax = compileError(parsed.data.code)
+        if (syntax !== null) errors[i] = `code does not compile: ${syntax}`
+        else valid.push({ ...parsed.data, tags: normalizeTags(parsed.data.tags) })
+      }
     }
     if (Object.keys(errors).length > 0) {
       return reply.status(400).send({ error: 'validation failed', errors })
@@ -170,6 +176,10 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     const parsed = UpdateTestSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: parsed.error.flatten() })
+    }
+    if (parsed.data.code !== undefined) {
+      const syntax = compileError(parsed.data.code)
+      if (syntax !== null) return reply.status(400).send({ error: `code does not compile: ${syntax}` })
     }
     const data = parsed.data.tags === undefined
       ? parsed.data

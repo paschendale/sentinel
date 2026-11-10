@@ -12,6 +12,17 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
   ...args: string[]
 ) => CompiledFn
 
+/** Compiles test code without caching it. Returns the syntax error message, or null when it compiles. */
+export function compileError(code: string): string | null {
+  try {
+    new AsyncFunction('ctx', code)
+    return null
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
+/** Throws the SyntaxError when the code does not compile. */
 export function getCompiledFn(testId: string, code: string): CompiledFn {
   const entry = cache.get(testId)
   if (entry && entry.code === code) {

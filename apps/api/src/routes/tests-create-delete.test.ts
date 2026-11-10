@@ -53,3 +53,34 @@ describe('DELETE /tests/:id', () => {
     expect(cleanup?.[1]).toEqual(['t-1'])
   })
 })
+
+describe('compile on save', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+  })
+
+  const base = { name: 'x', schedule_ms: 60_000, timeout_ms: 5_000, enabled: false }
+
+  it('rejects POST /tests with code that does not compile, before touching the database', async () => {
+    const app = await buildServer()
+    const res = await app.inject({ method: 'POST', url: '/tests', headers: auth, payload: { ...base, code: 'return (' } })
+    expect(res.statusCode).toBe(400)
+    expect((res.json() as { error: string }).error).toMatch(/^code does not compile: /)
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('rejects PATCH /tests/:id with code that does not compile', async () => {
+    const app = await buildServer()
+    const res = await app.inject({ method: 'PATCH', url: '/tests/t-1', headers: auth, payload: { code: 'const = 1' } })
+    expect(res.statusCode).toBe(400)
+    expect((res.json() as { error: string }).error).toMatch(/^code does not compile: /)
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('accepts code that compiles, including top-level await', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: 't-1', enabled: false }] } as never)
+    const app = await buildServer()
+    const res = await app.inject({ method: 'POST', url: '/tests', headers: auth, payload: { ...base, code: 'const r = await ctx.http.get("https://x"); return r.status === 200' } })
+    expect(res.statusCode).toBe(201)
+  })
+})

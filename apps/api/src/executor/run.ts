@@ -49,7 +49,26 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   let status: TestStatus = 'success'
   let errorMessage: string | null = null
 
-  const fn = getCompiledFn(test.id, test.code)
+  let fn: ReturnType<typeof getCompiledFn>
+  try {
+    fn = getCompiledFn(test.id, test.code)
+  } catch (err) {
+    // Stored code that does not compile (saved before compile-on-save, or edited in the
+    // database) is a failed run, recorded like any other, not just a log line.
+    const message = `code does not compile: ${err instanceof Error ? err.message : String(err)}`
+    runLog.warn({ event: 'test.compile_error', error_message: message }, `test code does not compile: test_id=${test.id}`)
+    const finishedAt = new Date()
+    return {
+      id: runId,
+      test_id: test.id,
+      started_at: startedAt,
+      finished_at: finishedAt,
+      status: 'fail',
+      duration_ms: finishedAt.getTime() - startMs,
+      error_message: message,
+      assertions: [],
+    }
+  }
   // Aborted when the run times out, so pending ctx I/O is cancelled instead of outliving the run.
   const runAbort = new AbortController()
   const { ctx, getAssertions, getWarnings, getInFlight } = buildCtx({

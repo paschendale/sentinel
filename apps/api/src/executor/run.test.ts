@@ -159,3 +159,12 @@ describe('runTestWithRetries', () => {
     expect(hits).toBe(1)
   })
 })
+
+describe('stored code that does not compile', () => {
+  it('records a failed run with the syntax error instead of throwing', async () => {
+    const result = await runTest({ id: 'bad-syntax', code: 'return (', timeout_ms: 1_000 }, { trigger: 'scheduler' })
+    expect(result.status).toBe('fail')
+    expect(result.error_message).toMatch(/^code does not compile: /)
+    expect(result.test_id).toBe('bad-syntax')
+  })
+})
