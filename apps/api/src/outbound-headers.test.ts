@@ -15,14 +15,14 @@ describe('withSentinelHeaders', () => {
   it('adds a Sentinel User-Agent and no instance header when SENTINEL_INSTANCE is unset', async () => {
     const { withSentinelHeaders } = await load()
     expect(withSentinelHeaders()).toEqual({
-      'user-agent': 'Sentinel (+https://github.com/paschendale/sentinel)',
+      'user-agent': 'Sentinel (+https://github.com/territorial-dev/sentinel)',
     })
   })
 
   it('names the instance in the User-Agent and X-Sentinel-Instance when configured', async () => {
     const { withSentinelHeaders } = await load('sao-paulo-1')
     expect(withSentinelHeaders({ accept: 'text/plain' })).toEqual({
-      'user-agent': 'Sentinel (+https://github.com/paschendale/sentinel; instance=sao-paulo-1)',
+      'user-agent': 'Sentinel (+https://github.com/territorial-dev/sentinel; instance=sao-paulo-1)',
       'x-sentinel-instance': 'sao-paulo-1',
       accept: 'text/plain',
     })

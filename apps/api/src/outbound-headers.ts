@@ -1,6 +1,6 @@
 import { SENTINEL_INSTANCE } from './config.js'
 
-export const USER_AGENT_URL = 'https://github.com/paschendale/sentinel'
+export const USER_AGENT_URL = 'https://github.com/territorial-dev/sentinel'
 
 export const SENTINEL_USER_AGENT = SENTINEL_INSTANCE
   ? `Sentinel (+${USER_AGENT_URL}; instance=${SENTINEL_INSTANCE})`

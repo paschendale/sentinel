@@ -42,7 +42,7 @@ export function PublicFooter() {
     <footer className="sn-pubfoot">
       <span>Times in {tz === 'utc' ? 'UTC' : 'your local time'} · refreshes every 60 s</span>
       <span>
-        Powered by <a href="https://github.com/paschendale/sentinel">sentinel</a>, open source from territorial.dev
+        Powered by <a href="https://github.com/territorial-dev/sentinel">sentinel</a>, open source from territorial.dev
       </span>
     </footer>
   )
