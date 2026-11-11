@@ -50,6 +50,8 @@ COPY --from=build-api /app/apps/api/dist /app/apps/api/dist
 COPY --from=build-api /app/apps/api/src/db/migrations /app/apps/api/dist/db/migrations
 # package.json needed so Node resolves the dist as ESM ("type": "module")
 COPY --from=build-api /app/apps/api/package.json /app/apps/api/package.json
+# Data files shipped with the API (empty upstream; see apps/api/data/README.md)
+COPY --from=build-api /app/apps/api/data /app/apps/api/data
 COPY --from=build-api /app/VERSION /app/apps/api/VERSION
 
 # Web: outputFileTracingRoot places standalone relative to repo root, so server.js
