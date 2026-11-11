@@ -5,6 +5,7 @@ import { logger } from '../logger.js'
 import { getCompiledFn } from './compile.js'
 import { buildCtx } from './ctx.js'
 import { getSecretsSnapshot } from './secrets-cache.js'
+import { fork } from '../fork/extension.js'
 
 export type RunTrigger = 'scheduler' | 'api-post' | 'api-sse' | 'mcp'
 
@@ -114,6 +115,7 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
       )
     },
   })
+  addForkCtx(ctx as unknown as Record<string, unknown>, runAbort.signal, runLog)
 
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -242,4 +244,16 @@ export async function runTestWithRetries(test: RetryableTestInput, options: RunT
     )
   }
   return result
+}
+
+/** Adds a fork's ctx members (apps/api/src/fork/extension.ts); upstream members are never replaced. */
+function addForkCtx(ctx: Record<string, unknown>, signal: AbortSignal, log: typeof logger): void {
+  if (!fork.ctx) return
+  for (const [name, value] of Object.entries(fork.ctx({ signal, log }))) {
+    if (name in ctx) {
+      log.warn({ event: 'fork.ctx_conflict', name }, `fork ctx member "${name}" ignored: upstream already defines it`)
+      continue
+    }
+    ctx[name] = value
+  }
 }

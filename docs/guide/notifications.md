@@ -8,9 +8,9 @@ What the states mean, and how incidents open and resolve: [Status and incidents]
 
 | Event (UI) | Wire value | Sent when |
 | --- | --- | --- |
-| Outage | `fail` | Failed or Timed out runs in a row reach the test's `failure_threshold`, outside the cooldown |
+| Outage | `fail` | The test reaches Outage: Failed or Timed out runs in a row reach its `failure_threshold` (and, with a [status window](status-and-incidents.md#the-status-window), it has been failing for the whole window), outside the cooldown |
 | Degraded | `warning` | A run is Warned (`ctx.warn`), outside the warning cooldown. No threshold |
-| Recovered | `recovery` | A run passes after an Outage or Degraded alert was sent |
+| Recovered | `recovery` | The test is Operational again (with a status window, after passing for the whole window) and an Outage or Degraded alert was sent |
 
 Rules:
 

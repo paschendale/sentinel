@@ -7,9 +7,10 @@ const config: NextConfig = {
   // so standalone output contains apps/web/server.js (not standalone/server.js)
   outputFileTracingRoot: path.join(__dirname, '../../'),
   devIndicators: false,
-  // Signed-in pages moved under /admin; the old paths keep working.
+  // Signed-in pages moved under /admin and the status page lives at /; the old paths keep working.
   async redirects() {
     return [
+      { source: '/status', destination: '/', permanent: true },
       { source: '/login', destination: '/admin', permanent: true },
       { source: '/tests', destination: '/admin/tests', permanent: true },
       { source: '/tests/:path*', destination: '/admin/tests/:path*', permanent: true },

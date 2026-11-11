@@ -1130,3 +1130,14 @@ API: `GET /dashboard` returns `section`, `public_status`, `consecutive_failures`
 - The design system's rules and component guidelines now live in `docs/dev/DESIGN.md`, since the handoff folder they came from is deleted.
 
 **Deferred:** `GET /status/test/:id/events` is public and still returns run `error_message`s; the web no longer calls it and it stays for compatibility, but it should drop the field or require auth in a later release. Moving the Docker images to a `territorial-dev` namespace.
+
+## 2026-11-11 · Forks · Fork slots, status window, /status redirect
+
+**What was built:** Extension points so a fork adds behaviour without editing upstream files (`apps/api/src/fork/extension.ts` with the `ForkExtension` shape in `apps/api/src/extensions.ts`, and `apps/web/fork/status-lead.tsx` on the public status page). An optional status window, `STATUS_WINDOW_MINUTES`: Outage also needs a full window of failing, and after trouble Operational needs a full window of passing. `/status` redirects permanently to `/`.
+**Files changed:** `packages/shared/src/state.ts` (`StatusWindow`, `publicStatusFor`), `apps/api/src/db/result-buffer.ts` (streak starts and the window in the state upsert), migration `023_test_state_streaks.sql`, `apps/api/src/notifier/dispatch.ts`, `apps/api/src/config.ts`, `server.ts`, `index.ts`, `executor/run.ts`, `routes/mcp.ts`, `apps/web/app/(public)/_components/status-page.tsx`, `apps/web/next.config.ts`, docs (FORKING, CONTRIBUTING rule 30, guides).
+**Decisions:**
+- Alerts now follow state transitions (Outage gates fail alerts; returning to Operational is the recovery) instead of the raw run result. With the window off this sends exactly the alerts it did before; with it on, alerts, incidents and the dashboard agree.
+- The streak columns reuse the names the station-monitor fork already had (`failing_since`, `succeeding_since`), added with `IF NOT EXISTS`, so that fork's database needs no change. `succeeding_since` is now kept for every passing streak, not only during recovery.
+- Fork routes under `/status/` are public through the existing rule, so the extension has no separate public-route list. Fork `ctx` members cannot replace upstream ones (a conflict is logged and ignored).
+- One web slot (`StatusLead`) instead of a replaceable home page: the status list stays upstream's, and a fork leads it with its own content on `/` and on tag pages.
+**Deferred:** the status window is not shown in the UI (the section text still describes the threshold); a page could read it from a public endpoint later.

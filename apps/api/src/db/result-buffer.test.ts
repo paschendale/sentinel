@@ -245,7 +245,7 @@ describe('flush', () => {
     expect(callsMatching('INSERT INTO test_runs')).toHaveLength(2)
   })
 
-  it('notifies after commit with the previous status', async () => {
+  it('notifies after commit with the state change', async () => {
     clientQuery.mockImplementation((sql: string, params?: unknown[]) => {
       if (sql.includes('INSERT INTO test_state')) {
         return Promise.resolve({ rows: [{ test_id: 'test-1', test_name: 'T', public_status: 'degraded', prev_public_status: 'up', prev_last_status: 'success', consecutive_failures: 1 }] })
@@ -255,7 +255,7 @@ describe('flush', () => {
     enqueue(makeResult({ status: 'fail', error_message: 'nope' }))
     await flush()
     expect(triggerNotifications).toHaveBeenCalledWith([
-      { test_id: 'test-1', new_status: 'fail', prev_status: 'success', error_message: 'nope', duration_ms: 100, incident_id: null, incident_transition: null },
+      { test_id: 'test-1', new_status: 'fail', prev_public_status: 'up', public_status: 'degraded', error_message: 'nope', duration_ms: 100, incident_id: null, incident_transition: null },
     ])
   })
 })
@@ -278,7 +278,7 @@ describe('test_state upsert', () => {
     enqueue(makeResult({ id: 'r-late', test_id: 'test-1', finished_at: new Date('2026-01-01T00:00:02Z'), status: 'success' }))
     await flush()
     const params = callsMatching('INSERT INTO test_state')[0]![1] as unknown[]
-    expect(params).toEqual(['test-1', 'success', new Date('2026-01-01T00:00:02Z')])
+    expect(params).toEqual(['test-1', 'success', new Date('2026-01-01T00:00:02Z'), 0])
   })
 
   it('builds correct SQL with ON CONFLICT upsert', async () => {

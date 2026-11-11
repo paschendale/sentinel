@@ -52,6 +52,14 @@ export const RAW_RETENTION_DAYS = parseIntEnvInRange('RAW_RETENTION_DAYS', 7, 1,
 export const AGG_RETENTION_DAYS = parseIntEnvInRange('AGG_RETENTION_DAYS', 90, 30, 180)
 /** Days of notification_events (the notifier's audit log of evaluated, skipped, sent and failed alerts) to keep. */
 export const NOTIFICATION_RETENTION_DAYS = parseIntEnvInRange('NOTIFICATION_RETENTION_DAYS', 90, 7, 365)
+
+/**
+ * Status window in minutes; 0 (the default) turns it off. When set, a test reaches Outage only
+ * after failing for the whole window (and its failure threshold), and after trouble it returns
+ * to Operational only after passing for the whole window. See StatusWindow in @sentinel/shared.
+ */
+export const STATUS_WINDOW_MINUTES = parseIntEnvInRange('STATUS_WINDOW_MINUTES', 0, 0, 1440)
+export const STATUS_WINDOW_MS = STATUS_WINDOW_MINUTES * 60_000
 export const PRUNE_BATCH_SIZE = parseIntEnvInRange('PRUNE_BATCH_SIZE', 5000, 100, 50000)
 
 /** Directory `ctx.ftp.get` and `ctx.s3.get` write temp downloads to. Files are deleted immediately after each call. */

@@ -2,10 +2,11 @@ import type { PublicIncident, PublicStatusTest } from '@sentinel/shared'
 import { apiGet } from '../../../lib/api-server'
 import { PUBLIC_REVALIDATE, statusTitle } from '../../../lib/site'
 import { ApiErrorCallout, PublicHeader, TagFilters } from '../../_components/ui'
+import { StatusLead } from '../../../fork/status-lead'
 import { StatusBoard } from './status-board'
 
 /**
- * The public status page: `/`, `/status` and `/status/[tag]`. Fetches on the server; the
+ * The public status page: `/` and `/status/[tag]` (`/status` redirects to `/`). Fetches on the server; the
  * board fetches history for the chosen period in the browser and refreshes every 60 s.
  */
 export async function StatusPage({ tag }: { tag?: string }) {
@@ -22,6 +23,7 @@ export async function StatusPage({ tag }: { tag?: string }) {
       <PublicHeader title={title}>
         <TagFilters tags={tagList} current={tag ?? null} allHref="/" hrefFor={(t) => `/status/${encodeURIComponent(t)}`} external />
       </PublicHeader>
+      <StatusLead {...(tag === undefined ? {} : { tag })} />
       {status.ok ? (
         <StatusBoard
           tests={status.data.filter((t) => t.enabled)}

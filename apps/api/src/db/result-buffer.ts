@@ -7,6 +7,7 @@ import { pool } from './pool.js'
 import { triggerNotifications } from '../notifier/dispatch.js'
 import { applyIncidentTransitions, type IncidentLink } from './queries/incidents.js'
 import { recordTestResult } from '../metrics/index.js'
+import { STATUS_WINDOW_MS } from '../config.js'
 
 const log = logger.child({ component: 'result-buffer' })
 
@@ -190,7 +191,8 @@ async function writeChunk(rows: RunResult[]): Promise<void> {
       transitions.map((t) => ({
         test_id: t.test_id,
         new_status: t.run.status,
-        prev_status: t.prev_last_status,
+        prev_public_status: t.prev_public_status,
+        public_status: t.public_status,
         error_message: t.run.error_message,
         duration_ms: t.run.duration_ms,
         incident_id: incidents.get(t.test_id)?.incident_id ?? null,
@@ -277,10 +279,14 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
     values.push(r.test_id, r.status, r.finished_at)
     return `($${b + 1}::text,$${b + 2}::text,$${b + 3}::timestamptz)`
   })
+  values.push(STATUS_WINDOW_MS)
+  const windowParam = `$${values.length}::bigint`
+  const windowElapsed = (since: string) => `v.last_run_at - ${since} >= ${windowParam} * interval '1 millisecond'`
 
-  // LEFT JOIN reads the previous state so consecutive_failures can be incremented and the
-  // problem window (problem_started_at/ended_at/worst, last_problem_at) maintained; JOIN tests
-  // reads failure_threshold so public_status is computed atomically. The final SELECT hands the
+  // LEFT JOIN reads the previous state so consecutive_failures can be incremented, the streak
+  // starts (failing_since/succeeding_since) carried for the status window and the problem window
+  // (problem_started_at/ended_at/worst, last_problem_at) maintained; JOIN tests reads
+  // failure_threshold so public_status is computed atomically. The final SELECT hands the
   // transition (previous → new state) back to the caller.
   const { rows: out } = await client.query<UpsertRow>(
     `WITH v(test_id, last_status, last_run_at) AS (VALUES ${placeholders.join(',')}),
@@ -296,11 +302,18 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
               ELSE 0
          END AS consecutive_failures,
          CASE
-           WHEN v.last_status = 'success' THEN 'up'
+           WHEN v.last_status = 'success' THEN
+             CASE WHEN ${windowParam} > 0
+                       AND COALESCE(ts.public_status, 'unknown') IN ('down', 'degraded')
+                       AND NOT (${windowElapsed('s.succeeding_since')}) THEN 'degraded'
+                  ELSE 'up' END
            WHEN v.last_status IN (${FAILURE_SQL})
-                AND (COALESCE(ts.consecutive_failures, 0) + 1) >= GREATEST(t.failure_threshold, 1) THEN 'down'
+                AND (COALESCE(ts.consecutive_failures, 0) + 1) >= GREATEST(t.failure_threshold, 1)
+                AND (${windowParam} = 0 OR ${windowElapsed('s.failing_since')}) THEN 'down'
            ELSE 'degraded'
          END AS public_status,
+         s.failing_since,
+         s.succeeding_since,
          ts.last_status AS prev_last_status,
          COALESCE(ts.public_status, 'unknown') AS prev_public_status,
          ts.problem_started_at AS prev_started_at,
@@ -310,9 +323,16 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
        FROM v
        LEFT JOIN test_state ts ON ts.test_id = v.test_id
        JOIN tests t ON t.id = v.test_id
+       -- the start of the streak this run belongs to: kept while the streak goes on, set on its first run
+       CROSS JOIN LATERAL (
+         SELECT
+           CASE WHEN v.last_status IN (${FAILURE_SQL}) THEN COALESCE(ts.failing_since, v.last_run_at) END AS failing_since,
+           CASE WHEN v.last_status = 'success' THEN COALESCE(ts.succeeding_since, v.last_run_at) END AS succeeding_since
+       ) s
      ),
      upserted AS (
        INSERT INTO test_state (test_id, last_status, consecutive_failures, last_run_at, public_status,
+                               failing_since, succeeding_since,
                                problem_started_at, problem_ended_at, problem_worst, last_problem_at)
        SELECT
          test_id,
@@ -320,6 +340,8 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
          consecutive_failures,
          last_run_at,
          public_status,
+         failing_since,
+         succeeding_since,
          -- a new streak starts when a non-passing state follows a passing (or unknown) one
          CASE WHEN public_status <> 'up' AND prev_public_status IN ('up', 'unknown') THEN last_run_at
               ELSE prev_started_at END,
@@ -338,6 +360,8 @@ async function upsertTestState(client: pg.PoolClient, rows: RunResult[]): Promis
          consecutive_failures = EXCLUDED.consecutive_failures,
          last_run_at          = EXCLUDED.last_run_at,
          public_status        = EXCLUDED.public_status,
+         failing_since        = EXCLUDED.failing_since,
+         succeeding_since     = EXCLUDED.succeeding_since,
          problem_started_at   = EXCLUDED.problem_started_at,
          problem_ended_at     = EXCLUDED.problem_ended_at,
          problem_worst        = EXCLUDED.problem_worst,

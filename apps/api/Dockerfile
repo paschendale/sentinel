@@ -24,6 +24,10 @@ WORKDIR /app
 
 COPY --from=build /api-prod/node_modules /app/node_modules
 COPY --from=build /app/apps/api/dist /app/dist
+# SQL migrations are not processed by tsc: copy them from the source
+COPY --from=build /app/apps/api/src/db/migrations /app/dist/db/migrations
+# Data files shipped with the API (empty upstream; see apps/api/data/README.md)
+COPY --from=build /app/apps/api/data /app/data
 COPY --from=build /app/VERSION /app/VERSION
 
 ENV NODE_ENV=production

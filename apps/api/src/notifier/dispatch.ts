@@ -1,5 +1,5 @@
 import pLimit from 'p-limit'
-import { isBotChannelType, isPassing, type IncidentThread, type NotificationChannelType, type TestStatus } from '@sentinel/shared'
+import { isBotChannelType, isPassing, type IncidentThread, type NotificationChannelType, type PublicStatusOutcome, type TestStatus } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import {
   flushNotificationEvents,
@@ -28,8 +28,11 @@ import { TransportError } from './transports/types.js'
 
 export interface NotificationCandidate {
   test_id: string
+  /** This run's result: picks the event (a pass is a recovery, a warning a warning, else a fail). */
   new_status: TestStatus
-  prev_status: TestStatus | null
+  /** The test's state before and after this run: Outage gates fail alerts, the return to Operational is the recovery. */
+  prev_public_status: PublicStatusOutcome
+  public_status: Exclude<PublicStatusOutcome, 'unknown'>
   error_message: string | null
   duration_ms: number
   /** The stored incident this test belongs to after this run, if any. */
@@ -53,10 +56,12 @@ type Event = 'fail' | 'warning' | 'recovery'
 export async function runNotifications(candidates: NotificationCandidate[]): Promise<void> {
   for (const c of candidates) incidentOfTest.set(c.test_id, c.incident_id ?? null)
   const actionable = candidates.filter(c => {
-    // Warned and failing runs are always evaluated, so a missed threshold crossing can still notify.
+    // Warned and failing runs are always evaluated, so a missed Outage can still notify and open
+    // bot threads get their updates.
     if (!isPassing(c.new_status)) return true
-    // A passing run only matters right after a run that did not pass (recovery).
-    return c.prev_status !== null && !isPassing(c.prev_status)
+    // A passing run only matters when it brings the test back to Operational (recovery). With a
+    // status window that is the first pass after a full window of passing, not the first pass.
+    return c.public_status === 'up' && (c.prev_public_status === 'down' || c.prev_public_status === 'degraded')
   })
   if (actionable.length === 0) return
 
@@ -152,8 +157,9 @@ async function evaluateCandidate(
     }
     await dispatchForTest(ctx, 'warning', null, threads)
   } else if (eventType === 'fail') {
-    // fail/timeout: check per-test threshold and cooldown (last_notification_at only — not affected by warnings)
-    if (consecutive < threshold) {
+    // fail/timeout: alert only in Outage (the failure threshold, plus the status window when set),
+    // then apply the cooldown (last_notification_at only — not affected by warnings)
+    if (candidate.public_status !== 'down') {
       await touchOpenIncidents('fail', ctx, threads)
       return
     }
