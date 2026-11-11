@@ -1,3 +1,15 @@
+# [1.32.0](https://github.com/territorial-dev/sentinel/compare/v1.31.0...v1.32.0) (2026-11-11)
+
+
+### Bug Fixes
+
+* **api:** ship SQL migrations in the API-only image, and an apps/api/data folder in both images ([2f9ccd6](https://github.com/territorial-dev/sentinel/commit/2f9ccd699b82885da9b6f9ab9eb1c24b52ed6563))
+
+
+### Features
+
+* **api:** fork slots, an optional status window, and /status redirects to / ([adb0eda](https://github.com/territorial-dev/sentinel/commit/adb0eda640ca1a37c90d0993d337484f2cbf1dc1))
+
 # [1.31.0](https://github.com/paschendale/sentinel/compare/v1.30.0...v1.31.0) (2026-11-11)
 
 
