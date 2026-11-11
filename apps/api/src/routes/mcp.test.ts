@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Upstream's own tools and text, whatever a fork adds through its extension.
+vi.mock('../fork/extension.js', () => ({ fork: {} }))
+
 vi.mock('../db/pool.js', () => ({
   pool: {
     query: vi.fn(),
