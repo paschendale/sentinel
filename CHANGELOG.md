@@ -1,3 +1,36 @@
+# [1.31.0](https://github.com/paschendale/sentinel/compare/v1.30.0...v1.31.0) (2026-11-11)
+
+
+### Bug Fixes
+
+* **api:** MCP text in the shared vocabulary, real server version ([ee47827](https://github.com/paschendale/sentinel/commit/ee47827b5661af6608ac8b13eecd653d8e2e1287))
+* **api:** return one error shape from every route ([c1580e2](https://github.com/paschendale/sentinel/commit/c1580e24699c630a76964f7b65eff01946a21f92))
+* **db:** isolate rejected rows in the result buffer instead of requeueing the batch ([d2ab2e6](https://github.com/paschendale/sentinel/commit/d2ab2e64e63a27d3fb61d62a1ab67db46f0e8208))
+* **executor:** cap response bodies of ctx.http, ctx.k8s and ctx.s3.list ([f18e7c4](https://github.com/paschendale/sentinel/commit/f18e7c4456ecdc46de33783b57bf118673f0cf91))
+* **executor:** compile test code on save and record a failed run when it does not compile ([835a57b](https://github.com/paschendale/sentinel/commit/835a57b26a2f763db9661077382638498f7eb51b))
+* **notifier:** say Outage, Degraded and Recovered in alerts, drop emoji ([4b3e297](https://github.com/paschendale/sentinel/commit/4b3e2974808dbd021e950e1a6900cff5d187b9d2))
+* **notifier:** time out and drain notification requests, deliver in parallel ([3cf399a](https://github.com/paschendale/sentinel/commit/3cf399a678694a08b764f140f0da21f265b00dff))
+* **scheduler:** keep a test's phase across restarts and edits ([b511b5e](https://github.com/paschendale/sentinel/commit/b511b5edd34df584d4b7eb7160cc47ee342486f1))
+* **web:** last old words in incident and editor copy ([f93c03f](https://github.com/paschendale/sentinel/commit/f93c03f00363755684a23f39f985db96dc6c076b))
+
+
+### Features
+
+* **api:** bulk actions on tests and the bulk_update_tests MCP tool ([fb99ba2](https://github.com/paschendale/sentinel/commit/fb99ba2e81879d5ebb4b53627795739fa3e9dc2b))
+* **api:** incident routes, publishing for people only, public incident pages ([64e1e3b](https://github.com/paschendale/sentinel/commit/64e1e3b6e573ec9226490046b3b47e2d0aff770e))
+* **api:** MCP tools for incidents ([299e533](https://github.com/paschendale/sentinel/commit/299e533cbc3da746775fdba04f59bf7ccd5ba1c3))
+* **db:** store incidents and open, join and resolve them from test states ([972e1c8](https://github.com/paschendale/sentinel/commit/972e1c8868db8a009248d96a9d1584af35902414))
+* **executor:** fail a run whose test function returns false ([2404899](https://github.com/paschendale/sentinel/commit/2404899fec3a357884860bd5a6f12b335da92da4))
+* **shared:** uptime with decimals that never reads 100 while a run failed ([92ad193](https://github.com/paschendale/sentinel/commit/92ad193378c5e23633829472ebe6a4ad645c0b3f))
+* **web:** design tokens, fonts, theme switch and the component library ([3b3c622](https://github.com/paschendale/sentinel/commit/3b3c6225173ff9e3ea92ca144b52cf2e2d6132b5))
+* **web:** public status page at /, signed-in pages under /admin, every page rebuilt ([f773ff4](https://github.com/paschendale/sentinel/commit/f773ff41e9c348e1ee1e8ea6d0e822d34a47645a))
+
+
+### Performance Improvements
+
+* **api:** cache and validate the public status routes ([20755b3](https://github.com/paschendale/sentinel/commit/20755b31fce0c2651099f2e384b194ed2c4d3827))
+* **notifier:** log deliveries and due alerts only, in batches ([33635aa](https://github.com/paschendale/sentinel/commit/33635aa756ec9ae04aacbcd8c01024ed1006ee44))
+
 # [1.30.0](https://github.com/paschendale/sentinel/compare/v1.29.0...v1.30.0) (2026-11-09)
 
 
