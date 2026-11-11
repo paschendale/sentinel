@@ -40,6 +40,26 @@ describe('one definition of a run result', () => {
     expect(publicStatusFor('fail', 1, 0)).toBe('down')
   })
 
+  it('applies the status window to Outage and to recovery', () => {
+    const hour = 3_600_000
+    const w = (previous: 'up' | 'degraded' | 'down' | 'unknown', failingForMs = 0, passingForMs = 0) =>
+      ({ windowMs: hour, failingForMs, passingForMs, previous })
+    // Outage needs the threshold and a full window of failing
+    expect(publicStatusFor('fail', 12, 3, w('degraded', hour - 1))).toBe('degraded')
+    expect(publicStatusFor('fail', 12, 3, w('degraded', hour))).toBe('down')
+    expect(publicStatusFor('fail', 2, 3, w('degraded', 2 * hour))).toBe('degraded')
+    // after trouble, Operational needs a full window of passing
+    expect(publicStatusFor('success', 0, 3, w('down', 0, hour - 1))).toBe('degraded')
+    expect(publicStatusFor('success', 0, 3, w('degraded', 0, hour))).toBe('up')
+    // a test that was fine (or new) stays Operational
+    expect(publicStatusFor('success', 0, 3, w('up'))).toBe('up')
+    expect(publicStatusFor('success', 0, 3, w('unknown'))).toBe('up')
+    expect(publicStatusFor('warn', 0, 3, w('up'))).toBe('degraded')
+    // a window of 0 is the plain rule
+    expect(publicStatusFor('fail', 3, 3, { ...w('degraded'), windowMs: 0 })).toBe('down')
+    expect(publicStatusFor('success', 0, 3, { ...w('down'), windowMs: 0 })).toBe('up')
+  })
+
   it('derives a period outcome from success, warn and failure counts', () => {
     expect(periodOutcome(0, 0, 0)).toBe('unknown')
     expect(periodOutcome(5, 0, 0)).toBe('up')

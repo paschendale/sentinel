@@ -6,6 +6,7 @@ import { TEST_RESULT_CONTRACT } from '@sentinel/shared'
 import { registerMcpTools } from '../mcp/tools.js'
 import { USER_AGENT_URL } from '../outbound-headers.js'
 import { SENTINEL_VERSION } from '../version.js'
+import { fork } from '../fork/extension.js'
 
 // What an MCP agent knows about Sentinel: it never reads docs/. This is a condensed copy of
 // docs/guide/writing-tests.md, notifications.md and status-and-incidents.md; keep them in step.
@@ -24,7 +25,10 @@ export const MCP_INSTRUCTIONS = [
     '(disabled). Recovered means Operational now with a problem in the last 24 h. A run is Passed (success), ' +
     'Warned (warn), Failed (fail) or Timed out (timeout). Dashboard section keys map the same way: critical = ' +
     'Outage, warning = Degraded, recovered = Recovered, clean = Operational, disabled = Paused. Use these words ' +
-    'when you report to a person; send the wire values to the tools.',
+    'when you report to a person; send the wire values to the tools. An instance may set a status window ' +
+    '(STATUS_WINDOW_MINUTES): then Outage also needs the test to have been failing for the whole window, and ' +
+    'after trouble a passing test stays Degraded until it has passed for the whole window; alerts and incidents ' +
+    'follow the same states.',
   'Tags group tests and drive the dashboard summary (get_dashboard_summary), the status page and notification ' +
     'routing. Notifications: a channel (discord, slack or webhook; email through Resend; or a discord_bot or ' +
     'slack_bot) is assigned to one test or to a tag with assign_channel, for the event types fail (Outage), ' +
@@ -52,6 +56,8 @@ export const MCP_INSTRUCTIONS = [
     'many times (while a full attempt still fits in 80% of schedule_ms) and record only the last attempt; ' +
     'run_test_now makes one attempt.',
   'Before creating a test, call list_tags to see the tag conventions and list_channels to see the channels that exist.',
+  // A fork's paragraphs (apps/api/src/fork/extension.ts) come last.
+  ...(fork.mcpInstructions ?? []),
 ].join('\n\n')
 
 
@@ -65,6 +71,7 @@ export async function mcpRoutes(app: FastifyInstance): Promise<void> {
       { instructions: MCP_INSTRUCTIONS }
     )
     registerMcpTools(server, app, req.headers['authorization'] ?? '')
+    fork.mcpTools?.(server, app, req.headers['authorization'] ?? '')
     // Omitting sessionIdGenerator selects the SDK's stateless mode (its docs spell this
     // as `sessionIdGenerator: undefined`, which exactOptionalPropertyTypes rejects).
     const transport = new StreamableHTTPServerTransport({

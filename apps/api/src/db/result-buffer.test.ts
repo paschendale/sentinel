@@ -255,7 +255,7 @@ describe('flush', () => {
     enqueue(makeResult({ status: 'fail', error_message: 'nope' }))
     await flush()
     expect(triggerNotifications).toHaveBeenCalledWith([
-      { test_id: 'test-1', new_status: 'fail', prev_status: 'success', error_message: 'nope', duration_ms: 100, incident_id: null, incident_transition: null },
+      { test_id: 'test-1', new_status: 'fail', prev_public_status: 'up', public_status: 'down', error_message: 'nope', duration_ms: 100, incident_id: null, incident_transition: null },
     ])
   })
 })

@@ -16,6 +16,7 @@ import { verifyJwt } from './auth/jwt.js'
 import { principalFromClaims } from './auth/principal.js'
 import { incidentsRoutes } from './routes/incidents.js'
 import { registerErrorHandling } from './routes/errors.js'
+import { fork } from './fork/extension.js'
 
 const PUBLIC_ROUTES: Array<{ method: string; prefix: string }> = [
   { method: 'POST', prefix: '/auth/login' },
@@ -92,5 +93,7 @@ export async function buildServer() {
   await app.register(healthRoutes, { prefix: '/health' })
   await app.register(incidentsRoutes, { prefix: '/incidents' })
   await app.register(mcpRoutes, { prefix: '/mcp' })
+  // A fork's routes (apps/api/src/fork/extension.ts), after upstream's.
+  if (fork.routes) await app.register(fork.routes)
   return app
 }

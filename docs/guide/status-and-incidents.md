@@ -41,6 +41,15 @@ After every run Sentinel updates the test's state (`test_state.public_status`), 
 
 Degraded covers those two cases. The dashboard says which in the "since" line rather than with another word: "1 of 3 failures" for a failure under the threshold, the warning text for a warning.
 
+### The status window
+
+An instance can set `STATUS_WINDOW_MINUTES` (off by default) for checks that flap, where a short failure should not page anyone. With a window:
+
+- **Outage** also needs the test to have been failing for the whole window, counted from the first failed run of the streak. Until then it is Degraded.
+- After any trouble, a passing test stays **Degraded** until it has passed for the whole window, counted from the first passing run. Then it is Operational.
+
+Alerts and incidents follow these states, so with a 60-minute window an Outage alert means "failing for over an hour" and the Recovered alert means "passing for over an hour". The streak starts are stored in `test_state.failing_since` and `succeeding_since`.
+
 **Recovered** is not a stored state: it is an Operational test whose last problem (a run that did not pass) is less than 24 h old.
 
 ## Sections

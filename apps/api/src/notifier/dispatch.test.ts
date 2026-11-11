@@ -50,7 +50,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -89,7 +90,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'warn',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'degraded',
       error_message: 'slow response',
       duration_ms: 500,
     }])
@@ -140,7 +142,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 321,
     }])
@@ -149,7 +152,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'success',
-      prev_status: 'fail',
+      prev_public_status: 'down',
+      public_status: 'up',
       error_message: null,
       duration_ms: 101,
     }])
@@ -176,7 +180,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'degraded',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -204,7 +209,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -234,7 +240,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -268,7 +275,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -304,7 +312,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'success',
+      prev_public_status: 'up',
+      public_status: 'down',
       error_message: 'network timeout',
       duration_ms: 123,
     }])
@@ -336,7 +345,8 @@ describe('triggerNotifications', () => {
     triggerNotifications([{
       test_id: 'test-1',
       new_status: 'fail',
-      prev_status: 'fail',
+      prev_public_status: 'degraded',
+      public_status: 'down',
       error_message: 'still down',
       duration_ms: 123,
     }])
@@ -373,8 +383,8 @@ describe('parallel delivery', () => {
     }) as never)
 
     triggerNotifications([
-      { test_id: 'slow', new_status: 'fail', prev_status: 'success', error_message: 'x', duration_ms: 1 },
-      { test_id: 'fast', new_status: 'fail', prev_status: 'success', error_message: 'y', duration_ms: 1 },
+      { test_id: 'slow', new_status: 'fail', prev_public_status: 'up', public_status: 'down', error_message: 'x', duration_ms: 1 },
+      { test_id: 'fast', new_status: 'fail', prev_public_status: 'up', public_status: 'down', error_message: 'y', duration_ms: 1 },
     ])
     await vi.waitFor(() => expect(delivered).toEqual(['https://fast.example.com']))
   })

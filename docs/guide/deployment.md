@@ -76,6 +76,7 @@ Only the four in the first table are required. Everything else is optional and h
 | `RAW_RETENTION_DAYS` | `7` | Days of raw runs and assertions to keep. 1 to 365. |
 | `AGG_RETENTION_DAYS` | `90` | Days of daily uptime aggregates to keep. 30 to 180. The status page's 30-day view reads these. |
 | `NOTIFICATION_RETENTION_DAYS` | `90` | Days of the notification log and closed bot threads to keep. 7 to 365. |
+| `STATUS_WINDOW_MINUTES` | `0` (off) | [Status window](status-and-incidents.md#the-status-window): a test is in Outage only after failing for this long, and returns to Operational only after passing for this long. 0 to 1440. |
 | `PRUNE_BATCH_SIZE` | `5000` | Rows deleted per batch when pruning. 100 to 50 000. |
 | `FTP_TEMP_DIR` | OS temp dir + `sentinel-ftp` | Where `ctx.ftp.get` and `ctx.s3.get` stream downloads. Each file is deleted before the call returns. |
 | `FTP_MAX_DOWNLOAD_BYTES` | `5242880` (5 MB) | Largest body any `ctx` call reads (FTP and S3 downloads, `ctx.http`, `ctx.k8s`, `ctx.s3.list`). 1 KB to 50 MB. |

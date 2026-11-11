@@ -84,6 +84,10 @@ They exist because of hard limits (1 GB RAM, 0.5 vCPU) and deliberate design dec
 28. Agents operate Sentinel through MCP and never read `docs/`. Their only view of what Sentinel can do is the `instructions` string in `apps/api/src/routes/mcp.ts` and the tool descriptions in `apps/api/src/mcp/tools.ts`. Any change that adds, removes or changes a capability updates them in the same change. The instructions are a condensed copy of the guides; when you edit one, edit the other.
 29. An agent-operable REST route gets an MCP tool, not just the route. Actions reserved for a person (publishing) get no tool and return 403 to API tokens.
 
+### Forks
+
+30. The fork slots (`apps/api/src/fork/extension.ts`, `apps/web/fork/status-lead.tsx`) stay empty upstream and are never edited, so forks that replace them pull without conflicts. When a fork needs a new hook, add a new slot and document it in [FORKING.md](docs/FORKING.md); keep `ForkExtension` backward compatible (new members optional).
+
 Ask yourself before finishing: would an agent that sees only the tool descriptions and the server instructions know this exists and how to use it?
 
 ## Checks

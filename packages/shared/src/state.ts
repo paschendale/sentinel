@@ -27,6 +27,22 @@ export function nextConsecutiveFailures(status: TestStatus, previous: number): n
 }
 
 /**
+ * The optional status window (`STATUS_WINDOW_MINUTES` on the API). With it, a test only reaches
+ * Outage once it has also been failing for the whole window, and after any trouble it only
+ * returns to Operational once it has been passing for the whole window; in between it is
+ * Degraded. A window of 0 turns this off.
+ */
+export interface StatusWindow {
+  windowMs: number
+  /** Time from the first run of the current failure streak to this run (0 on its first run). */
+  failingForMs: number
+  /** Time from the first run of the current passing streak to this run (0 on its first run). */
+  passingForMs: number
+  /** The test's state before this run. */
+  previous: PublicStatusOutcome
+}
+
+/**
  * A test's state after a run. `consecutiveFailures` includes this run (see
  * nextConsecutiveFailures). The SQL upsert in `apps/api/src/db/result-buffer.ts` mirrors this.
  */
@@ -34,9 +50,20 @@ export function publicStatusFor(
   status: TestStatus,
   consecutiveFailures: number,
   failureThreshold: number,
+  window?: StatusWindow,
 ): Exclude<PublicStatusOutcome, 'unknown'> {
-  if (status === 'success') return 'up'
-  if (isFailure(status) && consecutiveFailures >= Math.max(1, failureThreshold)) return 'down'
+  const windowMs = window && window.windowMs > 0 ? window.windowMs : 0
+  if (status === 'success') {
+    const recovering = windowMs > 0 && (window!.previous === 'down' || window!.previous === 'degraded')
+    return recovering && window!.passingForMs < windowMs ? 'degraded' : 'up'
+  }
+  if (
+    isFailure(status) &&
+    consecutiveFailures >= Math.max(1, failureThreshold) &&
+    (windowMs === 0 || window!.failingForMs >= windowMs)
+  ) {
+    return 'down'
+  }
   return 'degraded'
 }
 
