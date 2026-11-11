@@ -53,6 +53,8 @@ Two files exist upstream only for forks to replace. Upstream ships them empty an
 | `apps/api/src/fork/extension.ts` | The fork's API additions: routes, `ctx` members, MCP tools and instructions, background jobs. The shape is `ForkExtension` in `apps/api/src/extensions.ts`. |
 | `apps/web/fork/status-lead.tsx` | `StatusLead`, shown on the public status page between the header and the list of checks, on `/` and on every `/status/[tag]` page. |
 
+Two folders are there for the same reason: `apps/api/data/` for data files the fork ships with its image (both images copy it next to the compiled API, at `../data` from `dist/`), and `.github/workflows/` takes the fork's own workflows as new files. Upstream's release workflow only releases from `territorial-dev/sentinel`, so in a fork it runs the tests and stops.
+
 Everything else a fork adds goes in new files next to them. If you need a hook upstream does not have, add it upstream as a slot (a pull request against `territorial-dev/sentinel`) rather than editing a shared file in your fork.
 
 ```ts

@@ -85,6 +85,9 @@ jobs:
   release:
     name: Semantic Release
     needs: test
+    # Releases, images and the badge come from upstream only; a fork runs the tests and builds
+    # its own image from its own workflow.
+    if: github.repository == 'territorial-dev/sentinel'
     runs-on: ubuntu-latest
     outputs:
       published: ${{ steps.check.outputs.published || steps.manual.outputs.published }}
@@ -197,7 +200,7 @@ jobs:
     name: Update coverage badge
     needs: [test, release]
     runs-on: ubuntu-latest
-    if: github.actor != 'github-actions[bot]'
+    if: github.repository == 'territorial-dev/sentinel' && github.actor != 'github-actions[bot]'
     steps:
       - uses: actions/checkout@v4
         with:
