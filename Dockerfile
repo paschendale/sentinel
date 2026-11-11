@@ -22,6 +22,8 @@ RUN pnpm --filter @sentinel/api build
 RUN pnpm --filter @sentinel/api deploy --prod /api-prod
 # pnpm deploy respects .gitignore and skips dist/; copy compiled shared manually
 RUN cp -r /app/packages/shared/dist /api-prod/node_modules/@sentinel/shared/dist
+# The runtime ships no root package.json; keep the release version for the API
+RUN node -p "require('./package.json').version" > /app/VERSION
 
 # ---- Build Web ----
 FROM deps AS build-web
@@ -48,6 +50,7 @@ COPY --from=build-api /app/apps/api/dist /app/apps/api/dist
 COPY --from=build-api /app/apps/api/src/db/migrations /app/apps/api/dist/db/migrations
 # package.json needed so Node resolves the dist as ESM ("type": "module")
 COPY --from=build-api /app/apps/api/package.json /app/apps/api/package.json
+COPY --from=build-api /app/VERSION /app/apps/api/VERSION
 
 # Web: outputFileTracingRoot places standalone relative to repo root, so server.js
 # ends up at apps/web/server.js inside the standalone directory

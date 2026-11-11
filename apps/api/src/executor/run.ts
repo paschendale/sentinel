@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { TIMEOUT_TO_SCHEDULE_MAX_RATIO } from '@sentinel/shared'
+import { RUN_RESULT_LABELS, TIMEOUT_TO_SCHEDULE_MAX_RATIO, isFailure } from '@sentinel/shared'
 import type { TestStatus } from '@sentinel/shared'
 import { logger } from '../logger.js'
 import { getCompiledFn } from './compile.js'
@@ -12,6 +12,9 @@ export interface RunTestOptions {
   trigger: RunTrigger
   onLog?: (message: string) => void
 }
+
+/** error_message of a run whose test function returned exactly `false`. */
+export const RETURNED_FALSE_MESSAGE = 'returned false'
 
 export interface RunResult {
   id: string
@@ -49,7 +52,26 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   let status: TestStatus = 'success'
   let errorMessage: string | null = null
 
-  const fn = getCompiledFn(test.id, test.code)
+  let fn: ReturnType<typeof getCompiledFn>
+  try {
+    fn = getCompiledFn(test.id, test.code)
+  } catch (err) {
+    // Stored code that does not compile (saved before compile-on-save, or edited in the
+    // database) is a failed run, recorded like any other, not just a log line.
+    const message = `code does not compile: ${err instanceof Error ? err.message : String(err)}`
+    runLog.warn({ event: 'test.compile_error', error_message: message }, `test code does not compile: test_id=${test.id}`)
+    const finishedAt = new Date()
+    return {
+      id: runId,
+      test_id: test.id,
+      started_at: startedAt,
+      finished_at: finishedAt,
+      status: 'fail',
+      duration_ms: finishedAt.getTime() - startMs,
+      error_message: message,
+      assertions: [],
+    }
+  }
   // Aborted when the run times out, so pending ctx I/O is cancelled instead of outliving the run.
   const runAbort = new AbortController()
   const { ctx, getAssertions, getWarnings, getInFlight } = buildCtx({
@@ -108,10 +130,15 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   })
 
   try {
-    await Promise.race([
+    const returned: unknown = await Promise.race([
       Promise.resolve(fn(ctx)),
       timeoutPromise,
     ])
+    // The return contract: exactly `false` fails the run; true, undefined and anything else pass.
+    if (returned === false) {
+      status = 'fail'
+      errorMessage = RETURNED_FALSE_MESSAGE
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.startsWith('Timed out after')) {
@@ -137,14 +164,7 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
   const assertionPassed = assertions.filter((a) => a.passed).length
   const assertionFailed = assertions.length - assertionPassed
 
-  const resultSummary =
-    status === 'success'
-      ? 'passed'
-      : status === 'warn'
-        ? 'warned'
-        : status === 'timeout'
-          ? 'timed out'
-          : 'failed'
+  const resultSummary = RUN_RESULT_LABELS[status].toLowerCase()
 
   runLog.info(
     {
@@ -178,10 +198,6 @@ export async function runTest(test: TestInput, options: RunTestOptions): Promise
 interface RetryableTestInput extends TestInput {
   retries: number
   schedule_ms: number
-}
-
-function isFailure(status: TestStatus): boolean {
-  return status === 'fail' || status === 'timeout'
 }
 
 /**

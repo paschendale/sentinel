@@ -53,9 +53,6 @@ importers:
       p-limit:
         specifier: ^6.2.0
         version: 6.2.0
-      p-timeout:
-        specifier: ^6.1.4
-        version: 6.1.4
       pg:
         specifier: ^8.23.1
         version: 8.23.1

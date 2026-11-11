@@ -40,6 +40,13 @@ const EXPECTED_TOOLS = [
   'create_test',
   'update_test',
   'delete_test',
+  'bulk_update_tests',
+  'list_incidents',
+  'get_incident',
+  'add_incident_note',
+  'set_incident_state',
+  'link_incident_test',
+  'draft_incident_report',
   'run_test_now',
   'test_channel',
   'get_test_runs',
@@ -91,7 +98,7 @@ describe('mcp route', () => {
     expect(body.result.serverInfo.name).toBe('sentinel')
   })
 
-  it('lists all 22 tools', async () => {
+  it('lists all 29 tools', async () => {
     const app = await buildServer()
     const res = await app.inject({
       method: 'POST',

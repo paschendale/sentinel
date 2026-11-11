@@ -2,7 +2,58 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import { TEST_RESULT_CONTRACT } from '@sentinel/shared'
 import { registerMcpTools } from '../mcp/tools.js'
+import { USER_AGENT_URL } from '../outbound-headers.js'
+import { SENTINEL_VERSION } from '../version.js'
+
+// What an MCP agent knows about Sentinel: it never reads docs/. This is a condensed copy of
+// docs/guide/writing-tests.md, notifications.md and status-and-incidents.md; keep them in step.
+export const MCP_INSTRUCTIONS = [
+  'Sentinel is a synthetic testing and uptime monitor. It runs JavaScript tests on a schedule, ' +
+    'alerts channels when a test changes state, keeps incidents, and publishes a public status page.',
+  'Tests: code is a JavaScript function body (top-level await allowed) that receives ctx. ' + TEST_RESULT_CONTRACT +
+    ' Code that does not compile is rejected with 400. ctx has ctx.http.get/post (undici), ctx.ftp.ls/get ' +
+    '(basic-ftp), ctx.s3.get/head/list (SigV4-signed, any S3-compatible endpoint; list takes the bucket URL ' +
+    'plus prefix/delimiter/all and returns objects with key, size and lastModified), ctx.k8s.list/read/get ' +
+    '(bearer-token reads from a Kubernetes API server with an optional pinned CA, for CronJob/Job completion, ' +
+    'Argo Workflows and Deployment readiness), ctx.assert(name, value, message?), ctx.warn(message), ' +
+    'ctx.log(message), ctx.now() and ctx.secrets.NAME. Responses over FTP_MAX_DOWNLOAD_BYTES (default 5 MB) are aborted.',
+  'Words: a test is Operational (wire value up), Degraded (degraded: it warned, or it is failing but under its ' +
+    'failure_threshold), Outage (down: consecutive failures reached the threshold), No data (unknown) or Paused ' +
+    '(disabled). Recovered means Operational now with a problem in the last 24 h. A run is Passed (success), ' +
+    'Warned (warn), Failed (fail) or Timed out (timeout). Dashboard section keys map the same way: critical = ' +
+    'Outage, warning = Degraded, recovered = Recovered, clean = Operational, disabled = Paused. Use these words ' +
+    'when you report to a person; send the wire values to the tools.',
+  'Tags group tests and drive the dashboard summary (get_dashboard_summary), the status page and notification ' +
+    'routing. Notifications: a channel (discord, slack or webhook; email through Resend; or a discord_bot or ' +
+    'slack_bot) is assigned to one test or to a tag with assign_channel, for the event types fail (Outage), ' +
+    'warning (Degraded) and recovery (Recovered). Alerts fire on state changes only, past the failure threshold ' +
+    'and outside the cooldown. Webhook and email channels post one message per event; bot channels post one ' +
+    'message per incident, keep every update in a thread under it, edit it on state change and recovery, and ' +
+    'archive the thread when the test recovers. test_channel sends a one-off delivery check.',
+  'Incidents are stored: one opens when a test reaches Outage (tests sharing an incident:<group> tag share one; ' +
+    'a Degraded test joins an open one but never opens one), keeps a timeline and a five-section report with ' +
+    'Internal and Public versions, and resolves when every linked test is Operational. Agents can read incidents, ' +
+    'add internal notes, set the state (Investigating, Identified, Monitoring, Resolved), link tests and draft the ' +
+    'report (list_incidents, get_incident, add_incident_note, set_incident_state, link_incident_test, ' +
+    'draft_incident_report). Publishing an incident, a public note or the report is for a signed-in person only; ' +
+    'no tool does it. bulk_update_tests enables, pauses, runs, deletes or re-tags many tests at once.',
+  'Secrets are write-only (never readable back) and reach test code as ctx.secrets.NAME.',
+  'Outbound identification: every ctx.http / ctx.s3 / ctx.k8s request and notification webhook sends ' +
+    `\`User-Agent: Sentinel (+${USER_AGENT_URL})\`, with \`; instance=<name>\` and an ` +
+    '`X-Sentinel-Instance: <name>` header when the deployment sets SENTINEL_INSTANCE; a User-Agent in the ' +
+    "request's headers option overrides it.",
+  'Timeouts: each ctx.http / ctx.s3 / ctx.k8s request is limited by its `timeout` option (ms, headers and the full ' +
+    "body) and throws HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR / K8S_TIMEOUT_ERROR over it; without it the test's " +
+    'timeout_ms bounds the request. timeout_ms must be at most 80% of schedule_ms. When a run times out, its ' +
+    "pending ctx calls are aborted and named in the run's error_message (\"in flight: GET <url> (<s>, headers " +
+    "received, <n> KB of body read)\"). A test's retries re-run a failed or timed-out scheduled run up to that " +
+    'many times (while a full attempt still fits in 80% of schedule_ms) and record only the last attempt; ' +
+    'run_test_now makes one attempt.',
+  'Before creating a test, call list_tags to see the tag conventions and list_channels to see the channels that exist.',
+].join('\n\n')
+
 
 // Stateless MCP over Streamable HTTP: a fresh server + transport per request (the SDK's
 // documented stateless pattern) so no session state is retained between requests.
@@ -10,38 +61,8 @@ import { registerMcpTools } from '../mcp/tools.js'
 export async function mcpRoutes(app: FastifyInstance): Promise<void> {
   app.post('/', async (req, reply) => {
     const server = new McpServer(
-      { name: 'sentinel', version: '1.0.0' },
-      {
-        instructions:
-          'Sentinel is a synthetic testing & uptime monitoring platform. Tests are JavaScript ' +
-          'functions receiving a `ctx` object with four protocols — ctx.http (HTTP via undici), ' +
-          'ctx.ftp (ctx.ftp.ls/get via basic-ftp), and ctx.s3 (ctx.s3.get/head/list, SigV4-signed, works ' +
-          'against any S3-compatible endpoint; list takes the bucket URL plus prefix/delimiter/all and ' +
-          'returns objects with key, size and lastModified), and ctx.k8s (ctx.k8s.list/read/get: bearer-token ' +
-          'reads from a Kubernetes API server with an optional pinned CA, for CronJob/Job completion, Argo ' +
-          'Workflows and Deployment readiness) — plus ctx.assert, ctx.warn, ctx.log, ctx.now, and ' +
-          'ctx.secrets. Tests are organized by free-form tags, which drive both the dashboard summary ' +
-          '(get_dashboard_summary) and notification routing: a channel (Discord, Slack, webhook, email, ' +
-          'or a Discord/Slack bot) can be assigned to one test or to an entire tag via assign_channel, scoped to ' +
-          'fail/warning/recovery event types, and only fires on state transitions past a failure ' +
-          'threshold and cooldown. Webhook channels post one message per event; discord_bot and slack_bot ' +
-          'channels (bot_token + channel_ref) post one message per incident, keep every update in a thread ' +
-          'under it, edit the root on state change and recovery, and archive the thread when the test ' +
-          'recovers. test_channel sends a one-off delivery check through any channel. Secrets are write-only (never readable back) and reach test code as ' +
-          'ctx.secrets.NAME. Outbound identification: every ctx.http / ctx.s3 request and notification ' +
-          'webhook sends `User-Agent: Sentinel (+https://github.com/paschendale/sentinel)` — with ' +
-          '`; instance=<name>` and an `X-Sentinel-Instance: <name>` header when the deployment sets ' +
-          'SENTINEL_INSTANCE — so monitored servers can recognise Sentinel and which location probed them; a ' +
-          'User-Agent in the request\'s headers option overrides it. Timeouts: every ctx.http / ctx.s3 request is limited by its `timeout` option ' +
-          '(ms, covering headers and the full body); a request over its limit throws code ' +
-          'HTTP_TIMEOUT_ERROR / S3_TIMEOUT_ERROR. Without it, the test\'s timeout_ms bounds the request. When a ' +
-          'run times out, its pending ctx calls are aborted and named in the run\'s error_message ' +
-          '("in flight: GET <url> (<s>, headers received, <n> KB of body read)"). A test\'s `retries` ' +
-          're-runs a failed or timed-out scheduled run up to that many times (while a full attempt still ' +
-          'fits in 80% of schedule_ms) and records only the last attempt; run_test_now makes one attempt. ' +
-          'Before creating a test, call list_tags to see existing tag conventions and ' +
-          'list_channels to see what notification targets already exist.',
-      }
+      { name: 'sentinel', version: SENTINEL_VERSION },
+      { instructions: MCP_INSTRUCTIONS }
     )
     registerMcpTools(server, app, req.headers['authorization'] ?? '')
     // Omitting sessionIdGenerator selects the SDK's stateless mode (its docs spell this

@@ -1,33 +1,20 @@
 import type { FastifyInstance } from 'fastify'
-import type { Test } from '@sentinel/shared'
-import { pool } from '../db/pool.js'
-import { runTest } from '../executor/run.js'
-import { enqueue } from '../db/result-buffer.js'
+import { RUN_NOW_ERRORS, runNow } from '../executor/run-now.js'
+import { sendError } from './errors.js'
 
 export async function runRoutes(app: FastifyInstance): Promise<void> {
   // POST /tests/:id/run
   app.post<{ Params: { id: string } }>('/:id/run', async (req, reply) => {
-    const { rows } = await pool.query<Test>(
-      'SELECT * FROM tests WHERE id = $1',
-      [req.params.id]
-    )
-    const test = rows[0]
-    if (test == null) return reply.status(404).send({ error: 'not found' })
-    if (!test.enabled) return reply.status(422).send({ error: 'test is disabled' })
-
-    const result = await runTest(test, { trigger: 'api-post' })
-    enqueue(result)
-    return reply.send(result)
+    const outcome = await runNow(req.params.id, { trigger: 'api-post' })
+    if (outcome.kind !== 'ok') {
+      const { status, error } = RUN_NOW_ERRORS[outcome.kind]
+      return sendError(reply, status, error)
+    }
+    return reply.send(outcome.result)
   })
 
   // GET /tests/:id/run/stream — SSE: triggers execution and streams ctx.log() in real-time
   app.get<{ Params: { id: string } }>('/:id/run/stream', async (req, reply) => {
-    const { rows } = await pool.query<Test>(
-      'SELECT * FROM tests WHERE id = $1',
-      [req.params.id]
-    )
-    const test = rows[0]
-
     reply.hijack()
     const res = reply.raw
     res.writeHead(200, {
@@ -41,24 +28,13 @@ export async function runRoutes(app: FastifyInstance): Promise<void> {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
 
-    if (test == null) {
-      send('error', { error: 'not found' })
-      res.end()
-      return
-    }
-    if (!test.enabled) {
-      send('error', { error: 'test is disabled' })
-      res.end()
-      return
-    }
-
     try {
-      const result = await runTest(test, {
+      const outcome = await runNow(req.params.id, {
         trigger: 'api-sse',
         onLog: (message) => send('log', { message }),
       })
-      enqueue(result)
-      send('done', result)
+      if (outcome.kind === 'ok') send('done', outcome.result)
+      else send('error', { error: RUN_NOW_ERRORS[outcome.kind].error })
     } catch (err) {
       send('error', { error: err instanceof Error ? err.message : 'Run failed' })
     } finally {

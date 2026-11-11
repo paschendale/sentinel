@@ -24,6 +24,8 @@ services:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: changeme
       JWT_SECRET: change-this-to-a-random-secret
+      # Optional: title of the public status page (default "Service status")
+      # STATUS_PAGE_TITLE: Example Inc. status
     depends_on:
       db:
         condition: service_healthy

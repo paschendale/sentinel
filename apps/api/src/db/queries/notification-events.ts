@@ -28,27 +28,55 @@ export interface NotificationEventInsert {
   cooldown_ms: number
   http_status?: number | null
   error_message?: string | null
+  incident_id?: string | null
 }
 
-export async function insertNotificationEvent(input: NotificationEventInsert): Promise<void> {
-  await pool.query(
-    `INSERT INTO notification_events
-      (id, test_id, channel_id, event, phase, reason, consecutive_failures,
-       failure_threshold, cooldown_ms, http_status, error_message)
-     VALUES
-      ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [
-      nanoid(),
-      input.test_id,
-      input.channel_id ?? null,
-      input.event,
-      input.phase,
-      input.reason ?? null,
-      input.consecutive_failures,
-      input.failure_threshold,
-      input.cooldown_ms,
-      input.http_status ?? null,
-      input.error_message ?? null,
-    ],
-  )
+/**
+ * The notifier's audit log records decisions that matter, not every evaluation: deliveries
+ * (`sent`, `failed`) and alerts that were due but went nowhere (`skipped` with no_channels or
+ * no_prior_notification). Rows are queued and written in batches by flushNotificationEvents().
+ */
+const queue: NotificationEventInsert[] = []
+const BATCH_SIZE = 100
+const COLUMNS_PER_ROW = 12
+
+export function queueNotificationEvent(input: NotificationEventInsert): void {
+  queue.push(input)
+}
+
+export function queuedNotificationEventCount(): number {
+  return queue.length
+}
+
+/** Writes every queued event, in multi-row inserts of up to 100 rows. */
+export async function flushNotificationEvents(): Promise<void> {
+  while (queue.length > 0) {
+    const batch = queue.splice(0, BATCH_SIZE)
+    const values: unknown[] = []
+    const placeholders = batch.map((e, i) => {
+      const b = i * COLUMNS_PER_ROW
+      values.push(
+        nanoid(),
+        e.test_id,
+        e.channel_id ?? null,
+        e.event,
+        e.phase,
+        e.reason ?? null,
+        e.consecutive_failures,
+        e.failure_threshold,
+        e.cooldown_ms,
+        e.http_status ?? null,
+        e.error_message ?? null,
+        e.incident_id ?? null,
+      )
+      return `(${Array.from({ length: COLUMNS_PER_ROW }, (_, k) => `$${b + k + 1}`).join(', ')})`
+    })
+    await pool.query(
+      `INSERT INTO notification_events
+        (id, test_id, channel_id, event, phase, reason, consecutive_failures,
+         failure_threshold, cooldown_ms, http_status, error_message, incident_id)
+       VALUES ${placeholders.join(', ')}`,
+      values,
+    )
+  }
 }

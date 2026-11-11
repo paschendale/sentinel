@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import type {
   AssertionResult,
   PublicStatusDay,
@@ -9,9 +9,11 @@ import type {
   StatusPeriod,
   TestRun,
 } from '@sentinel/shared'
-import { statusSection } from '@sentinel/shared'
+import { FAILURE_STATUSES, periodOutcome, statusSection, toIso, uptimePct } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import { getDistinctTags } from '../db/queries/assignments.js'
+import { cachedReply, parseInstant, type CachedReply } from './public-cache.js'
+import { getPublicIncident, listPublicIncidents } from '../db/queries/incidents.js'
 
 type TestRow = { id: string; name: string; enabled: boolean; tags: string[] }
 
@@ -19,6 +21,7 @@ type UdRow = {
   test_id: string
   date: string
   success_count: number
+  warn_count: number
   failure_count: number
 }
 
@@ -33,17 +36,7 @@ type StateRow = {
 
 const STATE_COLUMNS = 'test_id, public_status, problem_started_at, problem_ended_at, problem_worst, last_problem_at'
 
-function iso(v: Date | string | null | undefined): string | null {
-  if (v === null || v === undefined) return null
-  return v instanceof Date ? v.toISOString() : String(v)
-}
-
-function dayOutcome(successCount: number, failureCount: number): PublicStatusDay['outcome'] {
-  if (failureCount > 0 && successCount === 0) return 'down'
-  if (failureCount > 0 && successCount > 0) return 'degraded'
-  if (successCount > 0) return 'up'
-  return 'unknown'
-}
+const FAILURE_SQL = FAILURE_STATUSES.map((s) => `'${s}'`).join(',')
 
 /** Last 30 UTC calendar days, oldest first. */
 function utcDayStrings(): string[] {
@@ -59,7 +52,7 @@ function utcDayStrings(): string[] {
 
 function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRow[], now = new Date()): PublicStatusTest[] {
   const dayStrings = utcDayStrings()
-  const udByTest = new Map<string, Map<string, { s: number; f: number }>>()
+  const udByTest = new Map<string, Map<string, { s: number; w: number; f: number }>>()
 
   for (const row of udRows) {
     const d =
@@ -71,7 +64,7 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRo
       m = new Map()
       udByTest.set(row.test_id, m)
     }
-    m.set(d, { s: Number(row.success_count), f: Number(row.failure_count) })
+    m.set(d, { s: Number(row.success_count), w: Number(row.warn_count ?? 0), f: Number(row.failure_count) })
   }
 
   const stateMap = new Map(stateRows.map(s => [s.test_id, s]))
@@ -79,26 +72,28 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRo
   return tests.map((t) => {
     const m = udByTest.get(t.id) ?? new Map()
     let totalS = 0
+    let totalW = 0
     let totalF = 0
     const days: PublicStatusDay[] = dayStrings.map((date) => {
       const cell = m.get(date)
       const s = cell?.s ?? 0
+      const w = cell?.w ?? 0
       const f = cell?.f ?? 0
       totalS += s
+      totalW += w
       totalF += f
-      return { date, outcome: dayOutcome(s, f) }
+      return { date, outcome: periodOutcome(s, w, f) }
     })
 
-    const denom = totalS + totalF
-    const uptime_pct_30d = denom === 0 ? null : Math.round((100 * totalS) / denom)
+    const uptime_pct_30d = uptimePct(totalS, totalW, totalF)
 
     const state = stateMap.get(t.id)
     const current_status = (state?.public_status ?? 'unknown') as PublicStatusTest['current_status']
     const window = {
-      problem_started_at: iso(state?.problem_started_at),
-      problem_ended_at: iso(state?.problem_ended_at),
+      problem_started_at: toIso(state?.problem_started_at),
+      problem_ended_at: toIso(state?.problem_ended_at),
       problem_worst: state?.problem_worst ?? null,
-      last_problem_at: iso(state?.last_problem_at),
+      last_problem_at: toIso(state?.last_problem_at),
     }
 
     return {
@@ -115,233 +110,115 @@ function buildPublicStatus(tests: TestRow[], udRows: UdRow[], stateRows: StateRo
   })
 }
 
+const PERIODS: readonly StatusPeriod[] = ['1h', '24h', '7d', '30d']
+/** Most tests one public bucket query covers. */
+export const MAX_PUBLIC_TESTS = 500
+const MAX_PARAM_LENGTH = 255
+
+function tooLong(...values: Array<string | undefined>): boolean {
+  return values.some((v) => v !== undefined && v.length > MAX_PARAM_LENGTH)
+}
+
+async function send(reply: FastifyReply, key: string, load: () => Promise<CachedReply>): Promise<FastifyReply> {
+  const r = await cachedReply(key, load)
+  return reply.status(r.status).send(r.body)
+}
+
+const ok = (body: unknown): CachedReply => ({ status: 200, body })
+const notFound = (error = 'not found'): CachedReply => ({ status: 404, body: { error } })
+
+async function loadStatus(tests: TestRow[], udWhere: string, udParams: unknown[]): Promise<PublicStatusTest[]> {
+  const { rows: udRows } = await pool.query<UdRow>(
+    `SELECT test_id, date::text AS date, success_count, warn_count, failure_count
+     FROM uptime_daily
+     WHERE ${udWhere}
+       AND date >= (CURRENT_DATE - 29)
+       AND date <= CURRENT_DATE`,
+    udParams,
+  )
+  const testIds = tests.map(t => t.id)
+  const { rows: stateRows } = await pool.query<StateRow>(
+    `SELECT ${STATE_COLUMNS} FROM test_state WHERE test_id = ANY($1)`,
+    [testIds],
+  )
+  return buildPublicStatus(tests, udRows, stateRows)
+}
+
+/**
+ * Public status routes. No authentication; every response is cached in-process for
+ * PUBLIC_CACHE_TTL_MS by its validated parameters (see public-cache.ts), so a busy status page
+ * costs one query set per key per TTL, not one per visitor.
+ */
 export async function statusRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/', async (_req, reply) => {
-    const { rows: tests } = await pool.query<TestRow>(
-      `SELECT id, name, enabled, tags FROM tests ORDER BY created_at DESC`,
-    )
-    const { rows: udRows } = await pool.query<UdRow>(
-      `SELECT test_id, date::text AS date, success_count, failure_count
-       FROM uptime_daily
-       WHERE date >= (CURRENT_DATE - 29)
-         AND date <= CURRENT_DATE`,
-    )
-    const testIds = tests.map(t => t.id)
-    const { rows: stateRows } = await pool.query<StateRow>(
-      `SELECT ${STATE_COLUMNS} FROM test_state WHERE test_id = ANY($1)`,
-      [testIds],
-    )
-    return reply.send(buildPublicStatus(tests, udRows, stateRows))
-  })
+  app.get('/', async (_req, reply) =>
+    send(reply, 'status', async () => {
+      const { rows: tests } = await pool.query<TestRow>(
+        `SELECT id, name, enabled, tags FROM tests ORDER BY created_at DESC`,
+      )
+      return ok(await loadStatus(tests, 'TRUE', []))
+    }),
+  )
 
   // GET /status/tags — public tag directory so status pages can be browsed
   // without already knowing a tag name.
-  app.get('/tags', async (_req, reply) => {
-    const tags = await getDistinctTags()
-    return reply.send(tags)
-  })
+  app.get('/tags', async (_req, reply) => send(reply, 'tags', async () => ok(await getDistinctTags())))
 
   app.get<{ Params: { tag: string } }>('/tag/:tag', async (req, reply) => {
     const { tag } = req.params
-    const { rows: tests } = await pool.query<TestRow>(
-      `SELECT id, name, enabled, tags FROM tests WHERE $1 = ANY(tags) ORDER BY created_at DESC`,
-      [tag],
-    )
-    if (tests.length === 0) return reply.status(404).send({ error: 'no tests found for this tag' })
-    const testIds = tests.map(t => t.id)
-    const { rows: udRows } = await pool.query<UdRow>(
-      `SELECT test_id, date::text AS date, success_count, failure_count
-       FROM uptime_daily
-       WHERE test_id = ANY($1)
-         AND date >= (CURRENT_DATE - 29)
-         AND date <= CURRENT_DATE`,
-      [testIds],
-    )
-    const { rows: stateRows } = await pool.query<StateRow>(
-      `SELECT ${STATE_COLUMNS} FROM test_state WHERE test_id = ANY($1)`,
-      [testIds],
-    )
-    return reply.send(buildPublicStatus(tests, udRows, stateRows))
+    if (tooLong(tag)) return reply.status(400).send({ error: 'tag is too long' })
+    return send(reply, `tag:${tag}`, async () => {
+      const { rows: tests } = await pool.query<TestRow>(
+        `SELECT id, name, enabled, tags FROM tests WHERE $1 = ANY(tags) ORDER BY created_at DESC`,
+        [tag],
+      )
+      if (tests.length === 0) return notFound('no tests found for this tag')
+      return ok(await loadStatus(tests, 'test_id = ANY($1)', [tests.map(t => t.id)]))
+    })
   })
 
   app.get<{ Params: { id: string } }>('/test/:id', async (req, reply) => {
     const { id } = req.params
-    const { rows: tests } = await pool.query<TestRow>(
-      `SELECT id, name, enabled, tags FROM tests WHERE id = $1`,
-      [id],
-    )
-    if (tests.length === 0) return reply.status(404).send({ error: 'not found' })
-    const { rows: udRows } = await pool.query<UdRow>(
-      `SELECT test_id, date::text AS date, success_count, failure_count
-       FROM uptime_daily
-       WHERE test_id = $1
-         AND date >= (CURRENT_DATE - 29)
-         AND date <= CURRENT_DATE`,
-      [id],
-    )
-    const { rows: stateRows } = await pool.query<StateRow>(
-      `SELECT ${STATE_COLUMNS} FROM test_state WHERE test_id = $1`,
-      [id],
-    )
-    const [result] = buildPublicStatus(tests, udRows, stateRows)
-    return reply.send(result)
+    if (tooLong(id)) return reply.status(404).send({ error: 'not found' })
+    return send(reply, `test:${id}`, async () => {
+      const { rows: tests } = await pool.query<TestRow>(
+        `SELECT id, name, enabled, tags FROM tests WHERE id = $1`,
+        [id],
+      )
+      if (tests.length === 0) return notFound()
+      const [result] = await loadStatus(tests, 'test_id = $1', [id])
+      return ok(result)
+    })
   })
 
   app.get<{ Querystring: { period?: string; tag?: string; testId?: string } }>('/buckets', async (req, reply) => {
     const period = (req.query.period ?? '24h') as StatusPeriod
-    const tag = req.query.tag as string | undefined
-    const testId = req.query.testId as string | undefined
+    const tag = req.query.tag || undefined
+    const testId = req.query.testId || undefined
 
-    if (!['1h', '24h', '7d', '30d'].includes(period)) {
-      return reply.status(400).send({ error: 'invalid period' })
+    if (!PERIODS.includes(period)) {
+      return reply.status(400).send({ error: `period must be one of: ${PERIODS.join(', ')}` })
     }
+    if (tooLong(tag, testId)) return reply.status(400).send({ error: 'tag or testId is too long' })
 
-    let tests: TestRow[]
-    if (testId) {
-      const { rows } = await pool.query<TestRow>(
-        `SELECT id, name, enabled, tags FROM tests WHERE id = $1`,
-        [testId],
-      )
-      tests = rows
-    } else if (tag) {
-      const { rows } = await pool.query<TestRow>(
-        `SELECT id, name, enabled, tags FROM tests WHERE $1 = ANY(tags) ORDER BY created_at DESC`,
-        [tag],
-      )
-      tests = rows
-    } else {
-      const { rows } = await pool.query<TestRow>(
-        `SELECT id, name, enabled, tags FROM tests ORDER BY created_at DESC`,
-      )
-      tests = rows
-    }
-    if (tests.length === 0) return reply.send([])
+    return send(reply, `buckets:${period}:${testId ?? ''}:${tag ?? ''}`, async () => ok(await loadBuckets(period, tag, testId)))
+  })
 
-    const testIds = tests.map(t => t.id)
+  // GET /status/incidents?tag= — published incidents, open or started in the last 30 days.
+  // Only public text: titles, states, times, affected check names, public notes, the public report.
+  app.get<{ Querystring: { tag?: string } }>('/incidents', async (req, reply) => {
+    const tag = req.query.tag || undefined
+    if (tooLong(tag)) return reply.status(400).send({ error: 'tag is too long' })
+    return send(reply, `incidents:${tag ?? ''}`, async () => ok(await listPublicIncidents(tag ?? null)))
+  })
 
-    if (period === '30d') {
-      type DayBucketRow = {
-        test_id: string
-        date: string
-        success_count: number
-        failure_count: number
-        avg_latency_ms: number | null
-      }
-      const { rows } = await pool.query<DayBucketRow>(
-        `SELECT test_id, date::text AS date, success_count, failure_count, avg_latency_ms
-         FROM uptime_daily
-         WHERE test_id = ANY($1)
-           AND date >= (CURRENT_DATE - 29)
-           AND date <= CURRENT_DATE
-         ORDER BY test_id, date`,
-        [testIds],
-      )
-
-      // Build 30-day bucket arrays per test
-      const now = new Date()
-      const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-      const dayStrings: string[] = []
-      for (let i = 29; i >= 0; i--) {
-        const t = todayUTC - i * 86_400_000
-        dayStrings.push(new Date(t).toISOString().slice(0, 10))
-      }
-
-      const byTest = new Map<string, Map<string, { s: number; f: number; avg: number | null }>>()
-      for (const r of rows) {
-        const d = typeof r.date === 'string' ? r.date.slice(0, 10) : (r.date as unknown as Date).toISOString().slice(0, 10)
-        let m = byTest.get(r.test_id)
-        if (!m) { m = new Map(); byTest.set(r.test_id, m) }
-        m.set(d, { s: Number(r.success_count), f: Number(r.failure_count), avg: r.avg_latency_ms !== null ? Number(r.avg_latency_ms) : null })
-      }
-
-      const result: StatusBucketTest[] = tests.map(t => ({
-        id: t.id,
-        name: t.name,
-        enabled: t.enabled,
-        tags: t.tags,
-        buckets: dayStrings.map(date => {
-          const cell = byTest.get(t.id)?.get(date)
-          const bucketStart = new Date(date + 'T00:00:00Z').toISOString()
-          const bucketEnd = new Date(new Date(date + 'T00:00:00Z').getTime() + 86_400_000).toISOString()
-          return {
-            bucket_start: bucketStart,
-            bucket_end: bucketEnd,
-            success_count: cell?.s ?? 0,
-            failure_count: cell?.f ?? 0,
-            avg_latency_ms: cell?.avg ?? null,
-          } satisfies StatusBucket
-        }),
-      }))
-      return reply.send(result)
-    }
-
-    // For 1h / 24h / 7d — use test_runs, 100 equal-width buckets
-    const periodMs: Record<string, number> = { '1h': 3_600_000, '24h': 86_400_000, '7d': 7 * 86_400_000 }
-    const durationMs = periodMs[period]!
-    const endTime = new Date()
-    const startTime = new Date(endTime.getTime() - durationMs)
-    const bucketSecs = durationMs / 1000 / 100
-
-    type BucketRow = {
-      test_id: string
-      idx: number
-      success_count: number
-      failure_count: number
-      avg_latency_ms: number | null
-    }
-
-    const { rows: bucketRows } = await pool.query<BucketRow>(
-      `WITH
-         all_buckets AS (SELECT generate_series(0, 99) AS idx),
-         run_data AS (
-           SELECT
-             test_id,
-             LEAST(FLOOR(EXTRACT(EPOCH FROM (started_at - $1::timestamptz)) / $2)::INT, 99) AS idx,
-             COUNT(*) FILTER (WHERE status = 'success')  AS success_count,
-             COUNT(*) FILTER (WHERE status != 'success') AS failure_count,
-             AVG(duration_ms)                            AS avg_latency_ms
-           FROM test_runs
-           WHERE started_at >= $1 AND started_at < $3
-             AND test_id = ANY($4)
-           GROUP BY test_id, idx
-         )
-       SELECT
-         t.id AS test_id,
-         b.idx,
-         COALESCE(r.success_count, 0) AS success_count,
-         COALESCE(r.failure_count, 0) AS failure_count,
-         r.avg_latency_ms
-       FROM tests t
-       CROSS JOIN all_buckets b
-       LEFT JOIN run_data r ON r.test_id = t.id AND r.idx = b.idx
-       WHERE t.id = ANY($4)
-       ORDER BY t.id, b.idx`,
-      [startTime.toISOString(), bucketSecs, endTime.toISOString(), testIds],
-    )
-
-    // Group by test
-    const bucketsByTest = new Map<string, StatusBucket[]>()
-    for (const row of bucketRows) {
-      let arr = bucketsByTest.get(row.test_id)
-      if (!arr) { arr = []; bucketsByTest.set(row.test_id, arr) }
-      const idx = Number(row.idx)
-      arr.push({
-        bucket_start: new Date(startTime.getTime() + idx * bucketSecs * 1000).toISOString(),
-        bucket_end: new Date(startTime.getTime() + (idx + 1) * bucketSecs * 1000).toISOString(),
-        success_count: Number(row.success_count),
-        failure_count: Number(row.failure_count),
-        avg_latency_ms: row.avg_latency_ms !== null ? Number(row.avg_latency_ms) : null,
-      })
-    }
-
-    const result: StatusBucketTest[] = tests.map(t => ({
-      id: t.id,
-      name: t.name,
-      enabled: t.enabled,
-      tags: t.tags,
-      buckets: bucketsByTest.get(t.id) ?? [],
-    }))
-    return reply.send(result)
+  // GET /status/incidents/:id — 404 unless published.
+  app.get<{ Params: { id: string } }>('/incidents/:id', async (req, reply) => {
+    const { id } = req.params
+    if (tooLong(id)) return reply.status(404).send({ error: 'not found' })
+    return send(reply, `incident:${id}`, async () => {
+      const incident = await getPublicIncident(id)
+      return incident === null ? notFound() : ok(incident)
+    })
   })
 
   // GET /status/test/:id/events — recent checks with assertion details, for the
@@ -351,52 +228,222 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
     '/test/:id/events',
     async (req, reply) => {
       const { id } = req.params
-      const { rows: exists } = await pool.query<{ id: string }>('SELECT id FROM tests WHERE id = $1', [id])
-      if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
-
-      const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50)
-      const conditions = ['test_id = $1']
-      const params: unknown[] = [id]
-      if (req.query.after) {
-        params.push(req.query.after)
-        conditions.push(`started_at >= $${params.length}`)
+      if (tooLong(id)) return reply.status(404).send({ error: 'not found' })
+      const after = parseInstant(req.query.after)
+      const before = parseInstant(req.query.before)
+      if (after === 'invalid' || before === 'invalid') {
+        return reply.status(400).send({ error: 'after and before must be ISO 8601 timestamps' })
       }
-      if (req.query.before) {
-        params.push(req.query.before)
-        conditions.push(`started_at < $${params.length}`)
+      const rawLimit = req.query.limit
+      if (rawLimit !== undefined && rawLimit !== '' && !/^\d+$/.test(rawLimit)) {
+        return reply.status(400).send({ error: 'limit must be a whole number between 1 and 50' })
       }
-      params.push(limit)
-
-      const { rows } = await pool.query<TestRun>(
-        `SELECT id, test_id, started_at, finished_at, status, duration_ms, error_message
-         FROM test_runs WHERE ${conditions.join(' AND ')}
-         ORDER BY started_at DESC LIMIT $${params.length}`,
-        params,
-      )
-      if (rows.length === 0) return reply.send([])
-
-      const runIds = rows.map(r => r.id)
-      const { rows: assertionRows } = await pool.query<AssertionResult>(
-        `SELECT id, test_run_id, name, passed, message FROM assertion_results WHERE test_run_id = ANY($1)`,
-        [runIds],
-      )
-      const byRunId = new Map<string, AssertionResult[]>()
-      for (const a of assertionRows) {
-        const list = byRunId.get(a.test_run_id) ?? []
-        list.push(a)
-        byRunId.set(a.test_run_id, list)
-      }
-
-      const events: PublicStatusEvent[] = rows.map(r => ({
-        id: r.id,
-        started_at: r.started_at as unknown as string,
-        finished_at: r.finished_at as unknown as string,
-        status: r.status,
-        duration_ms: r.duration_ms,
-        error_message: r.error_message,
-        assertions: (byRunId.get(r.id) ?? []).map(a => ({ name: a.name, passed: a.passed, message: a.message })),
-      }))
-      return reply.send(events)
+      const limit = Math.min(Math.max(Number(rawLimit) || 20, 1), 50)
+      const key = `events:${id}:${limit}:${after?.toISOString() ?? ''}:${before?.toISOString() ?? ''}`
+      return send(reply, key, async () => loadEvents(id, limit, after, before))
     },
   )
+}
+
+async function loadBuckets(period: StatusPeriod, tag: string | undefined, testId: string | undefined): Promise<StatusBucketTest[]> {
+  let tests: TestRow[]
+  if (testId) {
+    const { rows } = await pool.query<TestRow>(
+      `SELECT id, name, enabled, tags FROM tests WHERE id = $1`,
+      [testId],
+    )
+    tests = rows
+  } else if (tag) {
+    const { rows } = await pool.query<TestRow>(
+      `SELECT id, name, enabled, tags FROM tests WHERE $1 = ANY(tags) ORDER BY created_at DESC LIMIT ${MAX_PUBLIC_TESTS}`,
+      [tag],
+    )
+    tests = rows
+  } else {
+    const { rows } = await pool.query<TestRow>(
+      `SELECT id, name, enabled, tags FROM tests ORDER BY created_at DESC LIMIT ${MAX_PUBLIC_TESTS}`,
+    )
+    tests = rows
+  }
+  if (tests.length === 0) return []
+
+  const testIds = tests.map(t => t.id)
+
+  if (period === '30d') {
+    type DayBucketRow = {
+      test_id: string
+      date: string
+      success_count: number
+      warn_count: number
+      failure_count: number
+      avg_latency_ms: number | null
+    }
+    const { rows } = await pool.query<DayBucketRow>(
+      `SELECT test_id, date::text AS date, success_count, warn_count, failure_count, avg_latency_ms
+       FROM uptime_daily
+       WHERE test_id = ANY($1)
+         AND date >= (CURRENT_DATE - 29)
+         AND date <= CURRENT_DATE
+       ORDER BY test_id, date`,
+      [testIds],
+    )
+
+    // Build 30-day bucket arrays per test
+    const now = new Date()
+    const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    const dayStrings: string[] = []
+    for (let i = 29; i >= 0; i--) {
+      const t = todayUTC - i * 86_400_000
+      dayStrings.push(new Date(t).toISOString().slice(0, 10))
+    }
+
+    const byTest = new Map<string, Map<string, { s: number; w: number; f: number; avg: number | null }>>()
+    for (const r of rows) {
+      const d = typeof r.date === 'string' ? r.date.slice(0, 10) : (r.date as unknown as Date).toISOString().slice(0, 10)
+      let m = byTest.get(r.test_id)
+      if (!m) { m = new Map(); byTest.set(r.test_id, m) }
+      m.set(d, { s: Number(r.success_count), w: Number(r.warn_count ?? 0), f: Number(r.failure_count), avg: r.avg_latency_ms !== null ? Number(r.avg_latency_ms) : null })
+    }
+
+    const result: StatusBucketTest[] = tests.map(t => ({
+      id: t.id,
+      name: t.name,
+      enabled: t.enabled,
+      tags: t.tags,
+      buckets: dayStrings.map(date => {
+        const cell = byTest.get(t.id)?.get(date)
+        const bucketStart = new Date(date + 'T00:00:00Z').toISOString()
+        const bucketEnd = new Date(new Date(date + 'T00:00:00Z').getTime() + 86_400_000).toISOString()
+        return {
+          bucket_start: bucketStart,
+          bucket_end: bucketEnd,
+          success_count: cell?.s ?? 0,
+          warn_count: cell?.w ?? 0,
+          failure_count: cell?.f ?? 0,
+          avg_latency_ms: cell?.avg ?? null,
+        } satisfies StatusBucket
+      }),
+    }))
+    return result
+  }
+
+  // For 1h / 24h / 7d — use test_runs, 100 equal-width buckets
+  const periodMs: Record<string, number> = { '1h': 3_600_000, '24h': 86_400_000, '7d': 7 * 86_400_000 }
+  const durationMs = periodMs[period]!
+  const endTime = new Date()
+  const startTime = new Date(endTime.getTime() - durationMs)
+  const bucketSecs = durationMs / 1000 / 100
+
+  type BucketRow = {
+    test_id: string
+    idx: number
+    success_count: number
+    warn_count: number
+    failure_count: number
+    avg_latency_ms: number | null
+  }
+
+  const { rows: bucketRows } = await pool.query<BucketRow>(
+    `WITH
+       all_buckets AS (SELECT generate_series(0, 99) AS idx),
+       run_data AS (
+         SELECT
+           test_id,
+           LEAST(FLOOR(EXTRACT(EPOCH FROM (started_at - $1::timestamptz)) / $2)::INT, 99) AS idx,
+           COUNT(*) FILTER (WHERE status = 'success')            AS success_count,
+           COUNT(*) FILTER (WHERE status = 'warn')               AS warn_count,
+           COUNT(*) FILTER (WHERE status IN (${FAILURE_SQL}))    AS failure_count,
+           AVG(duration_ms)                            AS avg_latency_ms
+         FROM test_runs
+         WHERE started_at >= $1 AND started_at < $3
+           AND test_id = ANY($4)
+         GROUP BY test_id, idx
+       )
+     SELECT
+       t.id AS test_id,
+       b.idx,
+       COALESCE(r.success_count, 0) AS success_count,
+       COALESCE(r.warn_count, 0) AS warn_count,
+       COALESCE(r.failure_count, 0) AS failure_count,
+       r.avg_latency_ms
+     FROM tests t
+     CROSS JOIN all_buckets b
+     LEFT JOIN run_data r ON r.test_id = t.id AND r.idx = b.idx
+     WHERE t.id = ANY($4)
+     ORDER BY t.id, b.idx`,
+    [startTime.toISOString(), bucketSecs, endTime.toISOString(), testIds],
+  )
+
+  // Group by test
+  const bucketsByTest = new Map<string, StatusBucket[]>()
+  for (const row of bucketRows) {
+    let arr = bucketsByTest.get(row.test_id)
+    if (!arr) { arr = []; bucketsByTest.set(row.test_id, arr) }
+    const idx = Number(row.idx)
+    arr.push({
+      bucket_start: new Date(startTime.getTime() + idx * bucketSecs * 1000).toISOString(),
+      bucket_end: new Date(startTime.getTime() + (idx + 1) * bucketSecs * 1000).toISOString(),
+      success_count: Number(row.success_count),
+      warn_count: Number(row.warn_count ?? 0),
+      failure_count: Number(row.failure_count),
+      avg_latency_ms: row.avg_latency_ms !== null ? Number(row.avg_latency_ms) : null,
+    })
+  }
+
+  const result: StatusBucketTest[] = tests.map(t => ({
+    id: t.id,
+    name: t.name,
+    enabled: t.enabled,
+    tags: t.tags,
+    buckets: bucketsByTest.get(t.id) ?? [],
+  }))
+  return result
+}
+
+async function loadEvents(id: string, limit: number, after: Date | null, before: Date | null): Promise<CachedReply> {
+  const { rows: exists } = await pool.query<{ id: string }>('SELECT id FROM tests WHERE id = $1', [id])
+  if (exists.length === 0) return notFound()
+
+  const conditions = ['test_id = $1']
+  const params: unknown[] = [id]
+  if (after !== null) {
+    params.push(after.toISOString())
+    conditions.push(`started_at >= $${params.length}`)
+  }
+  if (before !== null) {
+    params.push(before.toISOString())
+    conditions.push(`started_at < $${params.length}`)
+  }
+  params.push(limit)
+
+  const { rows } = await pool.query<TestRun>(
+    `SELECT id, test_id, started_at, finished_at, status, duration_ms, error_message
+     FROM test_runs WHERE ${conditions.join(' AND ')}
+     ORDER BY started_at DESC LIMIT $${params.length}`,
+    params,
+  )
+  if (rows.length === 0) return ok([])
+
+  const runIds = rows.map(r => r.id)
+  const { rows: assertionRows } = await pool.query<AssertionResult>(
+    `SELECT id, test_run_id, name, passed, message FROM assertion_results WHERE test_run_id = ANY($1)`,
+    [runIds],
+  )
+  const byRunId = new Map<string, AssertionResult[]>()
+  for (const a of assertionRows) {
+    const list = byRunId.get(a.test_run_id) ?? []
+    list.push(a)
+    byRunId.set(a.test_run_id, list)
+  }
+
+  const events: PublicStatusEvent[] = rows.map(r => ({
+    id: r.id,
+    started_at: r.started_at as unknown as string,
+    finished_at: r.finished_at as unknown as string,
+    status: r.status,
+    duration_ms: r.duration_ms,
+    error_message: r.error_message,
+    assertions: (byRunId.get(r.id) ?? []).map(a => ({ name: a.name, passed: a.passed, message: a.message })),
+  }))
+  return ok(events)
 }

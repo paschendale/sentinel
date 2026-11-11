@@ -14,6 +14,7 @@ import {
 } from '../db/queries/channels.js'
 import { sendChannelTest } from '../notifier/channel-test.js'
 import { TransportError } from '../notifier/transports/types.js'
+import { sendValidationError } from './errors.js'
 
 export async function channelsRoutes(app: FastifyInstance): Promise<void> {
   // GET /channels — never includes a bot token, only has_bot_token.
@@ -25,7 +26,7 @@ export async function channelsRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>('/', async (req, reply) => {
     const parsed = CreateNotificationChannelSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
     }
     const channel = await createChannel(parsed.data)
     return reply.status(201).send(channel)
@@ -36,7 +37,7 @@ export async function channelsRoutes(app: FastifyInstance): Promise<void> {
   app.patch<{ Params: { id: string }; Body: unknown }>('/:id', async (req, reply) => {
     const parsed = UpdateNotificationChannelSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
     }
     const patch = Object.fromEntries(Object.entries(parsed.data).filter(([, v]) => v !== undefined)) as typeof parsed.data
     if (Object.keys(patch).length === 0) {

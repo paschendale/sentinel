@@ -48,6 +48,8 @@ describe('GET /tests/:id/incidents', () => {
           },
         ],
       } as never)
+      // stored incident links (none)
+      .mockResolvedValueOnce({ rows: [] } as never)
 
     const app = await buildServer()
     const res = await app.inject({
@@ -70,8 +72,8 @@ describe('GET /tests/:id/incidents', () => {
     const runsCall = mockQuery.mock.calls[2]
     expect(runsCall).toBeDefined()
     const sql = String(runsCall?.[0])
-    expect(sql).toContain('ORDER BY finished_at DESC')
+    expect(sql).toContain('ORDER BY started_at DESC')
     expect(sql).toContain('LIMIT 500')
-    expect(sql).toContain('ORDER BY finished_at ASC')
+    expect(sql).toContain('ORDER BY started_at ASC')
   })
 })

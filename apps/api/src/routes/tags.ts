@@ -3,6 +3,7 @@ import { CreateAssignmentSchema } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
 import { getAssignedChannels, addAssignment, removeAssignment, getDistinctTags } from '../db/queries/assignments.js'
 import { normalizeTag } from '../tags/normalize.js'
+import { sendValidationError } from './errors.js'
 
 function parseTagOrReply(tag: string, reply: FastifyReply): string | null {
   const normalized = normalizeTag(tag)
@@ -33,7 +34,7 @@ export async function tagsRoutes(app: FastifyInstance): Promise<void> {
     const tag = parseTagOrReply(req.params.tag, reply)
     if (tag === null) return
     const parsed = CreateAssignmentSchema.safeParse(req.body)
-    if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() })
+    if (!parsed.success) return sendValidationError(reply, parsed.error)
     const { rows: chExists } = await pool.query<{ id: string }>(
       'SELECT id FROM notification_channels WHERE id = $1',
       [parsed.data.channel_id]

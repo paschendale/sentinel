@@ -2,12 +2,11 @@ import type { IncidentThread, IncidentThreadState, NotificationEventType } from 
 import { INCIDENT_THREAD_HEARTBEAT_MS } from '../config.js'
 import { getDeliverableChannel, type DeliverableChannel } from '../db/queries/channels.js'
 import { closeThread, openThread, recordThreadUpdate } from '../db/queries/incident-threads.js'
-import { insertNotificationEvent, type NotificationEventReason } from '../db/queries/notification-events.js'
+import { queueNotificationEvent, type NotificationEventReason } from '../db/queries/notification-events.js'
 import { logger } from '../logger.js'
 import {
   discordMessage,
   slackMessage,
-  stateForEvent,
   threadName,
   threadReply,
   type EventInfo,
@@ -22,13 +21,15 @@ import { TransportError, type BotCredentials, type IncidentHandles, type Inciden
  *
  * A webhook channel gets one message per event. A bot channel gets one message per
  * incident: the root is posted when the incident opens, edited whenever the state
- * changes, and edited to "back UP" when it ends; everything in between goes into the
+ * changes, and edited to "Recovered" when it ends; everything in between goes into the
  * thread under it. One open thread exists per (test, channel); it is the row in
  * `notification_threads` with `closed_at IS NULL`.
  */
 
 export interface IncidentContext {
   testId: string
+  /** Stored incident the test belongs to, recorded on threads and audit rows. */
+  incidentId?: string | null
   info: EventInfo
   consecutiveFailures: number
   failureThreshold: number
@@ -72,8 +73,9 @@ async function logEvent(
   httpStatus?: number | null,
 ): Promise<void> {
   try {
-    await insertNotificationEvent({
+    queueNotificationEvent({
       test_id: ctx.testId,
+      incident_id: ctx.incidentId ?? null,
       channel_id: channelId,
       event,
       phase,
@@ -121,6 +123,7 @@ export async function deliverIncidentEvent(
     provider_root_id: handles.rootId,
     provider_thread_id: handles.threadId,
     message: dedupeKey(state, ctx.info),
+    incident_id: ctx.incidentId ?? null,
   })
   await logEvent(ctx, channel.id, event, 'sent', 'thread_opened')
   return { outcome: 'opened' }
@@ -174,7 +177,7 @@ async function updateIncident(
 }
 
 /**
- * Ends every open incident of a test: edits each root to "back UP", posts the closing
+ * Ends every open incident of a test: edits each root to "Recovered", posts the closing
  * reply and archives the thread. Runs on recovery regardless of the channel's event-type
  * filter, because an open incident must always be closed where it was opened. Never throws.
  */
@@ -207,4 +210,3 @@ export async function postStandalone(channel: DeliverableChannel, message: Recor
   await transportFor(channel.type).post(credentialsOf(channel), message)
 }
 
-export { stateForEvent }

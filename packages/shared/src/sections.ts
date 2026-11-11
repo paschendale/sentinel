@@ -1,4 +1,5 @@
 import type { PublicStatusOutcome } from './types.js'
+import { formatDuration } from './state.js'
 
 /**
  * Where a test is listed on the admin dashboard and the public status page, top to bottom.
@@ -68,16 +69,6 @@ export function compareInSection(
   return a.name.localeCompare(b.name)
 }
 
-export function formatDuration(ms: number): string {
-  const minutes = Math.max(0, Math.round(ms / 60_000))
-  if (minutes < 1) return 'under a minute'
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`
-  const days = Math.floor(hours / 24)
-  return `${days}d ${hours % 24}h`
-}
-
 function clock(iso: string, now: Date): string {
   const d = new Date(iso)
   const hhmm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`
@@ -109,7 +100,7 @@ export function sinceText(
   }
   if (t.section === 'warning') {
     if (t.failing && t.failing.count > 0) {
-      return { text: `failing, ${t.failing.count} of ${t.failing.threshold} runs`, sub: 'below the failure threshold', tone: 'warning' }
+      return { text: `${t.failing.count} of ${t.failing.threshold} failures`, sub: 'below the failure threshold', tone: 'warning' }
     }
     return {
       text: started ? `degraded for ${formatDuration(now.getTime() - new Date(started).getTime())}` : 'degraded',

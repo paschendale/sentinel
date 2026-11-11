@@ -9,6 +9,7 @@ import {
 } from '../db/queries/secrets.js'
 import { warmSecretsCache } from '../executor/secrets-cache.js'
 import { isEncryptionConfigured } from '../crypto/secret-cipher.js'
+import { sendValidationError } from './errors.js'
 
 function isUniqueViolation(err: unknown): err is { code: string; constraint?: string } {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505'
@@ -30,7 +31,7 @@ export async function secretsRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>('/', async (req, reply) => {
     const parsed = CreateSecretSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
     }
     const d = parsed.data
     const id = nanoid()
@@ -50,7 +51,7 @@ export async function secretsRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: unknown }>('/:id/rotate', async (req, reply) => {
     const parsed = RotateSecretSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
     }
     const secret = await rotateSecretValue(req.params.id, parsed.data.value)
     if (!secret) {

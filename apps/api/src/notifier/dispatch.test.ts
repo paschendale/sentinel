@@ -11,17 +11,18 @@ vi.mock('../db/pool.js', () => ({
 }))
 
 vi.mock('../db/queries/notification-events.js', () => ({
-  insertNotificationEvent: vi.fn().mockResolvedValue(undefined),
+  queueNotificationEvent: vi.fn(),
+  flushNotificationEvents: vi.fn().mockResolvedValue(undefined),
 }))
 
 import { pool } from '../db/pool.js'
 import { request } from 'undici'
-import { insertNotificationEvent } from '../db/queries/notification-events.js'
+import { queueNotificationEvent } from '../db/queries/notification-events.js'
 import { triggerNotifications } from './dispatch.js'
 
 const mockQuery = vi.mocked(pool.query)
 const mockRequest = vi.mocked(request)
-const mockInsertNotificationEvent = vi.mocked(insertNotificationEvent)
+const mockInsertNotificationEvent = vi.mocked(queueNotificationEvent)
 
 describe('triggerNotifications', () => {
   beforeEach(() => {
@@ -159,7 +160,7 @@ describe('triggerNotifications', () => {
     expect(mockRequest.mock.calls[1]?.[0]).toBe('https://example.com/webhook')
   })
 
-  it('logs skipped event when below threshold', async () => {
+  it('writes no audit row for a failing run under the threshold', async () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{
         test_id: 'test-1',
@@ -182,12 +183,11 @@ describe('triggerNotifications', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const skipped = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'skipped')
-    expect(skipped?.[0].reason).toBe('below_threshold')
+    expect(mockInsertNotificationEvent).not.toHaveBeenCalled()
     expect(mockRequest).not.toHaveBeenCalled()
   })
 
-  it('logs skipped event when cooldown is active', async () => {
+  it('writes no audit row for a repeat failure inside the cooldown', async () => {
     const now = Date.now()
     mockQuery.mockResolvedValueOnce({
       rows: [{
@@ -211,8 +211,7 @@ describe('triggerNotifications', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const skipped = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'skipped')
-    expect(skipped?.[0].reason).toBe('cooldown_active')
+    expect(mockInsertNotificationEvent).not.toHaveBeenCalled()
     expect(mockRequest).not.toHaveBeenCalled()
   })
 
@@ -276,9 +275,10 @@ describe('triggerNotifications', () => {
 
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const attempted = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'attempted')
+    const phases = mockInsertNotificationEvent.mock.calls.map(c => c[0].phase)
     const failed = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'failed' && c[0].reason === 'http_non_2xx')
-    expect(attempted).toBeDefined()
+    // one row per delivery outcome; no 'evaluated' or 'attempted' rows
+    expect(phases).toEqual(['failed'])
     expect(failed?.[0].http_status).toBe(500)
   })
 
@@ -346,5 +346,36 @@ describe('triggerNotifications', () => {
     expect(mockRequest).toHaveBeenCalledTimes(1)
     const sent = mockInsertNotificationEvent.mock.calls.find(c => c[0].phase === 'sent')
     expect(sent).toBeDefined()
+  })
+})
+
+describe('parallel delivery', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockRequest.mockReset()
+  })
+
+  it('does not hold back other tests behind one hung webhook', async () => {
+    const state = (id: string) => ({ test_id: id, test_name: id, consecutive_failures: 3, last_notification_at: null, last_warning_at: null, failure_threshold: 3, cooldown_ms: 0 })
+    mockQuery.mockImplementation(((sql: string, params?: unknown[]) => {
+      if (sql.includes('FROM test_state ts')) return Promise.resolve({ rows: [state('slow'), state('fast')] })
+      if (sql.includes('SELECT DISTINCT nc.id')) {
+        const url = params?.[0] === 'slow' ? 'https://slow.example.com' : 'https://fast.example.com'
+        return Promise.resolve({ rows: [{ id: `ch-${String(params?.[0])}`, type: 'webhook', webhook_url: url, email_to: null, channel_ref: null, bot_token_blob: null }] })
+      }
+      return Promise.resolve({ rows: [] })
+    }) as never)
+    const delivered: string[] = []
+    mockRequest.mockImplementation(((url: string) => {
+      if (url.includes('slow')) return new Promise(() => {}) // never answers
+      delivered.push(url)
+      return Promise.resolve({ statusCode: 200 })
+    }) as never)
+
+    triggerNotifications([
+      { test_id: 'slow', new_status: 'fail', prev_status: 'success', error_message: 'x', duration_ms: 1 },
+      { test_id: 'fast', new_status: 'fail', prev_status: 'success', error_message: 'y', duration_ms: 1 },
+    ])
+    await vi.waitFor(() => expect(delivered).toEqual(['https://fast.example.com']))
   })
 })

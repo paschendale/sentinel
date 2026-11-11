@@ -9,7 +9,8 @@
  */
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
 import pg from 'pg'
-import { enqueue, flush, startFlusher, stopFlusher } from './result-buffer.js'
+import { nextConsecutiveFailures, publicStatusFor, type TestStatus } from '@sentinel/shared'
+import { bufferedCount, enqueue, flush, startFlusher, stopFlusher } from './result-buffer.js'
 
 const DATABASE_URL = process.env['DATABASE_URL']
 
@@ -63,13 +64,14 @@ afterAll(async () => {
 
 function makeResult(overrides: {
   id?: string
-  status?: 'success' | 'fail' | 'timeout'
+  status?: TestStatus
   finished_at?: Date
+  test_id?: string
 } = {}) {
   const now = new Date()
   return {
     id: overrides.id ?? `integ-run-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    test_id: TEST_ID,
+    test_id: overrides.test_id ?? TEST_ID,
     started_at: now,
     finished_at: overrides.finished_at ?? new Date(now.getTime() + 100),
     status: overrides.status ?? ('success' as const),
@@ -186,5 +188,39 @@ describe.skipIf(!dbAvailable)('result-buffer integration', () => {
       [result.id],
     )
     expect(rows).toHaveLength(1)
+  })
+
+  it('drops a run whose test was deleted without blocking later flushes', async () => {
+    enqueue(makeResult({ id: 'integ-orphan', test_id: 'integ-no-such-test' }))
+    enqueue(makeResult({ id: 'integ-alongside-orphan' }))
+    await flush()
+    expect(bufferedCount()).toBe(0)
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM test_runs WHERE id = ANY($1) ORDER BY id`,
+      [['integ-orphan', 'integ-alongside-orphan']],
+    )
+    expect(rows.map((r) => r.id)).toEqual(['integ-alongside-orphan'])
+
+    enqueue(makeResult({ id: 'integ-after-orphan' }))
+    await flush()
+    const { rows: after } = await client.query(`SELECT id FROM test_runs WHERE id = 'integ-after-orphan'`)
+    expect(after).toHaveLength(1)
+  })
+
+  it('computes the same state in SQL as publicStatusFor() in shared', async () => {
+    const sequence: TestStatus[] = ['fail', 'fail', 'warn', 'fail', 'fail', 'fail', 'timeout', 'success', 'warn', 'success']
+    let consecutive = 0
+    let t = Date.now()
+    for (const [i, status] of sequence.entries()) {
+      t += 1000
+      enqueue({ ...makeResult({ id: `integ-seq-${i}`, status }), started_at: new Date(t), finished_at: new Date(t + 10) })
+      await flush()
+      consecutive = nextConsecutiveFailures(status, consecutive)
+      const { rows } = await client.query<{ public_status: string; consecutive_failures: number }>(
+        `SELECT public_status, consecutive_failures FROM test_state WHERE test_id = $1`,
+        [TEST_ID],
+      )
+      expect({ step: i, ...rows[0] }).toEqual({ step: i, public_status: publicStatusFor(status, consecutive, 3), consecutive_failures: consecutive })
+    }
   })
 })

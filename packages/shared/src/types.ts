@@ -4,8 +4,6 @@ export type TestStatus = 'success' | 'warn' | 'fail' | 'timeout'
 export type NotificationChannelType = 'discord' | 'slack' | 'webhook' | 'email' | 'discord_bot' | 'slack_bot'
 
 /** Channel types that post through a bot token and keep one thread per incident. */
-export const BOT_CHANNEL_TYPES: readonly NotificationChannelType[] = ['discord_bot', 'slack_bot']
-
 export function isBotChannelType(type: NotificationChannelType): type is 'discord_bot' | 'slack_bot' {
   return type === 'discord_bot' || type === 'slack_bot'
 }
@@ -52,6 +50,8 @@ export interface UptimeDaily {
   test_id: string
   date: string // YYYY-MM-DD
   success_count: number
+  /** Runs that passed with a warning. Neither a success nor a failure. */
+  warn_count: number
   failure_count: number
   avg_latency_ms: number
 }
@@ -121,14 +121,6 @@ export interface ChannelAssignment {
   event_types: NotificationEventType[]
 }
 
-export interface TestState {
-  test_id: string
-  last_status: TestStatus | null
-  consecutive_failures: number
-  last_notification_at: Date | null
-  last_run_at: Date | null
-}
-
 export interface TestSummary extends ProblemWindow {
   id: string
   name: string
@@ -143,6 +135,16 @@ export interface TestSummary extends ProblemWindow {
   failure_threshold: number
   /** Where the test is listed; see statusSection(). */
   section: StatusSection
+}
+
+/** One test's outcome in a POST /tests/bulk response. `run` reports `started`; the run itself is recorded as usual. */
+export interface BulkTestResult {
+  id: string
+  ok: boolean
+  /** Why this test was not changed: not found, disabled, a run already in progress. */
+  error?: string
+  /** For `run`: the run was started and will appear in the test's history. */
+  started?: boolean
 }
 
 export interface Incident {
@@ -163,6 +165,9 @@ export interface StatusBucket {
   bucket_start: string // ISO timestamp
   bucket_end: string   // ISO timestamp
   success_count: number
+  /** Runs that passed with a warning (status `warn`). Not counted in failure_count. */
+  warn_count: number
+  /** Failed and timed-out runs. */
   failure_count: number
   avg_latency_ms: number | null
 }

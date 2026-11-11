@@ -3,11 +3,13 @@ import { nanoid } from 'nanoid'
 import { CreateTestSchema, UpdateTestSchema, CreateAssignmentSchema } from '@sentinel/shared'
 import type { AssertionResult, Incident, Test, TestRun } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
-import { invalidateCache } from '../executor/compile.js'
+import { compileError, invalidateCache } from '../executor/compile.js'
 import { testEvents } from '../events.js'
 import { getAssignedChannels, getEffectiveChannelsForTest, addAssignment, removeAssignment } from '../db/queries/assignments.js'
 import { normalizeTags } from '../tags/normalize.js'
-import { buildIncidentsFromRuns } from './incident-policy.js'
+import { buildIncidentsFromRuns, mergeStoredIncidents } from './incident-policy.js'
+import { storedIncidentsForTest } from '../db/queries/incidents.js'
+import { sendValidationError } from './errors.js'
 
 function isCheckViolation(err: unknown): err is { code: string; constraint?: string } {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23514'
@@ -18,9 +20,11 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>('/', async (req, reply) => {
     const parsed = CreateTestSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
     }
     const d = parsed.data
+    const syntax = compileError(d.code)
+    if (syntax !== null) return reply.status(400).send({ error: `code does not compile: ${syntax}` })
     const tags = normalizeTags(d.tags)
     const id = nanoid()
     let rows: Test[]
@@ -59,10 +63,15 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     for (let i = 0; i < body.tests.length; i++) {
       const parsed = CreateTestSchema.safeParse(body.tests[i])
       if (!parsed.success) errors[i] = parsed.error.flatten()
-      else valid.push({ ...parsed.data, tags: normalizeTags(parsed.data.tags) })
+      else {
+        const syntax = compileError(parsed.data.code)
+        if (syntax !== null) errors[i] = `code does not compile: ${syntax}`
+        else valid.push({ ...parsed.data, tags: normalizeTags(parsed.data.tags) })
+      }
     }
     if (Object.keys(errors).length > 0) {
-      return reply.status(400).send({ error: 'validation failed', errors })
+      // `errors` is kept for existing clients; `details` carries the same map in the shared shape.
+      return reply.status(400).send({ error: 'validation failed', details: errors, errors })
     }
     const client = await pool.connect()
     const created: Test[] = []
@@ -110,7 +119,7 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
     const { rows } = await pool.query<TestRun>(
       `SELECT id, test_id, started_at, finished_at, status, duration_ms, error_message
-       FROM test_runs WHERE test_id = $1 ORDER BY finished_at DESC LIMIT 20`,
+       FROM test_runs WHERE test_id = $1 ORDER BY started_at DESC LIMIT 20`,
       [req.params.id]
     )
     const runIds = rows.map(r => r.id)
@@ -145,14 +154,15 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
          SELECT started_at, finished_at, status
          FROM test_runs
          WHERE test_id = $1
-         ORDER BY finished_at DESC
+         ORDER BY started_at DESC
          LIMIT 500
        ) AS recent_runs
-       ORDER BY finished_at ASC`,
+       ORDER BY started_at ASC`,
       [req.params.id],
     )
-    const incidents: Incident[] = buildIncidentsFromRuns(rows, failureThreshold)
-    return reply.send(incidents)
+    const derived: Incident[] = buildIncidentsFromRuns(rows, failureThreshold)
+    const stored = await storedIncidentsForTest(req.params.id)
+    return reply.send(mergeStoredIncidents(derived, stored))
   })
 
   // GET /tests/:id
@@ -169,7 +179,11 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
   app.patch<{ Params: { id: string }; Body: unknown }>('/:id', async (req, reply) => {
     const parsed = UpdateTestSchema.safeParse(req.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: parsed.error.flatten() })
+      return sendValidationError(reply, parsed.error)
+    }
+    if (parsed.data.code !== undefined) {
+      const syntax = compileError(parsed.data.code)
+      if (syntax !== null) return reply.status(400).send({ error: `code does not compile: ${syntax}` })
     }
     const data = parsed.data.tags === undefined
       ? parsed.data
@@ -242,7 +256,7 @@ export async function testsRoutes(app: FastifyInstance): Promise<void> {
     )
     if (exists.length === 0) return reply.status(404).send({ error: 'not found' })
     const parsed = CreateAssignmentSchema.safeParse(req.body)
-    if (!parsed.success) return reply.status(400).send({ error: parsed.error.flatten() })
+    if (!parsed.success) return sendValidationError(reply, parsed.error)
     const { rows: chExists } = await pool.query<{ id: string }>(
       'SELECT id FROM notification_channels WHERE id = $1',
       [parsed.data.channel_id]

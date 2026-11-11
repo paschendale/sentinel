@@ -9,19 +9,20 @@ vi.mock('../db/pool.js', () => ({
 }))
 
 vi.mock('../db/queries/notification-events.js', () => ({
-  insertNotificationEvent: vi.fn().mockResolvedValue(undefined),
+  queueNotificationEvent: vi.fn(),
+  flushNotificationEvents: vi.fn().mockResolvedValue(undefined),
 }))
 
 import { request } from 'undici'
 import type { IncidentThread } from '@sentinel/shared'
 import { pool } from '../db/pool.js'
-import { insertNotificationEvent } from '../db/queries/notification-events.js'
+import { queueNotificationEvent } from '../db/queries/notification-events.js'
 import type { DeliverableChannel } from '../db/queries/channels.js'
 import { closeOpenIncidents, deliverIncidentEvent, touchOpenIncidents, type IncidentContext } from './incidents.js'
 
 const mockRequest = vi.mocked(request)
 const mockQuery = vi.mocked(pool.query)
-const mockInsertEvent = vi.mocked(insertNotificationEvent)
+const mockInsertEvent = vi.mocked(queueNotificationEvent)
 
 function slackOk(extra: Record<string, unknown> = {}) {
   return { statusCode: 200, body: { text: async () => JSON.stringify({ ok: true, ...extra }) } } as never
@@ -100,7 +101,7 @@ describe('incident threads on bot channels', () => {
     expect(requestUrl(0)).toMatch(/\/chat\.postMessage$/)
     const body = requestBody(0)
     expect(body['channel']).toBe('C123')
-    expect(body['text']).toContain('API Prod Check is DOWN')
+    expect(body['text']).toContain('Outage: API Prod Check')
     const insert = mockQuery.mock.calls[0]
     expect(insert?.[0]).toContain('INSERT INTO notification_threads')
     expect(insert?.[1]).toEqual(expect.arrayContaining(['test-1', 'ch-slack', 'down', '1700000000.000100', '1700000000.000100']))
@@ -150,7 +151,7 @@ describe('incident threads on bot channels', () => {
     await deliverIncidentEvent(slackChannel, 'warning', ctx, openThreadRow({ state: 'down' }))
 
     expect(requestUrl(0)).toMatch(/\/chat\.update$/)
-    expect(String(requestBody(0)['text'])).toContain('DEGRADED')
+    expect(String(requestBody(0)['text'])).toContain('Degraded')
     expect(requestUrl(1)).toMatch(/\/chat\.postMessage$/)
   })
 
@@ -182,11 +183,11 @@ describe('incident threads on bot channels', () => {
 
     await touchOpenIncidents('fail', ctx, [openThreadRow({ last_update_at: new Date(Date.now() - 2 * 3_600_000) })])
 
-    expect(String(requestBody(0)['text'])).toContain('still down')
+    expect(String(requestBody(0)['text'])).toContain('Still in outage')
     expect(mockInsertEvent.mock.calls.find((c) => c[0].reason === 'thread_heartbeat')).toBeDefined()
   })
 
-  it('closes a Discord incident: edits the root to UP, posts the closing reply, archives the thread', async () => {
+  it('closes a Discord incident: edits the root to Recovered, posts the closing reply, archives the thread', async () => {
     const plaintextToken = Buffer.concat([Buffer.from([0x00]), Buffer.from('discord-token', 'utf8')])
     mockQuery
       .mockResolvedValueOnce({ rows: [{ id: 'ch-discord', type: 'discord_bot', webhook_url: null, email_to: null, channel_ref: '999', bot_token_blob: plaintextToken }] } as never)
@@ -200,9 +201,9 @@ describe('incident threads on bot channels', () => {
 
     expect(requestUrl(0)).toMatch(/\/channels\/999\/messages\/msg-1$/)
     expect((mockRequest.mock.calls[0]?.[1] as { method?: string }).method).toBe('PATCH')
-    expect(JSON.stringify(requestBody(0))).toContain('back UP')
+    expect(JSON.stringify(requestBody(0))).toContain('Recovered')
     expect(requestUrl(1)).toMatch(/\/channels\/thread-1\/messages$/)
-    expect(String(requestBody(1)['content'])).toContain('resolved')
+    expect(String(requestBody(1)['content'])).toContain('Recovered after')
     expect(requestUrl(2)).toMatch(/\/channels\/thread-1$/)
     expect(requestBody(2)['archived']).toBe(true)
     const close = mockQuery.mock.calls[1]

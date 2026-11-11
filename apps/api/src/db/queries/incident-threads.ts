@@ -15,6 +15,27 @@ export async function getOpenThreads(testIds: string[]): Promise<IncidentThread[
   return rows
 }
 
+/**
+ * Open threads whose test has been Operational for a while: the recovery that should have
+ * closed them failed (provider error, restart). `settledMs` keeps the reconciler out of the
+ * way of a recovery that is being delivered right now.
+ */
+export async function getThreadsToReconcile(settledMs: number): Promise<Array<IncidentThread & { test_name: string; last_duration_ms: number | null }>> {
+  const { rows } = await pool.query<IncidentThread & { test_name: string; last_duration_ms: number | null }>(
+    `SELECT ${COLUMNS.split(', ').map((c) => `nt.${c}`).join(', ')}, t.name AS test_name,
+            (SELECT r.duration_ms FROM test_runs r WHERE r.test_id = nt.test_id ORDER BY r.started_at DESC LIMIT 1) AS last_duration_ms
+       FROM notification_threads nt
+       JOIN tests t ON t.id = nt.test_id
+       JOIN test_state ts ON ts.test_id = nt.test_id
+      WHERE nt.closed_at IS NULL
+        AND ts.public_status = 'up'
+        AND COALESCE(ts.problem_ended_at, ts.last_run_at) < NOW() - make_interval(secs => $1::double precision / 1000)
+      LIMIT 50`,
+    [settledMs],
+  )
+  return rows
+}
+
 export async function openThread(input: {
   test_id: string
   channel_id: string
@@ -22,13 +43,14 @@ export async function openThread(input: {
   provider_root_id: string
   provider_thread_id: string
   message: string | null
+  incident_id?: string | null
 }): Promise<IncidentThread> {
   const { rows } = await pool.query<IncidentThread>(
     `INSERT INTO notification_threads
-       (id, test_id, channel_id, state, provider_root_id, provider_thread_id, last_update_message)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (id, test_id, channel_id, state, provider_root_id, provider_thread_id, last_update_message, incident_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING ${COLUMNS}`,
-    [nanoid(), input.test_id, input.channel_id, input.state, input.provider_root_id, input.provider_thread_id, input.message],
+    [nanoid(), input.test_id, input.channel_id, input.state, input.provider_root_id, input.provider_thread_id, input.message, input.incident_id ?? null],
   )
   return rows[0]!
 }

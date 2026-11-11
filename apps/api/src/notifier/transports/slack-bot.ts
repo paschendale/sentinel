@@ -1,6 +1,5 @@
-import { request } from 'undici'
 import { SLACK_API_URL } from '../../config.js'
-import { withSentinelHeaders } from '../../outbound-headers.js'
+import { notifyRequest } from '../http.js'
 import { TransportError, type BotCredentials, type IncidentHandles, type IncidentTransport } from './types.js'
 
 interface SlackResponse {
@@ -14,15 +13,12 @@ interface SlackResponse {
  * Slack answers HTTP 200 with `ok: false` on failure, so the body is always inspected.
  */
 async function call(creds: BotCredentials, method: string, body: Record<string, unknown>): Promise<SlackResponse> {
-  const res = await request(`${SLACK_API_URL}/${method}`, {
+  const res = await notifyRequest(`${SLACK_API_URL}/${method}`, {
     method: 'POST',
-    headers: withSentinelHeaders({
-      'content-type': 'application/json; charset=utf-8',
-      authorization: `Bearer ${creds.token}`,
-    }),
-    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json; charset=utf-8', authorization: `Bearer ${creds.token}` },
+    body,
   })
-  const text = await res.body.text()
+  const text = res.text
   if (res.statusCode < 200 || res.statusCode >= 300) {
     throw new TransportError(`Slack ${method} returned HTTP ${res.statusCode}: ${text.slice(0, 200)}`, res.statusCode)
   }
@@ -62,4 +58,3 @@ export const slackBotTransport: IncidentTransport = {
   },
 }
 
-export { call as slackApiCall }

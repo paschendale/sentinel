@@ -86,11 +86,11 @@ describe('compareInSection', () => {
 
 describe('formatDuration', () => {
   it('formats minutes, hours and days', () => {
-    expect(formatDuration(20_000)).toBe('under a minute')
-    expect(formatDuration(-5 * M)).toBe('under a minute')
-    expect(formatDuration(14 * M)).toBe('14m')
-    expect(formatDuration(5 * H + 6 * M)).toBe('5h 06m')
-    expect(formatDuration(26 * H + 30 * M)).toBe('1d 2h')
+    expect(formatDuration(20_000)).toBe('20 s')
+    expect(formatDuration(-5 * M)).toBe('0 s')
+    expect(formatDuration(14 * M)).toBe('14 min')
+    expect(formatDuration(5 * H + 6 * M)).toBe('5 h 6 min')
+    expect(formatDuration(26 * H + 30 * M)).toBe('1 d 2 h')
   })
 })
 
@@ -99,7 +99,7 @@ describe('sinceText', () => {
 
   it('says how long a critical test has been failing and since when', () => {
     expect(sinceText({ ...base, section: 'critical', problem_started_at: ago(5 * H + 6 * M) }, NOW)).toEqual({
-      text: 'failing for 5h 06m', sub: 'since 06:54 UTC', tone: 'critical',
+      text: 'failing for 5 h 6 min', sub: 'since 06:54 UTC', tone: 'critical',
     })
   })
 
@@ -115,23 +115,23 @@ describe('sinceText', () => {
 
   it('counts failing runs under the threshold when the admin view knows them', () => {
     expect(sinceText({ ...base, section: 'warning', failing: { count: 1, threshold: 3 } }, NOW)).toEqual({
-      text: 'failing, 1 of 3 runs', sub: 'below the failure threshold', tone: 'warning',
+      text: '1 of 3 failures', sub: 'below the failure threshold', tone: 'warning',
     })
   })
 
   it('says how long a warning has lasted otherwise', () => {
-    expect(sinceText({ ...base, section: 'warning', problem_started_at: ago(14 * M), failing: { count: 0, threshold: 3 } }, NOW).text).toBe('degraded for 14m')
+    expect(sinceText({ ...base, section: 'warning', problem_started_at: ago(14 * M), failing: { count: 0, threshold: 3 } }, NOW).text).toBe('degraded for 14 min')
   })
 
   it('says when a test recovered and how long the problem lasted', () => {
     const down = { ...base, section: 'recovered' as const, problem_started_at: ago(27 * H), problem_ended_at: ago(52 * M), problem_worst: 'down' as const }
-    expect(sinceText(down, NOW)).toEqual({ text: 'recovered 52m ago', sub: 'was down for 1d 2h', tone: 'recovered' })
+    expect(sinceText(down, NOW)).toEqual({ text: 'recovered 52 min ago', sub: 'was down for 1 d 2 h', tone: 'recovered' })
     expect(sinceText({ ...down, problem_worst: 'degraded' }, NOW).sub).toMatch(/^degraded for /)
   })
 
   it('uses the last problem time when no recovery time was recorded', () => {
     expect(sinceText({ ...base, section: 'recovered', last_problem_at: ago(2 * H) }, NOW)).toEqual({
-      text: 'recovered 2h 00m ago', sub: null, tone: 'recovered',
+      text: 'recovered 2 h ago', sub: null, tone: 'recovered',
     })
   })
 
